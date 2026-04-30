@@ -32,6 +32,7 @@ class ProductLotController extends Controller
             'buying_price' => $data['buying_price'],
             'selling_price' => $data['selling_price'],
             'quantity' => $data['quantity'],
+            'quantity_remaining' => $data['quantity'],
             'received_at' => $data['received_at'] ?? null,
             'expires_at' => $data['expires_at'] ?? null,
         ]);
@@ -65,6 +66,7 @@ class ProductLotController extends Controller
             'buying_price' => $data['buying_price'],
             'selling_price' => $data['selling_price'],
             'quantity' => $data['quantity'],
+            'quantity_remaining' => $data['quantity'],
             'received_at' => $data['received_at'] ?? null,
             'expires_at' => $data['expires_at'] ?? null,
         ]);

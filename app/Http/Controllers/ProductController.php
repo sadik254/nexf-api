@@ -15,28 +15,91 @@ use Uploadcare\Configuration;
 
 class ProductController extends Controller
 {
-    public function index(Request $request): JsonResponse
+    public function indexAdminStore(Request $request): JsonResponse
     {
         $actor = $request->user();
         $perPage = (int) $request->query('per_page', 25);
         $perPage = max(1, min($perPage, 100));
 
-        $query = Product::query()->latest();
-
-        if ($actor instanceof Seller) {
-            $query->where('seller_id', $actor->id);
-        } elseif ($actor instanceof Admin) {
-            $query->whereNull('seller_id');
+        if (!$actor instanceof Admin) {
+            return response()->json(['message' => 'Forbidden.'], 403);
         }
+
+        $query = Product::query()
+            ->with(['category', 'seller', 'variations'])
+            ->latest();
+
+        // Admin-store products are those not owned by a seller.
+        $query->whereNull('seller_id');
+
+        $this->applyListFilters($query, $request);
+
+        return response()->json($query->paginate($perPage));
+    }
+
+    public function indexSellerProductsForAdmin(Seller $seller, Request $request): JsonResponse
+    {
+        $actor = $request->user();
+        $perPage = (int) $request->query('per_page', 25);
+        $perPage = max(1, min($perPage, 100));
+
+        if (!$actor instanceof Admin) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        $query = Product::query()
+            ->with(['category', 'seller', 'variations'])
+            ->where('seller_id', $seller->id)
+            ->latest();
+
+        $this->applyListFilters($query, $request);
+
+        return response()->json($query->paginate($perPage));
+    }
+
+    public function indexSellerSelf(Request $request): JsonResponse
+    {
+        $actor = $request->user();
+        $perPage = (int) $request->query('per_page', 25);
+        $perPage = max(1, min($perPage, 100));
+
+        if (!$actor instanceof Seller) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        $query = Product::query()
+            ->with(['category', 'seller', 'variations'])
+            ->where('seller_id', $actor->id)
+            ->latest();
+
+        $this->applyListFilters($query, $request);
 
         return response()->json($query->paginate($perPage));
     }
 
     public function show(Product $product, Request $request): JsonResponse
     {
-        $this->authorizeProduct($product, $request->user());
+        $this->authorizeProductRead($product, $request->user());
 
-        return response()->json($product);
+        return response()->json(
+            $product->load(['category', 'seller', 'variations'])
+        );
+    }
+
+    public function showSellerProductForAdmin(Seller $seller, Product $product, Request $request): JsonResponse
+    {
+        $actor = $request->user();
+        if (!$actor instanceof Admin) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        if ((int) $product->seller_id !== (int) $seller->id) {
+            return response()->json(['message' => 'Product does not belong to seller.'], 422);
+        }
+
+        return response()->json(
+            $product->load(['category', 'seller', 'variations'])
+        );
     }
 
     public function store(Request $request): JsonResponse
@@ -100,7 +163,7 @@ class ProductController extends Controller
 
     public function update(Request $request, Product $product): JsonResponse
     {
-        $this->authorizeProduct($product, $request->user());
+        $this->authorizeProductWrite($product, $request->user());
 
         $data = $request->validate([
             'category_id' => ['sometimes', 'integer', 'exists:product_categories,id'],
@@ -158,20 +221,54 @@ class ProductController extends Controller
 
     public function destroy(Product $product, Request $request): JsonResponse
     {
-        $this->authorizeProduct($product, $request->user());
+        $this->authorizeProductWrite($product, $request->user());
         $product->delete();
 
         return response()->json(['message' => 'Product deleted successfully.']);
     }
 
-    private function authorizeProduct(Product $product, $actor): void
+    private function authorizeProductRead(Product $product, $actor): void
+    {
+        if ($actor instanceof Seller && $product->seller_id !== $actor->id) {
+            abort(403, 'Forbidden.');
+        }
+        // Admin can read all products via explicit endpoints.
+    }
+
+    private function authorizeProductWrite(Product $product, $actor): void
     {
         if ($actor instanceof Seller && $product->seller_id !== $actor->id) {
             abort(403, 'Forbidden.');
         }
 
+        // Admin can only manage admin-store products (seller_id is null).
         if ($actor instanceof Admin && $product->seller_id !== null) {
             abort(403, 'Forbidden.');
+        }
+    }
+
+    private function applyListFilters($query, Request $request): void
+    {
+        $search = (string) $request->query('search', '');
+        $categoryId = $request->query('category_id');
+        $status = $request->query('status');
+        $productType = $request->query('product_type');
+
+        if ($search !== '') {
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('slug', 'like', "%{$search}%");
+            });
+        }
+
+        if ($categoryId !== null && (string) $categoryId !== '') {
+            $query->where('category_id', (int) $categoryId);
+        }
+        if ($status !== null && (string) $status !== '') {
+            $query->where('status', (string) $status);
+        }
+        if ($productType !== null && (string) $productType !== '') {
+            $query->where('product_type', (string) $productType);
         }
     }
 

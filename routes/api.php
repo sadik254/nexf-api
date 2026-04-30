@@ -8,7 +8,11 @@ use App\Http\Controllers\ProductCategoryController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProductVariationController;
 use App\Http\Controllers\ProductLotController;
+use App\Http\Controllers\ProductConsumptionController;
+use App\Http\Controllers\StoreProductController;
 
+// temporary allow admin creation without authentication for testing purposes
+    // Route::post('/admin/create', [AdminController::class, 'store']);
 Route::prefix('customers')->group(function () {
     Route::post('/', [CustomerController::class, 'store']);
     Route::post('/login', [CustomerController::class, 'login']);
@@ -39,6 +43,7 @@ Route::post('/test', function() {
 Route::prefix('admin')->group(function () {
     Route::post('/login', [AdminController::class, 'login']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/logout', [AdminController::class, 'logout']);
+    // Temporarily disable admin creation endpoint to prevent accidental creation of multiple admins during testing
     Route::middleware('sanctum.type:admin,admin:manage-admins')->post('/create', [AdminController::class, 'store']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/me', [AdminController::class, 'updateProfile']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/me/password', [AdminController::class, 'updatePassword']);
@@ -70,7 +75,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/product-categories/{category}', [ProductCategoryController::class, 'update']);
     Route::post('/product-categories/{category}/delete', [ProductCategoryController::class, 'destroy']);
 
-    Route::get('/products', [ProductController::class, 'index']);
+    Route::get('/products', [ProductController::class, 'indexAdminStore']);
     Route::post('/products', [ProductController::class, 'store']);
     Route::get('/products/{product}', [ProductController::class, 'show']);
     Route::post('/products/{product}', [ProductController::class, 'update']);
@@ -83,10 +88,13 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 
     Route::post('/products/{product}/lots', [ProductLotController::class, 'storeForProduct']);
     Route::post('/products/{product}/variations/{variation}/lots', [ProductLotController::class, 'storeForVariation']);
+
+    Route::post('/products/{product}/consume', [ProductConsumptionController::class, 'consumeProduct']);
+    Route::post('/products/{product}/variations/{variation}/consume', [ProductConsumptionController::class, 'consumeVariation']);
 });
 
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
-    Route::get('/products', [ProductController::class, 'index']);
+    Route::get('/products', [ProductController::class, 'indexSellerSelf']);
     Route::post('/products', [ProductController::class, 'store']);
     Route::get('/products/{product}', [ProductController::class, 'show']);
     Route::post('/products/{product}', [ProductController::class, 'update']);
@@ -99,4 +107,19 @@ Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(f
 
     Route::post('/products/{product}/lots', [ProductLotController::class, 'storeForProduct']);
     Route::post('/products/{product}/variations/{variation}/lots', [ProductLotController::class, 'storeForVariation']);
+
+    Route::post('/products/{product}/consume', [ProductConsumptionController::class, 'consumeProduct']);
+    Route::post('/products/{product}/variations/{variation}/consume', [ProductConsumptionController::class, 'consumeVariation']);
+});
+
+Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(function () {
+    Route::get('/sellers/{seller}/products', [ProductController::class, 'indexSellerProductsForAdmin']);
+    Route::get('/sellers/{seller}/products/{product}', [ProductController::class, 'showSellerProductForAdmin']);
+});
+
+Route::prefix('store')->group(function () {
+    Route::get('/products', [StoreProductController::class, 'indexAll']);
+    Route::get('/categories/{category:slug}/products', [StoreProductController::class, 'indexByCategory']);
+    Route::get('/sellers/{seller:store_slug}/products', [StoreProductController::class, 'indexBySeller']);
+    Route::get('/admin/products', [StoreProductController::class, 'indexAdminStore']);
 });

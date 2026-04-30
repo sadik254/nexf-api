@@ -14,6 +14,7 @@ class ProductLot extends Model
         'buying_price',
         'selling_price',
         'quantity',
+        'quantity_remaining',
         'received_at',
         'expires_at',
     ];
