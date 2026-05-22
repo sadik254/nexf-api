@@ -19,7 +19,7 @@ class CreateSuperAdmin extends Command
 
     public function handle(): int
     {
-        if (Admin::where('role', 'super_admin')->exists()) {
+        if (Admin::query()->where('role', 'super_admin')->exists()) {
             $this->error('A super_admin already exists.');
             return self::FAILURE;
         }
@@ -36,12 +36,12 @@ class CreateSuperAdmin extends Command
             return self::FAILURE;
         }
 
-        if (Admin::where('email', $email)->exists()) {
+        if (Admin::query()->where('email', $email)->exists()) {
             $this->error('Email already in use.');
             return self::FAILURE;
         }
 
-        if ($phone !== '' && Admin::where('phone', $phone)->exists()) {
+        if ($phone !== '' && Admin::query()->where('phone', $phone)->exists()) {
             $this->error('Phone already in use.');
             return self::FAILURE;
         }
