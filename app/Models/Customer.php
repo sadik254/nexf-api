@@ -10,7 +10,7 @@ use Laravel\Sanctum\HasApiTokens;
 
 class Customer extends Authenticatable
 {
-    /** @use HasFactory<CustomerFactory> */
+
     use HasApiTokens, HasFactory, Notifiable;
 
     /**

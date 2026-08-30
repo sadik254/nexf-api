@@ -10,6 +10,8 @@ use App\Http\Controllers\ProductVariationController;
 use App\Http\Controllers\ProductLotController;
 use App\Http\Controllers\ProductConsumptionController;
 use App\Http\Controllers\StoreProductController;
+use App\Http\Controllers\PaymentMethodController;
+use App\Http\Controllers\ShippingMethodController;
 
 // temporary allow admin creation without authentication for testing purposes
     // Route::post('/admin/create', [AdminController::class, 'store']);
@@ -40,6 +42,9 @@ Route::post('/test', function() {
     return response()->json(['message' => 'Alive!']);
 });
 
+Route::get('/payment-methods', [PaymentMethodController::class, 'index']);
+Route::get('/shipping-methods', [ShippingMethodController::class, 'index']);
+
 Route::prefix('admin')->group(function () {
     Route::post('/login', [AdminController::class, 'login']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/logout', [AdminController::class, 'logout']);
@@ -52,6 +57,14 @@ Route::prefix('admin')->group(function () {
     Route::middleware('sanctum.type:admin,admin:manage-admins')->get('/admins/{admin}', [AdminController::class, 'show']);
     Route::middleware('sanctum.type:admin,admin:manage-admins')->post('/admins/{admin}', [AdminController::class, 'updateAdmin']);
     Route::middleware('sanctum.type:admin,admin:manage-admins')->post('/admins/{admin}/delete', [AdminController::class, 'destroy']);
+
+    Route::middleware('sanctum.type:admin,admin:payment-methods')->post('/payment-methods', [PaymentMethodController::class, 'store']);
+    Route::middleware('sanctum.type:admin,admin:payment-methods')->post('/payment-methods/{paymentMethod}', [PaymentMethodController::class, 'update']);
+    Route::middleware('sanctum.type:admin,admin:payment-methods')->post('/payment-methods/{paymentMethod}/delete', [PaymentMethodController::class, 'destroy']);
+
+    Route::middleware('sanctum.type:admin,admin:shipping-methods')->post('/shipping-methods', [ShippingMethodController::class, 'store']);
+    Route::middleware('sanctum.type:admin,admin:shipping-methods')->post('/shipping-methods/{shippingMethod}', [ShippingMethodController::class, 'update']);
+    Route::middleware('sanctum.type:admin,admin:shipping-methods')->post('/shipping-methods/{shippingMethod}/delete', [ShippingMethodController::class, 'destroy']);
 });
 
 Route::prefix('sellers')->group(function () {

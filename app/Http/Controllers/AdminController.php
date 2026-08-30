@@ -368,6 +368,8 @@ class AdminController extends Controller
                 'admin:customers',
                 'admin:orders',
                 'admin:products',
+                'admin:payment-methods',
+                'admin:shipping-methods',
             ]);
         }
 
