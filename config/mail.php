@@ -111,7 +111,9 @@ return [
     */
 
     'from' => [
-        'address' => env('MAIL_FROM_ADDRESS', 'hello@example.com'),
+        // An explicitly empty MAIL_FROM_ADDRESS overrides env's default value.
+        // Fall back to the authenticated SMTP address so every message has a sender.
+        'address' => env('MAIL_FROM_ADDRESS') ?: env('MAIL_USERNAME') ?: 'hello@example.com',
         'name' => env('MAIL_FROM_NAME', env('APP_NAME', 'Laravel')),
     ],
 
