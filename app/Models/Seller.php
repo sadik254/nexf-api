@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Database\Factories\SellerFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -56,5 +57,10 @@ class Seller extends Authenticatable
             'email_verified_at' => 'datetime',
             'is_active' => 'boolean',
         ];
+    }
+
+    public function orderItems(): HasMany
+    {
+        return $this->hasMany(OrderItem::class);
     }
 }

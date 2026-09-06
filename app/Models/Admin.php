@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Database\Factories\AdminFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
-use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Admin extends Authenticatable
 {
@@ -38,5 +39,10 @@ class Admin extends Authenticatable
             'password' => 'hashed',
             'last_login_at' => 'datetime',
         ];
+    }
+
+    public function coupons(): HasMany
+    {
+        return $this->hasMany(Coupon::class, 'created_by_admin_id');
     }
 }

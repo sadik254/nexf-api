@@ -34,4 +34,9 @@ class ProductVariation extends Model
     {
         return $this->hasMany(ProductLot::class, 'variation_id');
     }
+
+    public function orderItems(): HasMany
+    {
+        return $this->hasMany(OrderItem::class, 'variation_id');
+    }
 }

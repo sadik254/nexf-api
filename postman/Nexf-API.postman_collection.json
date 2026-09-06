@@ -1,0 +1,150 @@
+{
+  "info": {
+    "_postman_id": "e1865aa4-1f4d-4e84-9f09-24792fef9d41",
+    "name": "Nexf API",
+    "description": "Import this collection, set the collection variables, then run login requests first. Tokens and created resource IDs are saved automatically where applicable.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key":"base_url","value":"http://localhost:8000","type":"string"},
+    {"key":"admin_token","value":"","type":"string"},
+    {"key":"customer_token","value":"","type":"string"},
+    {"key":"seller_token","value":"","type":"string"},
+    {"key":"admin_id","value":"1","type":"string"},
+    {"key":"customer_id","value":"1","type":"string"},
+    {"key":"seller_id","value":"1","type":"string"},
+    {"key":"category_id","value":"1","type":"string"},
+    {"key":"category_slug","value":"electronics","type":"string"},
+    {"key":"product_id","value":"1","type":"string"},
+    {"key":"product_slug","value":"sample-product","type":"string"},
+    {"key":"variation_id","value":"1","type":"string"},
+    {"key":"payment_method_id","value":"1","type":"string"},
+    {"key":"shipping_method_id","value":"1","type":"string"},
+    {"key":"coupon_id","value":"1","type":"string"},
+    {"key":"order_id","value":"1","type":"string"},
+    {"key":"image_path","value":"","type":"string"},
+    {"key":"kyc_document_path","value":"","type":"string"}
+  ],
+  "item": [
+    {
+      "name": "Public store",
+      "item": [
+        {"name":"Health test","request":{"method":"POST","url":"{{base_url}}/api/test"}},
+        {"name":"Payment methods","request":{"method":"GET","url":"{{base_url}}/api/payment-methods"}},
+        {"name":"Shipping methods","request":{"method":"GET","url":"{{base_url}}/api/shipping-methods"}},
+        {"name":"Validate coupon","request":{"method":"POST","header":[{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\n  \"code\": \"WELCOME10\",\n  \"subtotal\": 1000\n}"},"url":"{{base_url}}/api/coupons/validate"}},
+        {"name":"All store products","request":{"method":"GET","url":"{{base_url}}/api/store/products?per_page=20&search="}},
+        {"name":"Product details by slug","request":{"method":"GET","url":"{{base_url}}/api/store/products/{{product_slug}}"}},
+        {"name":"Store products by category","request":{"method":"GET","url":"{{base_url}}/api/store/categories/{{category_slug}}/products"}},
+        {"name":"Store products by seller","request":{"method":"GET","url":"{{base_url}}/api/store/sellers/{{seller_id}}/products"}},
+        {"name":"Admin-store public products","request":{"method":"GET","url":"{{base_url}}/api/store/admin/products"}}
+      ]
+    },
+    {
+      "name": "Customer",
+      "item": [
+        {"name":"Register customer","request":{"method":"POST","header":[{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\n  \"name\": \"Test Customer\",\n  \"email\": \"customer@example.com\",\n  \"phone\": \"01700000000\",\n  \"password\": \"password123\"\n}"},"url":"{{base_url}}/api/customers"}},
+        {"name":"Verify email","request":{"method":"POST","header":[{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\n  \"email\": \"customer@example.com\",\n  \"code\": \"000000\"\n}"},"url":"{{base_url}}/api/customers/verify-email"}},
+        {"name":"Resend verification","request":{"method":"POST","header":[{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"email\":\"customer@example.com\"}"},"url":"{{base_url}}/api/customers/resend-verification"}},
+        {"name":"Customer login","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 200) { pm.collectionVariables.set('customer_token', pm.response.json().token); pm.collectionVariables.set('customer_id', pm.response.json().customer.id); }"]}}],"request":{"method":"POST","header":[{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\n  \"email\": \"customer@example.com\",\n  \"password\": \"password123\"\n}"},"url":"{{base_url}}/api/customers/login"}},
+        {"name":"Forgot password","request":{"method":"POST","header":[{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"email\":\"customer@example.com\"}"},"url":"{{base_url}}/api/customers/forgot-password"}},
+        {"name":"Reset password","request":{"method":"POST","header":[{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"email\":\"customer@example.com\",\"code\":\"000000\",\"password\":\"newpassword123\"}"},"url":"{{base_url}}/api/customers/reset-password"}},
+        {"name":"Update profile","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"Updated Customer\",\"phone\":\"01700000001\"}"},"url":"{{base_url}}/api/customers/me"}},
+        {"name":"Update password","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"current_password\":\"password123\",\"new_password\":\"newpassword123\"}"},"url":"{{base_url}}/api/customers/me/password"}},
+        {"name":"Ping","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"}],"url":"{{base_url}}/api/customers/me/ping"}},
+        {"name":"Customer orders","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"}],"url":"{{base_url}}/api/customers/orders?per_page=25"}},
+        {"name":"Place order","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 201) { pm.collectionVariables.set('order_id', pm.response.json().order.id); }"]}}],"request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\n  \"items\": [{\"product_id\": {{product_id}}, \"quantity\": 1}],\n  \"payment_method_id\": {{payment_method_id}},\n  \"shipping_method_id\": {{shipping_method_id}},\n  \"shipping_name\": \"Test Customer\",\n  \"shipping_phone\": \"01700000000\",\n  \"shipping_address\": \"Dhaka, Bangladesh\",\n  \"notes\": \"Postman test order\"\n}"},"url":"{{base_url}}/api/customers/orders"}},
+        {"name":"Customer order details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"}],"url":"{{base_url}}/api/customers/orders/{{order_id}}"}},
+        {"name":"Customer logout","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"}],"url":"{{base_url}}/api/customers/logout"}}
+      ]
+    },
+    {
+      "name": "Seller",
+      "item": [
+        {"name":"Seller onboarding (set kyc_document_path)","request":{"method":"POST","body":{"mode":"formdata","formdata":[{"key":"seller_name","value":"Test Seller","type":"text"},{"key":"email","value":"seller@example.com","type":"text"},{"key":"store_name","value":"Test Store","type":"text"},{"key":"kyc_type","value":"nid","type":"text"},{"key":"kyc_number","value":"1234567890","type":"text"},{"key":"kyc_document","type":"file","src":"{{kyc_document_path}}"},{"key":"product_category","value":"Electronics","type":"text"}]},"url":"{{base_url}}/api/sellers/onboard"}},
+        {"name":"Seller login","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 200) { pm.collectionVariables.set('seller_token', pm.response.json().token); pm.collectionVariables.set('seller_id', pm.response.json().seller.id); }"]}}],"request":{"method":"POST","header":[{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"email\":\"seller@example.com\",\"password\":\"password-from-approval-email\"}"},"url":"{{base_url}}/api/sellers/login"}},
+        {"name":"Seller update password","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"current_password\":\"password-from-approval-email\",\"new_password\":\"sellerpassword123\"}"},"url":"{{base_url}}/api/sellers/me/password"}},
+        {"name":"Seller products","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/products?per_page=25"}},
+        {"name":"Seller create product","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 201) { pm.collectionVariables.set('product_id', pm.response.json().product.id); pm.collectionVariables.set('product_slug', pm.response.json().product.slug); }"]}}],"request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"category_id\":{{category_id}},\"name\":\"Seller Test Product\",\"product_type\":\"simple\",\"status\":\"active\",\"default_buying_price\":100,\"default_selling_price\":150}"},"url":"{{base_url}}/api/seller/products"}},
+        {"name":"Seller product details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/products/{{product_id}}"}},
+        {"name":"Seller update product","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"description\":\"Updated by seller\",\"status\":\"active\"}"},"url":"{{base_url}}/api/seller/products/{{product_id}}"}},
+        {"name":"Seller delete product","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/products/{{product_id}}/delete"}},
+        {"name":"Seller add product lot","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"lot_number\":\"LOT-SELLER-001\",\"buying_price\":100,\"selling_price\":150,\"quantity\":10,\"received_at\":\"2026-09-06\"}"},"url":"{{base_url}}/api/seller/products/{{product_id}}/lots"}},
+        {"name":"Seller consume product","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"quantity\":1}"},"url":"{{base_url}}/api/seller/products/{{product_id}}/consume"}},
+        {"name":"Seller product variations","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/products/{{product_id}}/variations"}},
+        {"name":"Seller create variation","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 201) { pm.collectionVariables.set('variation_id', pm.response.json().variation.id); }"]}}],"request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"sku\":\"SELLER-SKU-001\",\"attributes\":{\"size\":\"M\",\"color\":\"Blue\"}}"},"url":"{{base_url}}/api/seller/products/{{product_id}}/variations"}},
+        {"name":"Seller update variation","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"is_active\":true}"},"url":"{{base_url}}/api/seller/products/{{product_id}}/variations/{{variation_id}}"}},
+        {"name":"Seller delete variation","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/products/{{product_id}}/variations/{{variation_id}}/delete"}},
+        {"name":"Seller add variation lot","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"lot_number\":\"LOT-VAR-001\",\"buying_price\":100,\"selling_price\":150,\"quantity\":10}"},"url":"{{base_url}}/api/seller/products/{{product_id}}/variations/{{variation_id}}/lots"}},
+        {"name":"Seller consume variation","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"quantity\":1}"},"url":"{{base_url}}/api/seller/products/{{product_id}}/variations/{{variation_id}}/consume"}},
+        {"name":"Seller logout","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/sellers/logout"}}
+      ]
+    },
+    {
+      "name": "Admin - authentication and people",
+      "item": [
+        {"name":"Admin login","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 200) { pm.collectionVariables.set('admin_token', pm.response.json().token); pm.collectionVariables.set('admin_id', pm.response.json().admin.id); }"]}}],"request":{"method":"POST","header":[{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"email\":\"admin@example.com\",\"password\":\"password123\"}"},"url":"{{base_url}}/api/admin/login"}},
+        {"name":"Admin profile","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"Updated Admin\"}"},"url":"{{base_url}}/api/admin/me"}},
+        {"name":"Admin password","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"current_password\":\"password123\",\"new_password\":\"newpassword123\"}"},"url":"{{base_url}}/api/admin/me/password"}},
+        {"name":"Create admin (super admin)","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"New Moderator\",\"email\":\"moderator@example.com\",\"role\":\"moderator\"}"},"url":"{{base_url}}/api/admin/create"}},
+        {"name":"List admins","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/admins?per_page=25&search="}},
+        {"name":"Admin details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/admins/{{admin_id}}"}},
+        {"name":"Update admin","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"is_active\":true}"},"url":"{{base_url}}/api/admin/admins/{{admin_id}}"}},
+        {"name":"Delete admin","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/admins/{{admin_id}}/delete"}},
+        {"name":"Admin password reset","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"email\":\"moderator@example.com\"}"},"url":"{{base_url}}/api/admin/reset-password"}},
+        {"name":"List customers","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/customers?per_page=25"}},
+        {"name":"Customer details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/customers/{{customer_id}}"}},
+        {"name":"List sellers","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/sellers?per_page=25&status=pending"}},
+        {"name":"Seller details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/sellers/{{seller_id}}"}},
+        {"name":"Approve seller","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/approve"}},
+        {"name":"Reject seller","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"rejection_reason\":\"KYC document is incomplete.\"}"},"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/reject"}},
+        {"name":"Admin logout","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/logout"}}
+      ]
+    },
+    {
+      "name": "Admin - catalogue and inventory",
+      "item": [
+        {"name":"List categories","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/product-categories?per_page=25"}},
+        {"name":"Create category","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 201) { pm.collectionVariables.set('category_id', pm.response.json().category.id); pm.collectionVariables.set('category_slug', pm.response.json().category.slug); }"]}}],"request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"Electronics\",\"description\":\"Devices and accessories\",\"is_active\":true}"},"url":"{{base_url}}/api/admin/product-categories"}},
+        {"name":"Category details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/product-categories/{{category_id}}"}},
+        {"name":"Update category","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"description\":\"Updated description\"}"},"url":"{{base_url}}/api/admin/product-categories/{{category_id}}"}},
+        {"name":"Delete category","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/product-categories/{{category_id}}/delete"}},
+        {"name":"Admin-store products","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/products?per_page=25"}},
+        {"name":"Create admin-store product","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 201) { pm.collectionVariables.set('product_id', pm.response.json().product.id); pm.collectionVariables.set('product_slug', pm.response.json().product.slug); }"]}}],"request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"category_id\":{{category_id}},\"name\":\"Sample Product\",\"description\":\"Created from Postman\",\"product_type\":\"simple\",\"status\":\"active\",\"default_buying_price\":100,\"default_selling_price\":150}"},"url":"{{base_url}}/api/admin/products"}},
+        {"name":"Admin product details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/products/{{product_id}}"}},
+        {"name":"Update admin-store product","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"description\":\"Updated product\",\"status\":\"active\"}"},"url":"{{base_url}}/api/admin/products/{{product_id}}"}},
+        {"name":"Delete admin-store product","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/products/{{product_id}}/delete"}},
+        {"name":"Add admin product lot","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"lot_number\":\"LOT-ADMIN-001\",\"buying_price\":100,\"selling_price\":150,\"quantity\":10,\"received_at\":\"2026-09-06\"}"},"url":"{{base_url}}/api/admin/products/{{product_id}}/lots"}},
+        {"name":"Consume admin product","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"quantity\":1}"},"url":"{{base_url}}/api/admin/products/{{product_id}}/consume"}},
+        {"name":"List product variations","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/products/{{product_id}}/variations"}},
+        {"name":"Create variation","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 201) { pm.collectionVariables.set('variation_id', pm.response.json().variation.id); }"]}}],"request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"sku\":\"ADMIN-SKU-001\",\"attributes\":{\"size\":\"M\",\"color\":\"Blue\"},\"is_active\":true}"},"url":"{{base_url}}/api/admin/products/{{product_id}}/variations"}},
+        {"name":"Update variation","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"is_active\":true}"},"url":"{{base_url}}/api/admin/products/{{product_id}}/variations/{{variation_id}}"}},
+        {"name":"Delete variation","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/products/{{product_id}}/variations/{{variation_id}}/delete"}},
+        {"name":"Add variation lot","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"lot_number\":\"LOT-ADMIN-VAR-001\",\"buying_price\":100,\"selling_price\":150,\"quantity\":10}"},"url":"{{base_url}}/api/admin/products/{{product_id}}/variations/{{variation_id}}/lots"}},
+        {"name":"Consume variation","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"quantity\":1}"},"url":"{{base_url}}/api/admin/products/{{product_id}}/variations/{{variation_id}}/consume"}},
+        {"name":"Seller products (admin view)","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/products?per_page=25"}},
+        {"name":"Seller product detail (admin view)","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/products/{{product_id}}"}}
+      ]
+    },
+    {
+      "name": "Admin - payment, shipping, coupons and orders",
+      "item": [
+        {"name":"Create payment method","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 201) { pm.collectionVariables.set('payment_method_id', pm.response.json().payment_method.id); }"]}}],"request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"Test Payment\",\"code\":\"test_payment\",\"is_active\":true,\"sort_order\":10}"},"url":"{{base_url}}/api/admin/payment-methods"}},
+        {"name":"Update payment method","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"description\":\"Updated payment method\"}"},"url":"{{base_url}}/api/admin/payment-methods/{{payment_method_id}}"}},
+        {"name":"Delete payment method","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/payment-methods/{{payment_method_id}}/delete"}},
+        {"name":"Create shipping method","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 201) { pm.collectionVariables.set('shipping_method_id', pm.response.json().shipping_method.id); }"]}}],"request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"Test Shipping\",\"code\":\"test_shipping\",\"charge\":80,\"currency\":\"BDT\",\"is_active\":true,\"sort_order\":10}"},"url":"{{base_url}}/api/admin/shipping-methods"}},
+        {"name":"Update shipping method","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"charge\":100}"},"url":"{{base_url}}/api/admin/shipping-methods/{{shipping_method_id}}"}},
+        {"name":"Delete shipping method","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/shipping-methods/{{shipping_method_id}}/delete"}},
+        {"name":"List coupons","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/coupons?per_page=25"}},
+        {"name":"Create coupon","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 201) { pm.collectionVariables.set('coupon_id', pm.response.json().coupon.id); }"]}}],"request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"code\":\"WELCOME10\",\"name\":\"Welcome discount\",\"discount_type\":\"percentage\",\"discount_value\":10,\"minimum_order_amount\":500,\"usage_limit\":100,\"per_customer_limit\":1,\"is_active\":true}"},"url":"{{base_url}}/api/admin/coupons"}},
+        {"name":"Coupon details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/coupons/{{coupon_id}}"}},
+        {"name":"Update coupon","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"discount_value\":15}"},"url":"{{base_url}}/api/admin/coupons/{{coupon_id}}"}},
+        {"name":"Delete coupon","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/coupons/{{coupon_id}}/delete"}},
+        {"name":"List orders","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/orders?per_page=25&status=&payment_status=&search="}},
+        {"name":"Order details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/orders/{{order_id}}"}},
+        {"name":"Update order status","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"status\":\"confirmed\"}"},"url":"{{base_url}}/api/admin/orders/{{order_id}}"}},
+        {"name":"Cancel order and restore inventory","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/orders/{{order_id}}/cancel"}}
+      ]
+    }
+  ]
+}

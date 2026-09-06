@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Seller;
+use App\Models\Store;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Http\JsonResponse;
@@ -18,6 +19,15 @@ class StoreProductController extends Controller
         $query = $this->baseStoreQuery();
 
         return $this->paginateProducts($query, $request);
+    }
+
+    public function show(string $product): JsonResponse
+    {
+        $product = $this->baseStoreQuery()
+            ->where('slug', $product)
+            ->firstOrFail();
+
+        return response()->json($this->transformProduct($product));
     }
 
     public function indexByCategory(ProductCategory $category, Request $request): JsonResponse
@@ -90,12 +100,13 @@ class StoreProductController extends Controller
 
     private function transformProduct(Product $product): array
     {
+        $platformStore = Store::primary();
         $store = $product->seller_id === null
             ? [
                 'type' => 'admin',
-                'name' => config('app.name'),
+                'name' => $platformStore?->name ?? config('app.name'),
                 'slug' => 'admin',
-                'logo' => null,
+                'logo' => $platformStore?->logo,
                 'image' => null,
             ]
             : [
@@ -149,6 +160,7 @@ class StoreProductController extends Controller
             'status' => $product->status,
             'thumbnail' => $product->thumbnail,
             'gallery' => $product->gallery,
+            'image_variants' => $product->image_variants,
             'category' => $product->category ? [
                 'id' => $product->category->id,
                 'name' => $product->category->name,

@@ -370,6 +370,7 @@ class AdminController extends Controller
                 'admin:products',
                 'admin:payment-methods',
                 'admin:shipping-methods',
+                'admin:coupons',
             ]);
         }
 

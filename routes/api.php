@@ -12,6 +12,8 @@ use App\Http\Controllers\ProductConsumptionController;
 use App\Http\Controllers\StoreProductController;
 use App\Http\Controllers\PaymentMethodController;
 use App\Http\Controllers\ShippingMethodController;
+use App\Http\Controllers\CouponController;
+use App\Http\Controllers\OrderController;
 
 // temporary allow admin creation without authentication for testing purposes
     // Route::post('/admin/create', [AdminController::class, 'store']);
@@ -27,6 +29,9 @@ Route::prefix('customers')->group(function () {
         Route::post('/me', [CustomerController::class, 'update']);
         Route::post('/me/password', [CustomerController::class, 'updatePassword']);
         Route::post('/logout', [CustomerController::class, 'logout']);
+        Route::get('/orders', [OrderController::class, 'indexCustomer']);
+        Route::post('/orders', [OrderController::class, 'store']);
+        Route::get('/orders/{order}', [OrderController::class, 'showCustomer']);
         Route::post('/me/ping', function () {
             return response()->json(['ok' => true]);
         });
@@ -44,6 +49,7 @@ Route::post('/test', function() {
 
 Route::get('/payment-methods', [PaymentMethodController::class, 'index']);
 Route::get('/shipping-methods', [ShippingMethodController::class, 'index']);
+Route::post('/coupons/validate', [CouponController::class, 'validateCode']);
 
 Route::prefix('admin')->group(function () {
     Route::post('/login', [AdminController::class, 'login']);
@@ -65,6 +71,17 @@ Route::prefix('admin')->group(function () {
     Route::middleware('sanctum.type:admin,admin:shipping-methods')->post('/shipping-methods', [ShippingMethodController::class, 'store']);
     Route::middleware('sanctum.type:admin,admin:shipping-methods')->post('/shipping-methods/{shippingMethod}', [ShippingMethodController::class, 'update']);
     Route::middleware('sanctum.type:admin,admin:shipping-methods')->post('/shipping-methods/{shippingMethod}/delete', [ShippingMethodController::class, 'destroy']);
+
+    Route::middleware('sanctum.type:admin,admin:coupons')->get('/coupons', [CouponController::class, 'index']);
+    Route::middleware('sanctum.type:admin,admin:coupons')->post('/coupons', [CouponController::class, 'store']);
+    Route::middleware('sanctum.type:admin,admin:coupons')->get('/coupons/{coupon}', [CouponController::class, 'show']);
+    Route::middleware('sanctum.type:admin,admin:coupons')->post('/coupons/{coupon}', [CouponController::class, 'update']);
+    Route::middleware('sanctum.type:admin,admin:coupons')->post('/coupons/{coupon}/delete', [CouponController::class, 'destroy']);
+
+    Route::middleware('sanctum.type:admin,admin:orders')->get('/orders', [OrderController::class, 'indexAdmin']);
+    Route::middleware('sanctum.type:admin,admin:orders')->get('/orders/{order}', [OrderController::class, 'showAdmin']);
+    Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}', [OrderController::class, 'updateStatus']);
+    Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}/cancel', [OrderController::class, 'cancel']);
 });
 
 Route::prefix('sellers')->group(function () {
@@ -132,6 +149,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 
 Route::prefix('store')->group(function () {
     Route::get('/products', [StoreProductController::class, 'indexAll']);
+    Route::get('/products/{product:slug}', [StoreProductController::class, 'show']);
     Route::get('/categories/{category:slug}/products', [StoreProductController::class, 'indexByCategory']);
     Route::get('/sellers/{seller:store_slug}/products', [StoreProductController::class, 'indexBySeller']);
     Route::get('/admin/products', [StoreProductController::class, 'indexAdminStore']);
