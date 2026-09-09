@@ -11,6 +11,8 @@ use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductVariation;
 use App\Models\ShippingMethod;
+use App\Models\OrderItem;
+use App\Models\Seller;
 use App\Services\InventoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -95,26 +97,73 @@ class OrderController extends Controller
         return response()->json($order->load(['customer', 'items', 'paymentMethod', 'shippingMethod', 'coupon']));
     }
 
+    public function indexSeller(Request $request): JsonResponse
+    {
+        /** @var Seller $seller */
+        $seller = $request->user();
+        $perPage = max(1, min((int) $request->query('per_page', 25), 100));
+
+        return response()->json(
+            Order::query()
+                ->whereHas('items', fn ($query) => $query->where('seller_id', $seller->id))
+                ->with([
+                    'customer:id,name,email,phone',
+                    'items' => fn ($query) => $query->where('seller_id', $seller->id),
+                    'shippingMethod',
+                ])
+                ->latest()
+                ->paginate($perPage)
+        );
+    }
+
+    public function showSeller(Request $request, Order $order): JsonResponse
+    {
+        /** @var Seller $seller */
+        $seller = $request->user();
+        if (!$order->items()->where('seller_id', $seller->id)->exists()) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        return response()->json($order->load([
+            'customer:id,name,email,phone',
+            'items' => fn ($query) => $query->where('seller_id', $seller->id),
+            'shippingMethod',
+        ]));
+    }
+
     public function updateStatus(Request $request, Order $order): JsonResponse
     {
         if (!$request->user() instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        $data = $request->validate([
-            'status' => ['required', 'in:pending,confirmed,completed'],
-        ]);
+        return response()->json([
+            'message' => 'Order status is derived from item fulfilment. Update an admin-owned item through the fulfilment endpoint.',
+            'order' => $order->load(['customer', 'items', 'paymentMethod', 'shippingMethod', 'coupon']),
+        ], 422);
+    }
 
-        if ($order->status === 'cancelled') {
-            return response()->json(['message' => 'Cancelled orders cannot be updated.'], 422);
+    public function fulfillSellerItem(Request $request, Order $order, OrderItem $item): JsonResponse
+    {
+        /** @var Seller $seller */
+        $seller = $request->user();
+        if ((int) $item->order_id !== (int) $order->id || (int) $item->seller_id !== (int) $seller->id) {
+            return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        $order->update(['status' => $data['status']]);
+        return $this->fulfillItem($request, $order, $item, $seller->id);
+    }
 
-        return response()->json([
-            'message' => 'Order status updated successfully.',
-            'order' => $order->fresh(['customer', 'items', 'paymentMethod', 'shippingMethod', 'coupon']),
-        ]);
+    public function fulfillAdminItem(Request $request, Order $order, OrderItem $item): JsonResponse
+    {
+        if (!$request->user() instanceof Admin) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+        if ((int) $item->order_id !== (int) $order->id || $item->seller_id !== null) {
+            return response()->json(['message' => 'This item is not fulfilled by the admin store.'], 422);
+        }
+
+        return $this->fulfillItem($request, $order, $item);
     }
 
     public function cancel(Request $request, Order $order): JsonResponse
@@ -136,6 +185,7 @@ class OrderController extends Controller
 
             foreach ($lockedOrder->items as $item) {
                 $this->inventory->restoreOrderItem($item, $admin);
+                $item->update(['fulfillment_status' => 'cancelled']);
             }
 
             $lockedOrder->update([
@@ -150,6 +200,82 @@ class OrderController extends Controller
             'message' => 'Order cancelled and inventory restored successfully.',
             'order' => $order,
         ]);
+    }
+
+    private function fulfillItem(Request $request, Order $order, OrderItem $item, ?int $sellerId = null): JsonResponse
+    {
+        $data = $request->validate([
+            'status' => ['required', 'in:confirmed,shipped,delivered'],
+            'tracking_number' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $order = DB::transaction(function () use ($order, $item, $data) {
+            $lockedOrder = Order::query()->lockForUpdate()->findOrFail($order->id);
+            if ($lockedOrder->status === 'cancelled') {
+                throw ValidationException::withMessages(['order' => ['Cancelled orders cannot be fulfilled.']]);
+            }
+
+            $lockedItem = OrderItem::query()->lockForUpdate()->findOrFail($item->id);
+            $allowedNextStatus = [
+                'pending' => 'confirmed',
+                'confirmed' => 'shipped',
+                'shipped' => 'delivered',
+            ][$lockedItem->fulfillment_status] ?? null;
+
+            if ($data['status'] !== $allowedNextStatus) {
+                throw ValidationException::withMessages([
+                    'status' => ["Item must transition from {$lockedItem->fulfillment_status} to {$allowedNextStatus}."],
+                ]);
+            }
+
+            if ($data['status'] === 'shipped' && empty($data['tracking_number']) && empty($lockedItem->tracking_number)) {
+                throw ValidationException::withMessages([
+                    'tracking_number' => ['A tracking number is required when shipping an item.'],
+                ]);
+            }
+
+            $lockedItem->update([
+                'fulfillment_status' => $data['status'],
+                'tracking_number' => $data['tracking_number'] ?? $lockedItem->tracking_number,
+                'shipped_at' => $data['status'] === 'shipped' ? now() : $lockedItem->shipped_at,
+                'delivered_at' => $data['status'] === 'delivered' ? now() : $lockedItem->delivered_at,
+            ]);
+
+            $this->refreshOrderStatus($lockedOrder);
+
+            return $lockedOrder->load(['customer', 'items', 'paymentMethod', 'shippingMethod', 'coupon']);
+        });
+
+        if ($sellerId !== null) {
+            $order->load([
+                'customer:id,name,email,phone',
+                'items' => fn ($query) => $query->where('seller_id', $sellerId),
+                'shippingMethod',
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Item fulfilment updated successfully.',
+            'order' => $order,
+        ]);
+    }
+
+    private function refreshOrderStatus(Order $order): void
+    {
+        $statuses = $order->items()->pluck('fulfillment_status');
+        if ($statuses->isEmpty()) {
+            return;
+        }
+
+        if ($statuses->every(fn (string $status) => $status === 'cancelled')) {
+            $order->update(['status' => 'cancelled', 'cancelled_at' => $order->cancelled_at ?? now()]);
+            return;
+        }
+
+        $rank = ['pending' => 0, 'confirmed' => 1, 'shipped' => 2, 'delivered' => 3];
+        $activeStatuses = $statuses->reject(fn (string $status) => $status === 'cancelled');
+        $lowest = $activeStatuses->sortBy(fn (string $status) => $rank[$status] ?? 0)->first();
+        $order->update(['status' => $lowest]);
     }
 
     public function store(Request $request): JsonResponse
@@ -232,6 +358,17 @@ class OrderController extends Controller
                 $quantity = (int) $itemData['quantity'];
                 $variation = null;
 
+                if ($product->product_type === 'variable' && empty($itemData['variation_id'])) {
+                    throw ValidationException::withMessages([
+                        'items' => ["A variation must be selected for {$product->name}."],
+                    ]);
+                }
+                if ($product->product_type === 'simple' && !empty($itemData['variation_id'])) {
+                    throw ValidationException::withMessages([
+                        'items' => ["{$product->name} does not have purchasable variations."],
+                    ]);
+                }
+
                 if (!empty($itemData['variation_id'])) {
                     $variation = ProductVariation::query()
                         ->where('product_id', $product->id)
@@ -265,6 +402,9 @@ class OrderController extends Controller
                     'seller_id' => $product->seller_id,
                     'product_name' => $product->name,
                     'product_slug' => $product->slug,
+                    'product_thumbnail' => $product->thumbnail,
+                    'product_gallery' => $product->gallery,
+                    'product_image_variants' => $product->image_variants,
                     'sku' => $variation?->sku,
                     'variation_attributes' => $variation?->attributes,
                     'quantity' => $quantity,

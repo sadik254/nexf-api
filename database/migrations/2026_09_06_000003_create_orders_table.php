@@ -15,7 +15,7 @@ return new class extends Migration
             $table->foreignId('payment_method_id')->nullable()->constrained('payment_methods')->nullOnDelete();
             $table->foreignId('shipping_method_id')->nullable()->constrained('shipping_methods')->nullOnDelete();
             $table->foreignId('coupon_id')->nullable()->constrained('coupons')->nullOnDelete();
-            $table->enum('status', ['pending', 'confirmed', 'cancelled', 'completed'])->default('pending');
+            $table->enum('status', ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled', 'completed'])->default('pending');
             $table->enum('payment_status', ['unpaid', 'paid', 'failed', 'refunded'])->default('unpaid');
             $table->string('payment_method_code')->nullable();
             $table->string('payment_method_name')->nullable();

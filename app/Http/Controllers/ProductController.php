@@ -222,6 +222,13 @@ class ProductController extends Controller
     public function destroy(Product $product, Request $request): JsonResponse
     {
         $this->authorizeProductWrite($product, $request->user());
+
+        if ($product->orderItems()->exists()) {
+            return response()->json([
+                'message' => 'Products referenced by orders cannot be deleted. Mark the product inactive instead.',
+            ], 422);
+        }
+
         $product->delete();
 
         return response()->json(['message' => 'Product deleted successfully.']);

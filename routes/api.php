@@ -81,6 +81,7 @@ Route::prefix('admin')->group(function () {
     Route::middleware('sanctum.type:admin,admin:orders')->get('/orders', [OrderController::class, 'indexAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->get('/orders/{order}', [OrderController::class, 'showAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}', [OrderController::class, 'updateStatus']);
+    Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}/items/{item}/fulfillment', [OrderController::class, 'fulfillAdminItem']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}/cancel', [OrderController::class, 'cancel']);
 });
 
@@ -124,6 +125,9 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 });
 
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
+    Route::get('/orders', [OrderController::class, 'indexSeller']);
+    Route::get('/orders/{order}', [OrderController::class, 'showSeller']);
+    Route::post('/orders/{order}/items/{item}/fulfillment', [OrderController::class, 'fulfillSellerItem']);
     Route::get('/products', [ProductController::class, 'indexSellerSelf']);
     Route::post('/products', [ProductController::class, 'store']);
     Route::get('/products/{product}', [ProductController::class, 'show']);

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Product;
 use App\Models\ProductCategory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -73,6 +74,12 @@ class ProductCategoryController extends Controller
 
     public function destroy(ProductCategory $category): JsonResponse
     {
+        if (Product::query()->where('category_id', $category->id)->exists()) {
+            return response()->json([
+                'message' => 'Categories with products cannot be deleted. Mark products inactive or move them first.',
+            ], 422);
+        }
+
         $category->delete();
 
         return response()->json(['message' => 'Category deleted successfully.']);

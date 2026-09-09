@@ -14,6 +14,9 @@ class OrderItem extends Model
         'seller_id',
         'product_name',
         'product_slug',
+        'product_thumbnail',
+        'product_gallery',
+        'product_image_variants',
         'sku',
         'variation_attributes',
         'quantity',
@@ -23,12 +26,18 @@ class OrderItem extends Model
         'line_cost',
         'line_profit',
         'lot_allocations',
+        'fulfillment_status',
+        'tracking_number',
+        'shipped_at',
+        'delivered_at',
     ];
 
     protected function casts(): array
     {
         return [
             'variation_attributes' => 'array',
+            'product_gallery' => 'array',
+            'product_image_variants' => 'array',
             'quantity' => 'integer',
             'unit_selling_price' => 'decimal:2',
             'unit_buying_price' => 'decimal:2',
@@ -36,6 +45,8 @@ class OrderItem extends Model
             'line_cost' => 'decimal:2',
             'line_profit' => 'decimal:2',
             'lot_allocations' => 'array',
+            'shipped_at' => 'datetime',
+            'delivered_at' => 'datetime',
         ];
     }
 

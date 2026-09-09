@@ -94,6 +94,12 @@ class ProductVariationController extends Controller
             return response()->json(['message' => 'Variation does not belong to product.'], 422);
         }
 
+        if ($variation->orderItems()->exists()) {
+            return response()->json([
+                'message' => 'Variations referenced by orders cannot be deleted. Mark the variation inactive instead.',
+            ], 422);
+        }
+
         $variation->delete();
 
         return response()->json(['message' => 'Variation deleted successfully.']);
