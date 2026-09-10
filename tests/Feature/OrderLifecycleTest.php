@@ -11,6 +11,7 @@ use App\Models\ProductCategory;
 use App\Models\ProductLot;
 use App\Models\Seller;
 use App\Models\ShippingMethod;
+use App\Models\OrderItem;
 use App\Mail\OrderNotificationMail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
@@ -148,6 +149,47 @@ class OrderLifecycleTest extends TestCase
         Mail::assertSent(OrderNotificationMail::class);
         $this->withToken($token)->postJson("/api/customers/orders/{$order['id']}/cancel")
             ->assertOk()->assertJsonPath('order.status', 'cancelled');
+    }
+
+    public function test_steadfast_webhook_requires_authentication_and_rejects_unknown_consignment(): void
+    {
+        config(['services.steadfast.webhook_token' => 'webhook-test-token']);
+        $payload = ['notification_type' => 'delivery_status', 'consignment_id' => 999, 'invoice' => 'UNKNOWN', 'status' => 'delivered'];
+        $this->postJson('/api/webhooks/steadfast', $payload)->assertUnauthorized();
+        $this->withHeader('Authorization', 'Bearer webhook-test-token')
+            ->postJson('/api/webhooks/steadfast', $payload)
+            ->assertStatus(422)->assertJsonPath('message', 'Invalid consignment ID.');
+    }
+
+    public function test_steadfast_cancellation_waits_for_reconciliation_and_duplicate_events_are_safe(): void
+    {
+        config(['services.steadfast.webhook_token' => 'webhook-test-token']);
+        [$customer, $product] = $this->checkoutFixtures(1);
+        $order = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
+        $item = OrderItem::findOrFail($order['items'][0]['id']);
+        $item->update(['fulfillment_status' => 'shipped', 'courier_provider' => 'steadfast', 'courier_consignment_id' => '12345', 'courier_invoice' => 'INV-12345']);
+        $payload = ['notification_type' => 'delivery_status', 'consignment_id' => 12345, 'invoice' => 'INV-12345', 'status' => 'cancelled', 'tracking_message' => 'Returned by courier'];
+        $this->withHeader('Authorization', 'Bearer webhook-test-token')->postJson('/api/webhooks/steadfast', $payload)->assertOk();
+        $this->assertDatabaseHas('order_items', ['id' => $item->id, 'fulfillment_status' => 'return_pending']);
+        $this->assertDatabaseHas('product_lots', ['product_id' => $product->id, 'quantity_remaining' => 0]);
+        $this->withHeader('Authorization', 'Bearer webhook-test-token')->postJson('/api/webhooks/steadfast', $payload)->assertOk();
+        $admin = Admin::create(['name' => 'Reconciliation Admin', 'email' => 'reconcile@example.test', 'password' => 'password123', 'role' => 'super_admin']);
+        $this->withToken($admin->createToken('test', ['admin:orders'])->plainTextToken)
+            ->postJson("/api/admin/orders/{$order['id']}/items/{$item->id}/reconcile-return")
+            ->assertOk()->assertJsonPath('order.items.0.fulfillment_status', 'returned');
+        $this->assertDatabaseHas('product_lots', ['product_id' => $product->id, 'quantity_remaining' => 1]);
+        $this->assertDatabaseHas('product_lot_movements', ['reason' => 'return_reconciliation', 'quantity_change' => 1]);
+    }
+
+    public function test_steadfast_delivery_webhook_marks_item_delivered(): void
+    {
+        config(['services.steadfast.webhook_token' => 'webhook-test-token']);
+        [$customer, $product] = $this->checkoutFixtures(1);
+        $order = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
+        $item = OrderItem::findOrFail($order['items'][0]['id']);
+        $item->update(['fulfillment_status' => 'shipped', 'courier_provider' => 'steadfast', 'courier_consignment_id' => '54321', 'courier_invoice' => 'INV-54321']);
+        $this->withHeader('Authorization', 'Bearer webhook-test-token')->postJson('/api/webhooks/steadfast', ['notification_type' => 'delivery_status', 'consignment_id' => 54321, 'invoice' => 'INV-54321', 'status' => 'delivered', 'tracking_message' => 'Delivered'])->assertOk();
+        $this->assertDatabaseHas('order_items', ['id' => $item->id, 'fulfillment_status' => 'delivered', 'courier_tracking_message' => 'Delivered']);
     }
 
     private function checkoutFixtures(int $quantity, bool $sellerOwned = false): array
