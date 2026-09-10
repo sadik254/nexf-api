@@ -21,7 +21,7 @@ class InventoryService
     {
         return $this->previewLots(productId: null, variationId: $variation->id, quantityRequested: $quantity);
     }
-    public function restoreOrderItem(OrderItem $item, $actor): void
+    public function restoreOrderItem(OrderItem $item, $actor, string $reason = 'order_cancellation'): void
     {
         foreach ($item->lot_allocations ?? [] as $allocation) {
             $lotId = (int) ($allocation['lot_id'] ?? 0);
@@ -45,7 +45,7 @@ class InventoryService
             ProductLotMovement::create([
                 'product_lot_id' => $lot->id,
                 'quantity_change' => $quantity,
-                'reason' => 'order_cancellation',
+                'reason' => $reason,
                 'actor_type' => $actor::class,
                 'actor_id' => $actor->id,
                 'meta' => [

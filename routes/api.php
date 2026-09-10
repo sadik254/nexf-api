@@ -14,6 +14,9 @@ use App\Http\Controllers\PaymentMethodController;
 use App\Http\Controllers\ShippingMethodController;
 use App\Http\Controllers\CouponController;
 use App\Http\Controllers\OrderController;
+use App\Http\Controllers\SteadfastWebhookController;
+
+Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
 // temporary allow admin creation without authentication for testing purposes
     // Route::post('/admin/create', [AdminController::class, 'store']);
@@ -85,6 +88,7 @@ Route::prefix('admin')->group(function () {
     Route::middleware('sanctum.type:admin,admin:orders')->get('/orders/{order}', [OrderController::class, 'showAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}', [OrderController::class, 'updateStatus']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}/items/{item}/fulfillment', [OrderController::class, 'fulfillAdminItem']);
+    Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}/items/{item}/reconcile-return', [OrderController::class, 'reconcileReturn']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}/cancel', [OrderController::class, 'cancel']);
     Route::middleware('sanctum.type:admin,admin:orders')->get('/sellers/{seller}/orders', [OrderController::class, 'indexSellerOrdersForSuperAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->get('/sellers/{seller}/orders/{order}', [OrderController::class, 'showSellerOrderForSuperAdmin']);

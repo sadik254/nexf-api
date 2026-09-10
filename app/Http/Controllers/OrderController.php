@@ -231,6 +231,27 @@ class OrderController extends Controller
         return $this->fulfillItem($request, $order, $item);
     }
 
+    public function reconcileReturn(Request $request, Order $order, OrderItem $item): JsonResponse
+    {
+        if (!$request->user() instanceof Admin || (int) $item->order_id !== (int) $order->id) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+        $result = DB::transaction(function () use ($order, $item, $request) {
+            $lockedOrder = Order::query()->lockForUpdate()->findOrFail($order->id);
+            $lockedItem = OrderItem::query()->lockForUpdate()->findOrFail($item->id);
+            if ($lockedItem->fulfillment_status !== 'return_pending') {
+                throw ValidationException::withMessages(['status' => ['Only items awaiting return reconciliation can be reconciled.']]);
+            }
+            $this->inventory->restoreOrderItem($lockedItem, $request->user(), 'return_reconciliation');
+            $lockedItem->update(['fulfillment_status' => 'returned']);
+            if (!$lockedOrder->items()->whereNotIn('fulfillment_status', ['returned', 'cancelled'])->exists()) {
+                $lockedOrder->update(['status' => 'cancelled', 'cancelled_at' => $lockedOrder->cancelled_at ?? now()]);
+            }
+            return $lockedOrder->load(['customer', 'items', 'paymentMethod', 'shippingMethod', 'coupon']);
+        });
+        return response()->json(['message' => 'Returned item reconciled and inventory restored.', 'order' => $result]);
+    }
+
     public function bulkShipAdmin(Request $request): JsonResponse
     {
         $admin = $request->user();

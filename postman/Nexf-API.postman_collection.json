@@ -25,6 +25,7 @@
     {"key":"order_item_id","value":"1","type":"string"},
     {"key":"image_path","value":"","type":"string"},
     {"key":"kyc_document_path","value":"","type":"string"}
+    ,{"key":"steadfast_webhook_token","value":"","type":"string"}
   ],
   "item": [
     {
@@ -157,6 +158,8 @@
         {"name":"Order details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/orders/{{order_id}}"}},
         {"name":"Fulfil admin-store order item","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"status\":\"confirmed\"}"},"url":"{{base_url}}/api/admin/orders/{{order_id}}/items/{{order_item_id}}/fulfillment"}},
         {"name":"Bulk ship admin-store items","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"order_item_ids\":[{{order_item_id}}]}"},"url":"{{base_url}}/api/admin/orders/bulk-ship"}},
+        {"name":"Reconcile returned courier item","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/orders/{{order_id}}/items/{{order_item_id}}/reconcile-return"}},
+        {"name":"SteadFast delivery status webhook","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{steadfast_webhook_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\n  \"notification_type\": \"delivery_status\",\n  \"consignment_id\": 12345,\n  \"invoice\": \"INV-67890\",\n  \"status\": \"delivered\",\n  \"tracking_message\": \"Package delivered\",\n  \"updated_at\": \"2025-03-02 12:45:30\"\n}"},"url":"{{base_url}}/api/webhooks/steadfast"}},
         {"name":"Cancel order and restore inventory","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/orders/{{order_id}}/cancel"}}
       ]
     }
