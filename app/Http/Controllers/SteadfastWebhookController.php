@@ -45,6 +45,7 @@ class SteadfastWebhookController extends Controller
         } elseif ($payload['notification_type'] === 'delivery_status' && $status === 'cancelled' && !in_array($item->fulfillment_status, ['returned', 'cancelled'], true)) {
             $item->update(['fulfillment_status' => 'return_pending']);
         }
+        app(OrderController::class)->refreshOrderStatus($item->order);
         $event->update(['processed_at' => now()]);
         return response()->json(['status' => 'success', 'message' => 'Webhook received successfully.']);
     }

@@ -318,6 +318,9 @@ class OrderController extends Controller
             }
 
             foreach ($lockedOrder->items as $item) {
+                if (in_array($item->fulfillment_status, ['shipped', 'delivered', 'return_pending'], true)) {
+                    throw ValidationException::withMessages(['order' => ['Shipped, delivered, or return-pending items must complete courier return reconciliation before cancellation.']]);
+                }
                 $this->inventory->restoreOrderItem($item, $actor);
                 $item->update(['fulfillment_status' => 'cancelled']);
             }
@@ -396,19 +399,19 @@ class OrderController extends Controller
         ]);
     }
 
-    private function refreshOrderStatus(Order $order): void
+    public function refreshOrderStatus(Order $order): void
     {
         $statuses = $order->items()->pluck('fulfillment_status');
         if ($statuses->isEmpty()) {
             return;
         }
 
-        if ($statuses->every(fn (string $status) => $status === 'cancelled')) {
+        if ($statuses->every(fn (string $status) => in_array($status, ['returned', 'cancelled'], true))) {
             $order->update(['status' => 'cancelled', 'cancelled_at' => $order->cancelled_at ?? now()]);
             return;
         }
 
-        $rank = ['pending' => 0, 'confirmed' => 1, 'shipped' => 2, 'delivered' => 3];
+        $rank = ['pending' => 0, 'confirmed' => 1, 'shipped' => 2, 'delivered' => 3, 'return_pending' => 4, 'returned' => 5];
         $activeStatuses = $statuses->reject(fn (string $status) => $status === 'cancelled');
         $lowest = $activeStatuses->sortBy(fn (string $status) => $rank[$status] ?? 0)->first();
         $order->update(['status' => $lowest]);
