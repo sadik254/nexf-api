@@ -151,14 +151,18 @@ class OrderLifecycleTest extends TestCase
             ->assertOk()->assertJsonPath('order.status', 'cancelled');
     }
 
-    public function test_steadfast_webhook_requires_authentication_and_rejects_unknown_consignment(): void
+    public function test_steadfast_webhook_requires_authentication_and_acknowledges_unknown_consignment(): void
     {
         config(['services.steadfast.webhook_token' => 'webhook-test-token']);
         $payload = ['notification_type' => 'delivery_status', 'consignment_id' => 999, 'invoice' => 'UNKNOWN', 'status' => 'delivered'];
         $this->postJson('/api/webhooks/steadfast', $payload)->assertUnauthorized();
         $this->withHeader('Authorization', 'Bearer webhook-test-token')
             ->postJson('/api/webhooks/steadfast', $payload)
-            ->assertStatus(422)->assertJsonPath('message', 'Invalid consignment ID.');
+            ->assertOk()->assertJsonPath('message', 'Webhook received successfully.');
+        $this->assertDatabaseHas('courier_webhook_events', [
+            'consignment_id' => '999',
+            'processing_error' => 'No matching local consignment; event ignored.',
+        ]);
     }
 
     public function test_steadfast_cancellation_waits_for_reconciliation_and_duplicate_events_are_safe(): void

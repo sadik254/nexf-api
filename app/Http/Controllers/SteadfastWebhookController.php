@@ -36,7 +36,17 @@ class SteadfastWebhookController extends Controller
         if ($event->processed_at) return response()->json(['status' => 'success', 'message' => 'Webhook already processed.']);
 
         $item = OrderItem::query()->where('courier_consignment_id', (string) $payload['consignment_id'])->orWhere('courier_invoice', $payload['invoice'])->first();
-        if (!$item) { $event->update(['processing_error' => 'Invalid consignment or invoice.']); return response()->json(['status' => 'error', 'message' => 'Invalid consignment ID.'], 422); }
+        if (!$item) {
+            $event->update([
+                'processing_error' => 'No matching local consignment; event ignored.',
+                'processed_at' => now(),
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Webhook received successfully.',
+            ]);
+        }
 
         $item->update(['courier_status' => $payload['status'] ?? $item->courier_status, 'courier_tracking_message' => $payload['tracking_message'] ?? $item->courier_tracking_message, 'courier_updated_at' => now()]);
         $status = strtolower((string) ($payload['status'] ?? ''));
