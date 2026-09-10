@@ -34,6 +34,7 @@ class OrderItem extends Model
         'courier_status',
         'courier_created_at',
         'courier_updated_at',
+        'courier_error',
         'shipped_at',
         'delivered_at',
     ];

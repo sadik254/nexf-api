@@ -100,6 +100,7 @@ class OrderController extends Controller
 
         $query = Order::query()
             ->with(['customer', 'items'])
+            ->whereDoesntHave('items', fn ($q) => $q->whereNotNull('seller_id'))
             ->latest();
 
         if ($status !== '') {
@@ -127,7 +128,34 @@ class OrderController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
+        if ($order->items()->whereNotNull('seller_id')->exists()) {
+            return response()->json(['message' => 'Seller orders are available through the super-admin seller-order endpoints.'], 403);
+        }
+
         return response()->json($order->load(['customer', 'items', 'paymentMethod', 'shippingMethod', 'coupon']));
+    }
+
+    public function indexSellerOrdersForSuperAdmin(Request $request, Seller $seller): JsonResponse
+    {
+        if (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
+        $perPage = max(1, min((int) $request->query('per_page', 25), 100));
+        return response()->json(Order::whereHas('items', fn ($q) => $q->where('seller_id', $seller->id))->with(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id)])->latest()->paginate($perPage));
+    }
+
+    public function showSellerOrderForSuperAdmin(Request $request, Seller $seller, Order $order): JsonResponse
+    {
+        if (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
+        if (!$order->items()->where('seller_id', $seller->id)->exists()) return response()->json(['message' => 'Order does not contain items from this seller.'], 404);
+        return response()->json($order->load(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'paymentMethod', 'shippingMethod', 'coupon']));
+    }
+
+    public function cancelSellerOrderForSuperAdmin(Request $request, Seller $seller, Order $order): JsonResponse
+    {
+        if (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
+        if (!$order->items()->where('seller_id', $seller->id)->exists()) return response()->json(['message' => 'Order does not contain items from this seller.'], 404);
+        $order = $this->cancelOrder($order, $request->user());
+        $this->notifications->cancelled($order);
+        return response()->json(['message' => 'Seller order cancelled and inventory restored successfully.', 'order' => $order]);
     }
 
     public function indexSeller(Request $request): JsonResponse
@@ -184,6 +212,10 @@ class OrderController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
+        if ($request->input('status') !== 'confirmed') {
+            return response()->json(['message' => 'Only admins can ship or deliver order items.'], 403);
+        }
+
         return $this->fulfillItem($request, $order, $item, $seller->id);
     }
 
@@ -192,11 +224,48 @@ class OrderController extends Controller
         if (!$request->user() instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
-        if ((int) $item->order_id !== (int) $order->id || $item->seller_id !== null) {
-            return response()->json(['message' => 'This item is not fulfilled by the admin store.'], 422);
+        if ((int) $item->order_id !== (int) $order->id) {
+            return response()->json(['message' => 'Order item does not belong to this order.'], 422);
         }
 
         return $this->fulfillItem($request, $order, $item);
+    }
+
+    public function bulkShipAdmin(Request $request): JsonResponse
+    {
+        $admin = $request->user();
+        if (!$admin instanceof Admin) return response()->json(['message' => 'Forbidden.'], 403);
+        $ids = $request->validate(['order_item_ids' => ['required', 'array', 'min:1', 'max:500'], 'order_item_ids.*' => ['integer', 'distinct', 'exists:order_items,id']])['order_item_ids'];
+        $items = OrderItem::query()->with(['order.customer'])->whereIn('id', $ids)->get();
+        return $this->bulkShipItems($items, $ids);
+    }
+
+    private function bulkShipItems($items, array $requestedIds): JsonResponse
+    {
+        if ($items->count() !== count($requestedIds)) return response()->json(['message' => 'One or more items are outside your fulfilment scope.'], 403);
+        $invalid = $items->first(fn ($item) => $item->fulfillment_status !== 'confirmed' || $item->courier_consignment_id);
+        if ($invalid) return response()->json(['message' => 'All selected items must be confirmed and not already shipped.'], 422);
+
+        $results = $this->steadfast->createBulkConsignments($items);
+        $byInvoice = collect($results)->keyBy('invoice');
+        $successful = [];
+        $failed = [];
+        DB::transaction(function () use ($items, $byInvoice, &$successful, &$failed) {
+            foreach ($items as $item) {
+                $invoice = $item->order->order_number . '-ITEM-' . $item->id;
+                $result = $byInvoice->get($invoice);
+                if (!$result || ($result['status'] ?? null) === 'error' || empty($result['tracking_code'])) {
+                    $item->update(['courier_error' => $result['message'] ?? 'SteadFast did not create this consignment.']);
+                    $failed[] = $item->id;
+                    continue;
+                }
+                $item->update(['fulfillment_status' => 'shipped', 'tracking_number' => $result['tracking_code'], 'courier_provider' => 'steadfast', 'courier_consignment_id' => (string) ($result['consignment_id'] ?? ''), 'courier_invoice' => $result['invoice'] ?? $invoice, 'courier_status' => $result['status'] ?? 'in_review', 'shipped_at' => now(), 'courier_created_at' => $result['created_at'] ?? now(), 'courier_updated_at' => $result['updated_at'] ?? now(), 'courier_error' => null]);
+                $this->refreshOrderStatus($item->order);
+                $successful[] = $item->id;
+            }
+        });
+
+        return response()->json(['message' => 'Bulk fulfilment processed.', 'successful_item_ids' => $successful, 'failed_item_ids' => $failed]);
     }
 
     public function cancel(Request $request, Order $order): JsonResponse

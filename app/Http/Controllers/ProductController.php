@@ -43,7 +43,7 @@ class ProductController extends Controller
         $perPage = (int) $request->query('per_page', 25);
         $perPage = max(1, min($perPage, 100));
 
-        if (!$actor instanceof Admin) {
+        if (!$actor instanceof Admin || $actor->role !== 'super_admin') {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -89,7 +89,7 @@ class ProductController extends Controller
     public function showSellerProductForAdmin(Seller $seller, Product $product, Request $request): JsonResponse
     {
         $actor = $request->user();
-        if (!$actor instanceof Admin) {
+        if (!$actor instanceof Admin || $actor->role !== 'super_admin') {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -100,6 +100,26 @@ class ProductController extends Controller
         return response()->json(
             $product->load(['category', 'seller', 'variations'])
         );
+    }
+
+    public function updateSellerProductForSuperAdmin(Seller $seller, Product $product, Request $request): JsonResponse
+    {
+        $actor = $request->user();
+        if (!$actor instanceof Admin || $actor->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
+        if ((int) $product->seller_id !== (int) $seller->id) return response()->json(['message' => 'Product does not belong to seller.'], 422);
+        $data = $request->validate(['category_id' => ['sometimes', 'integer', 'exists:product_categories,id'], 'name' => ['sometimes', 'string', 'max:255'], 'description' => ['sometimes', 'nullable', 'string'], 'status' => ['sometimes', 'in:draft,active,inactive']]);
+        $product->fill($data)->save();
+        return response()->json(['message' => 'Seller product updated successfully.', 'product' => $product->fresh(['category', 'seller', 'variations'])]);
+    }
+
+    public function destroySellerProductForSuperAdmin(Seller $seller, Product $product, Request $request): JsonResponse
+    {
+        $actor = $request->user();
+        if (!$actor instanceof Admin || $actor->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
+        if ((int) $product->seller_id !== (int) $seller->id) return response()->json(['message' => 'Product does not belong to seller.'], 422);
+        if ($product->orderItems()->exists()) return response()->json(['message' => 'Products referenced by orders cannot be deleted. Mark inactive instead.'], 422);
+        $product->delete();
+        return response()->json(['message' => 'Seller product deleted successfully.']);
     }
 
     public function store(Request $request): JsonResponse

@@ -15,6 +15,7 @@ return new class extends Migration
             $table->string('courier_status')->nullable()->after('courier_invoice');
             $table->timestamp('courier_created_at')->nullable()->after('courier_status');
             $table->timestamp('courier_updated_at')->nullable()->after('courier_created_at');
+            $table->text('courier_error')->nullable()->after('courier_updated_at');
             $table->index(['courier_provider', 'courier_consignment_id']);
         });
     }
@@ -23,7 +24,7 @@ return new class extends Migration
     {
         Schema::table('order_items', function (Blueprint $table) {
             $table->dropIndex(['courier_provider', 'courier_consignment_id']);
-            $table->dropColumn(['courier_provider', 'courier_consignment_id', 'courier_invoice', 'courier_status', 'courier_created_at', 'courier_updated_at']);
+            $table->dropColumn(['courier_provider', 'courier_consignment_id', 'courier_invoice', 'courier_status', 'courier_created_at', 'courier_updated_at', 'courier_error']);
         });
     }
 };

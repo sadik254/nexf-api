@@ -81,10 +81,14 @@ Route::prefix('admin')->group(function () {
     Route::middleware('sanctum.type:admin,admin:coupons')->post('/coupons/{coupon}/delete', [CouponController::class, 'destroy']);
 
     Route::middleware('sanctum.type:admin,admin:orders')->get('/orders', [OrderController::class, 'indexAdmin']);
+    Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/bulk-ship', [OrderController::class, 'bulkShipAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->get('/orders/{order}', [OrderController::class, 'showAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}', [OrderController::class, 'updateStatus']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}/items/{item}/fulfillment', [OrderController::class, 'fulfillAdminItem']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}/cancel', [OrderController::class, 'cancel']);
+    Route::middleware('sanctum.type:admin,admin:orders')->get('/sellers/{seller}/orders', [OrderController::class, 'indexSellerOrdersForSuperAdmin']);
+    Route::middleware('sanctum.type:admin,admin:orders')->get('/sellers/{seller}/orders/{order}', [OrderController::class, 'showSellerOrderForSuperAdmin']);
+    Route::middleware('sanctum.type:admin,admin:orders')->post('/sellers/{seller}/orders/{order}/cancel', [OrderController::class, 'cancelSellerOrderForSuperAdmin']);
 });
 
 Route::prefix('sellers')->group(function () {
@@ -151,6 +155,8 @@ Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(f
 Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(function () {
     Route::get('/sellers/{seller}/products', [ProductController::class, 'indexSellerProductsForAdmin']);
     Route::get('/sellers/{seller}/products/{product}', [ProductController::class, 'showSellerProductForAdmin']);
+    Route::post('/sellers/{seller}/products/{product}', [ProductController::class, 'updateSellerProductForSuperAdmin']);
+    Route::post('/sellers/{seller}/products/{product}/delete', [ProductController::class, 'destroySellerProductForSuperAdmin']);
 });
 
 Route::prefix('store')->group(function () {

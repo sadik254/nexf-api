@@ -131,7 +131,9 @@
         {"name":"Add variation lot","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"lot_number\":\"LOT-ADMIN-VAR-001\",\"buying_price\":100,\"selling_price\":150,\"quantity\":10}"},"url":"{{base_url}}/api/admin/products/{{product_id}}/variations/{{variation_id}}/lots"}},
         {"name":"Consume variation","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"quantity\":1}"},"url":"{{base_url}}/api/admin/products/{{product_id}}/variations/{{variation_id}}/consume"}},
         {"name":"Seller products (admin view)","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/products?per_page=25"}},
-        {"name":"Seller product detail (admin view)","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/products/{{product_id}}"}}
+        {"name":"Seller product detail (admin view)","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/products/{{product_id}}"}},
+        {"name":"Update seller product (super admin)","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"status\":\"inactive\"}"},"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/products/{{product_id}}"}},
+        {"name":"Delete seller product (super admin)","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/products/{{product_id}}/delete"}}
       ]
     },
     {
@@ -148,9 +150,13 @@
         {"name":"Coupon details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/coupons/{{coupon_id}}"}},
         {"name":"Update coupon","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"discount_value\":15}"},"url":"{{base_url}}/api/admin/coupons/{{coupon_id}}"}},
         {"name":"Delete coupon","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/coupons/{{coupon_id}}/delete"}},
-        {"name":"List orders","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/orders?per_page=25&status=&payment_status=&search="}},
+        {"name":"List orders (platform store)","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/orders?per_page=25&status=&payment_status=&search="}},
+        {"name":"List seller orders (super admin)","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/orders?per_page=25"}},
+        {"name":"Seller order details (super admin)","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/orders/{{order_id}}"}},
+        {"name":"Cancel seller order (super admin)","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/orders/{{order_id}}/cancel"}},
         {"name":"Order details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/orders/{{order_id}}"}},
         {"name":"Fulfil admin-store order item","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"status\":\"confirmed\"}"},"url":"{{base_url}}/api/admin/orders/{{order_id}}/items/{{order_item_id}}/fulfillment"}},
+        {"name":"Bulk ship admin-store items","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"order_item_ids\":[{{order_item_id}}]}"},"url":"{{base_url}}/api/admin/orders/bulk-ship"}},
         {"name":"Cancel order and restore inventory","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/orders/{{order_id}}/cancel"}}
       ]
     }

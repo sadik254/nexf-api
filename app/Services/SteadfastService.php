@@ -8,6 +8,47 @@ use Illuminate\Validation\ValidationException;
 
 class SteadfastService
 {
+    public function createBulkConsignments(iterable $items): array
+    {
+        $apiKey = (string) config('services.steadfast.api_key');
+        $secretKey = (string) config('services.steadfast.secret_key');
+        if ($apiKey === '' || $secretKey === '') {
+            throw ValidationException::withMessages(['courier' => ['SteadFast credentials are not configured.']]);
+        }
+
+        $payload = [];
+        foreach ($items as $item) {
+            $order = $item->order;
+            $phone = preg_replace('/\D+/', '', (string) $order->shipping_phone);
+            if (strlen($phone) !== 11) {
+                $item->update(['courier_error' => 'A valid 11-digit phone number is required for SteadFast delivery.']);
+                continue;
+            }
+            $invoice = $order->order_number . '-ITEM-' . $item->id;
+            $payload[$invoice] = [
+                'invoice' => $invoice,
+                'recipient_name' => $order->shipping_name,
+                'recipient_phone' => $phone,
+                'recipient_email' => $order->customer?->email,
+                'recipient_address' => $order->shipping_address,
+                'cod_amount' => (float) $item->line_subtotal,
+                'note' => $order->notes,
+                'item_description' => $item->product_name,
+                'total_lot' => $item->quantity,
+                'delivery_type' => 0,
+            ];
+        }
+
+        if ($payload === []) return [];
+        $response = Http::timeout(config('services.steadfast.timeout', 15))
+            ->acceptJson()->withHeaders(['Api-Key' => $apiKey, 'Secret-Key' => $secretKey])
+            ->post(rtrim(config('services.steadfast.base_url'), '/') . '/create_order/bulk-order', ['data' => json_encode(array_values($payload))]);
+
+        if (!$response->successful()) throw ValidationException::withMessages(['courier' => ['SteadFast bulk request failed.']]);
+        $results = $response->json('data', $response->json());
+        return is_array($results) ? $results : [];
+    }
+
     public function createConsignment(OrderItem $item): array
     {
         $apiKey = (string) config('services.steadfast.api_key');
