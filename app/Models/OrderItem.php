@@ -28,6 +28,12 @@ class OrderItem extends Model
         'lot_allocations',
         'fulfillment_status',
         'tracking_number',
+        'courier_provider',
+        'courier_consignment_id',
+        'courier_invoice',
+        'courier_status',
+        'courier_created_at',
+        'courier_updated_at',
         'shipped_at',
         'delivered_at',
     ];
@@ -47,6 +53,8 @@ class OrderItem extends Model
             'lot_allocations' => 'array',
             'shipped_at' => 'datetime',
             'delivered_at' => 'datetime',
+            'courier_created_at' => 'datetime',
+            'courier_updated_at' => 'datetime',
         ];
     }
 

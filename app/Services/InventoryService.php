@@ -12,6 +12,15 @@ use Illuminate\Validation\ValidationException;
 
 class InventoryService
 {
+    public function previewProduct(Product $product, int $quantity): array
+    {
+        return $this->previewLots(productId: $product->id, variationId: null, quantityRequested: $quantity);
+    }
+
+    public function previewVariation(ProductVariation $variation, int $quantity): array
+    {
+        return $this->previewLots(productId: null, variationId: $variation->id, quantityRequested: $quantity);
+    }
     public function restoreOrderItem(OrderItem $item, $actor): void
     {
         foreach ($item->lot_allocations ?? [] as $allocation) {
@@ -161,5 +170,32 @@ class InventoryService
                 'totals' => $totals,
             ];
         });
+    }
+
+    private function previewLots(?int $productId, ?int $variationId, int $quantityRequested): array
+    {
+        $lots = ProductLot::query()
+            ->when($productId !== null, fn ($q) => $q->where('product_id', $productId))
+            ->when($variationId !== null, fn ($q) => $q->where('variation_id', $variationId))
+            ->where('quantity_remaining', '>', 0)
+            ->orderByRaw('received_at is null')->orderBy('received_at')->orderBy('id')->get();
+
+        $available = (int) $lots->sum('quantity_remaining');
+        if ($available < $quantityRequested) {
+            throw ValidationException::withMessages(['quantity' => ["Insufficient stock. Requested {$quantityRequested}, available {$available}."]]);
+        }
+
+        $remaining = $quantityRequested;
+        $cost = 0.0;
+        $revenue = 0.0;
+        foreach ($lots as $lot) {
+            $take = min($remaining, (int) $lot->quantity_remaining);
+            $cost = round($cost + ((float) $lot->buying_price * $take), 2);
+            $revenue = round($revenue + ((float) $lot->selling_price * $take), 2);
+            $remaining -= $take;
+            if ($remaining === 0) break;
+        }
+
+        return ['quantity' => $quantityRequested, 'available_quantity' => $available, 'cost' => $cost, 'subtotal' => $revenue];
     }
 }

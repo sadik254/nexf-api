@@ -30,8 +30,10 @@ Route::prefix('customers')->group(function () {
         Route::post('/me/password', [CustomerController::class, 'updatePassword']);
         Route::post('/logout', [CustomerController::class, 'logout']);
         Route::get('/orders', [OrderController::class, 'indexCustomer']);
+        Route::post('/orders/preview', [OrderController::class, 'preview']);
         Route::post('/orders', [OrderController::class, 'store']);
         Route::get('/orders/{order}', [OrderController::class, 'showCustomer']);
+        Route::post('/orders/{order}/cancel', [OrderController::class, 'cancelCustomer']);
         Route::post('/me/ping', function () {
             return response()->json(['ok' => true]);
         });

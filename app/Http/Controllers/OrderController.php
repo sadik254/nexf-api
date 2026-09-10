@@ -14,6 +14,9 @@ use App\Models\ShippingMethod;
 use App\Models\OrderItem;
 use App\Models\Seller;
 use App\Services\InventoryService;
+use App\Services\CheckoutService;
+use App\Services\OrderNotificationService;
+use App\Services\SteadfastService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -22,7 +25,7 @@ use Illuminate\Validation\ValidationException;
 
 class OrderController extends Controller
 {
-    public function __construct(private InventoryService $inventory)
+    public function __construct(private InventoryService $inventory, private CheckoutService $checkout, private OrderNotificationService $notifications, private SteadfastService $steadfast)
     {
     }
 
@@ -51,6 +54,36 @@ class OrderController extends Controller
         }
 
         return response()->json($order->load(['items', 'paymentMethod', 'shippingMethod', 'coupon']));
+    }
+
+    public function preview(Request $request): JsonResponse
+    {
+        /** @var Customer $customer */
+        $customer = $request->user();
+        $data = $request->validate($this->checkoutRules());
+        $preview = $this->checkout->preview($customer, $data);
+
+        return response()->json([
+            'items' => collect($preview['items'])->map(fn ($item) => [
+                'product_id' => $item['product']->id, 'variation_id' => $item['variation']?->id,
+                'name' => $item['product']->name, 'quantity' => $item['quantity'],
+                'available_quantity' => $item['quote']['available_quantity'], 'line_subtotal' => $item['quote']['subtotal'],
+            ])->values(),
+            'payment_method' => $preview['paymentMethod'], 'shipping_method' => $preview['shippingMethod'],
+            'coupon' => $preview['coupon'], 'subtotal' => $preview['subtotal'],
+            'discount_total' => $preview['discount_total'], 'shipping_charge' => $preview['shippingMethod']->charge, 'total' => $preview['total'],
+        ]);
+    }
+
+    public function cancelCustomer(Request $request, Order $order): JsonResponse
+    {
+        /** @var Customer $customer */
+        $customer = $request->user();
+        if ((int) $order->customer_id !== (int) $customer->id) return response()->json(['message' => 'Forbidden.'], 403);
+        if ($order->status !== 'pending') return response()->json(['message' => 'Only pending orders can be cancelled by customers.'], 422);
+        $order = $this->cancelOrder($order, $customer);
+        $this->notifications->cancelled($order);
+        return response()->json(['message' => 'Order cancelled and inventory restored successfully.', 'order' => $order]);
     }
 
     public function indexAdmin(Request $request): JsonResponse
@@ -174,7 +207,18 @@ class OrderController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        $order = DB::transaction(function () use ($order, $admin) {
+        $order = $this->cancelOrder($order, $admin);
+        $this->notifications->cancelled($order);
+
+        return response()->json([
+            'message' => 'Order cancelled and inventory restored successfully.',
+            'order' => $order,
+        ]);
+    }
+
+    private function cancelOrder(Order $order, $actor): Order
+    {
+        return DB::transaction(function () use ($order, $actor) {
             $lockedOrder = Order::query()->lockForUpdate()->findOrFail($order->id);
 
             if ($lockedOrder->status === 'cancelled') {
@@ -184,7 +228,7 @@ class OrderController extends Controller
             }
 
             foreach ($lockedOrder->items as $item) {
-                $this->inventory->restoreOrderItem($item, $admin);
+                $this->inventory->restoreOrderItem($item, $actor);
                 $item->update(['fulfillment_status' => 'cancelled']);
             }
 
@@ -195,11 +239,6 @@ class OrderController extends Controller
 
             return $lockedOrder->load(['customer', 'items', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
-
-        return response()->json([
-            'message' => 'Order cancelled and inventory restored successfully.',
-            'order' => $order,
-        ]);
     }
 
     private function fulfillItem(Request $request, Order $order, OrderItem $item, ?int $sellerId = null): JsonResponse
@@ -228,15 +267,20 @@ class OrderController extends Controller
                 ]);
             }
 
-            if ($data['status'] === 'shipped' && empty($data['tracking_number']) && empty($lockedItem->tracking_number)) {
-                throw ValidationException::withMessages([
-                    'tracking_number' => ['A tracking number is required when shipping an item.'],
-                ]);
+            $courier = null;
+            if ($data['status'] === 'shipped' && !$lockedItem->courier_consignment_id) {
+                $courier = $this->steadfast->createConsignment($lockedItem);
             }
 
             $lockedItem->update([
                 'fulfillment_status' => $data['status'],
-                'tracking_number' => $data['tracking_number'] ?? $lockedItem->tracking_number,
+                'tracking_number' => $courier['tracking_code'] ?? ($data['tracking_number'] ?? $lockedItem->tracking_number),
+                'courier_provider' => $courier['provider'] ?? $lockedItem->courier_provider,
+                'courier_consignment_id' => $courier['consignment_id'] ?? $lockedItem->courier_consignment_id,
+                'courier_invoice' => $courier['invoice'] ?? $lockedItem->courier_invoice,
+                'courier_status' => $courier['status'] ?? $lockedItem->courier_status,
+                'courier_created_at' => $courier['created_at'] ?? $lockedItem->courier_created_at,
+                'courier_updated_at' => $courier['updated_at'] ?? $lockedItem->courier_updated_at,
                 'shipped_at' => $data['status'] === 'shipped' ? now() : $lockedItem->shipped_at,
                 'delivered_at' => $data['status'] === 'delivered' ? now() : $lockedItem->delivered_at,
             ]);
@@ -245,6 +289,8 @@ class OrderController extends Controller
 
             return $lockedOrder->load(['customer', 'items', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
+
+        $this->notifications->statusChanged($order);
 
         if ($sellerId !== null) {
             $order->load([
@@ -283,19 +329,15 @@ class OrderController extends Controller
         /** @var Customer $customer */
         $customer = $request->user();
 
-        $data = $request->validate([
-            'items' => ['required', 'array', 'min:1'],
-            'items.*.product_id' => ['required', 'integer', 'exists:products,id'],
-            'items.*.variation_id' => ['nullable', 'integer', 'exists:product_variations,id'],
-            'items.*.quantity' => ['required', 'integer', 'min:1'],
-            'payment_method_id' => ['required', 'integer', 'exists:payment_methods,id'],
-            'shipping_method_id' => ['required', 'integer', 'exists:shipping_methods,id'],
-            'coupon_code' => ['nullable', 'string', 'max:64'],
+        $data = $request->validate($this->checkoutRules() + [
             'shipping_name' => ['required', 'string', 'max:255'],
             'shipping_phone' => ['required', 'string', 'max:32'],
             'shipping_address' => ['required', 'string'],
             'notes' => ['nullable', 'string'],
         ]);
+
+        // Uses the same validation, availability, and pricing rules as checkout preview.
+        $this->checkout->preview($customer, $data);
 
         $order = DB::transaction(function () use ($customer, $data) {
             $paymentMethod = PaymentMethod::query()->active()->find($data['payment_method_id']);
@@ -447,10 +489,25 @@ class OrderController extends Controller
             return $order->load(['items', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
 
+        $this->notifications->placed($order->load(['customer', 'items.seller']));
+
         return response()->json([
             'message' => 'Order placed successfully.',
             'order' => $order,
         ], 201);
+    }
+
+    private function checkoutRules(): array
+    {
+        return [
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.product_id' => ['required', 'integer', 'exists:products,id'],
+            'items.*.variation_id' => ['nullable', 'integer', 'exists:product_variations,id'],
+            'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'payment_method_id' => ['required', 'integer', 'exists:payment_methods,id'],
+            'shipping_method_id' => ['required', 'integer', 'exists:shipping_methods,id'],
+            'coupon_code' => ['nullable', 'string', 'max:64'],
+        ];
     }
 
     private function resolveCoupon(?string $couponCode, float $subtotal, Customer $customer): ?Coupon

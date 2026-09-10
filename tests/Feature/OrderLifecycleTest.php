@@ -11,7 +11,10 @@ use App\Models\ProductCategory;
 use App\Models\ProductLot;
 use App\Models\Seller;
 use App\Models\ShippingMethod;
+use App\Mail\OrderNotificationMail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class OrderLifecycleTest extends TestCase
@@ -70,6 +73,8 @@ class OrderLifecycleTest extends TestCase
 
     public function test_seller_can_only_view_and_transition_own_order_items(): void
     {
+        config(['services.steadfast.api_key' => 'test-key', 'services.steadfast.secret_key' => 'test-secret', 'services.steadfast.base_url' => 'https://steadfast.test/api/v1']);
+        Http::fake(['https://steadfast.test/*' => Http::response(['status' => 200, 'consignment' => ['consignment_id' => 1, 'invoice' => 'INV-1', 'tracking_code' => 'TRACK-API', 'status' => 'in_review']], 200)]);
         [$customer, $product] = $this->checkoutFixtures(1, true);
         $order = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
         $seller = $product->seller;
@@ -87,17 +92,12 @@ class OrderLifecycleTest extends TestCase
             ->assertJsonPath('order.items.0.fulfillment_status', 'confirmed');
 
         $this->withToken($token)
-            ->postJson("/api/seller/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'shipped'])
-            ->assertUnprocessable()
-            ->assertJsonValidationErrors('tracking_number');
-
-        $this->withToken($token)
             ->postJson("/api/seller/orders/{$order['id']}/items/{$itemId}/fulfillment", [
                 'status' => 'shipped',
-                'tracking_number' => 'TRACK-001',
             ])
             ->assertOk()
-            ->assertJsonPath('order.status', 'shipped');
+            ->assertJsonPath('order.status', 'shipped')
+            ->assertJsonPath('order.items.0.tracking_number', 'TRACK-API');
 
         $this->withToken($token)
             ->postJson("/api/seller/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'delivered'])
@@ -120,6 +120,25 @@ class OrderLifecycleTest extends TestCase
         $this->withToken($admin->createToken('test', ['admin:basic'])->plainTextToken)
             ->postJson("/api/admin/products/{$product->id}/delete")
             ->assertUnprocessable();
+    }
+
+    public function test_customer_can_preview_and_cancel_a_pending_order(): void
+    {
+        Mail::fake();
+        [$customer, $product] = $this->checkoutFixtures(1);
+        $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+        $payload = [
+            'items' => [['product_id' => $product->id, 'quantity' => 1]],
+            'payment_method_id' => PaymentMethod::firstOrFail()->id,
+            'shipping_method_id' => ShippingMethod::firstOrFail()->id,
+        ];
+        $this->withToken($token)->postJson('/api/customers/orders/preview', $payload)
+            ->assertOk()->assertJsonPath('subtotal', 100)->assertJsonPath('total', 120);
+
+        $order = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
+        Mail::assertSent(OrderNotificationMail::class);
+        $this->withToken($token)->postJson("/api/customers/orders/{$order['id']}/cancel")
+            ->assertOk()->assertJsonPath('order.status', 'cancelled');
     }
 
     private function checkoutFixtures(int $quantity, bool $sellerOwned = false): array

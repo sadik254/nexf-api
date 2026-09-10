@@ -33,6 +33,13 @@ return [
         'secret_key' => env('UPLOADCARE_SECRET_KEY'),
     ],
 
+    'steadfast' => [
+        'base_url' => env('STEADFAST_BASE_URL', 'https://portal.packzy.com/api/v1'),
+        'api_key' => env('STEADFAST_API_KEY'),
+        'secret_key' => env('STEADFAST_SECRET_KEY'),
+        'timeout' => (int) env('STEADFAST_TIMEOUT', 15),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),
