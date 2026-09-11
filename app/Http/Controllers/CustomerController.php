@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Mail\CustomerVerificationCodeMail;
 use App\Models\Customer;
 use App\Models\CustomerVerificationCode;
+use App\Services\PasswordResetCodeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -15,6 +16,8 @@ use Uploadcare\Configuration;
 class CustomerController extends Controller
 {
     private const CODE_EXPIRES_MINUTES = 10;
+
+    public function __construct(private PasswordResetCodeService $passwordResets) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -109,7 +112,7 @@ class CustomerController extends Controller
     {
         $data = $request->validate([
             'email' => ['required', 'email'],
-            'code' => ['required', 'string'],
+            'code' => ['required', 'digits:6'],
         ]);
 
         $customer = Customer::where('email', $data['email'])->first();
@@ -156,7 +159,7 @@ class CustomerController extends Controller
 
         $customer = Customer::where('email', $data['email'])->first();
         if ($customer) {
-            $this->sendVerificationCode($customer, 'password_reset');
+            $this->passwordResets->send($customer, 'customer');
         }
 
         return response()->json([
@@ -168,8 +171,8 @@ class CustomerController extends Controller
     {
         $data = $request->validate([
             'email' => ['required', 'email'],
-            'code' => ['required', 'string'],
-            'password' => ['required', 'string', 'min:8'],
+            'code' => ['required', 'digits:6'],
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
         ]);
 
         $customer = Customer::where('email', $data['email'])->first();
@@ -177,8 +180,7 @@ class CustomerController extends Controller
             return response()->json(['message' => 'Invalid code.'], 422);
         }
 
-        $code = $this->getValidCode($data['email'], 'password_reset', $data['code']);
-        if (!$code) {
+        if (!$this->passwordResets->consume($customer, 'customer', $data['code'])) {
             return response()->json(['message' => 'Invalid or expired code.'], 422);
         }
 
@@ -186,7 +188,7 @@ class CustomerController extends Controller
             'password' => $data['password'],
         ])->save();
 
-        $code->forceFill(['used_at' => now()])->save();
+        $customer->tokens()->delete();
 
         return response()->json(['message' => 'Password reset successfully.']);
     }
@@ -287,20 +289,13 @@ class CustomerController extends Controller
     public function updatePassword(Request $request)
     {
         /** @var Customer|null $customer */
-        $customer = $request->user('customer');
+        $customer = $request->user();
         if (!$customer) {
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
 
-        $currentPassword = (string) $request->input('current_password', '');
-        $newPassword = (string) $request->input('new_password', '');
-
-        if ($currentPassword === '' || $newPassword === '') {
-            return response()->json(['message' => 'Current and new password are required.'], 422);
-        }
-        if (strlen($newPassword) < 8) {
-            return response()->json(['message' => 'New password must be at least 8 characters.'], 422);
-        }
+        $data = $request->validate(['current_password' => ['required', 'string'], 'new_password' => ['required', 'string', 'min:8', 'confirmed']]);
+        $currentPassword = $data['current_password']; $newPassword = $data['new_password'];
         if ($currentPassword === $newPassword) {
             return response()->json(['message' => 'New password must be different from current password.'], 422);
         }
@@ -311,6 +306,7 @@ class CustomerController extends Controller
         $customer->forceFill([
             'password' => Hash::make($newPassword),
         ])->save();
+        $customer->tokens()->delete();
 
         return response()->json(['message' => 'Password updated successfully.']);
     }

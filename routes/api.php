@@ -58,12 +58,13 @@ Route::post('/coupons/validate', [CouponController::class, 'validateCode']);
 
 Route::prefix('admin')->group(function () {
     Route::post('/login', [AdminController::class, 'login']);
+    Route::post('/forgot-password', [AdminController::class, 'forgotPassword']);
+    Route::post('/reset-password', [AdminController::class, 'resetPassword']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/logout', [AdminController::class, 'logout']);
     // Temporarily disable admin creation endpoint to prevent accidental creation of multiple admins during testing
     Route::middleware('sanctum.type:admin,admin:manage-admins')->post('/create', [AdminController::class, 'store']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/me', [AdminController::class, 'updateProfile']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/me/password', [AdminController::class, 'updatePassword']);
-    Route::middleware('sanctum.type:admin,admin:manage-admins')->post('/reset-password', [AdminController::class, 'resetPassword']);
     Route::middleware('sanctum.type:admin,admin:manage-admins')->get('/admins', [AdminController::class, 'index']);
     Route::middleware('sanctum.type:admin,admin:manage-admins')->get('/admins/{admin}', [AdminController::class, 'show']);
     Route::middleware('sanctum.type:admin,admin:manage-admins')->post('/admins/{admin}', [AdminController::class, 'updateAdmin']);
@@ -98,6 +99,8 @@ Route::prefix('admin')->group(function () {
 Route::prefix('sellers')->group(function () {
     Route::post('/onboard', [SellerController::class, 'onboard']);
     Route::post('/login', [SellerController::class, 'login']);
+    Route::post('/forgot-password', [SellerController::class, 'forgotPassword']);
+    Route::post('/reset-password', [SellerController::class, 'resetPassword']);
     Route::middleware('sanctum.type:seller,seller:basic')->post('/logout', [SellerController::class, 'logout']);
     Route::middleware('sanctum.type:seller,seller:basic')->post('/me/password', [SellerController::class, 'updatePassword']);
 });

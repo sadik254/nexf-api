@@ -10,10 +10,12 @@ use Illuminate\Support\Facades\Mail;
 use Uploadcare\Api;
 use Uploadcare\Configuration;
 use App\Mail\AdminCreatedMail;
-use App\Mail\AdminPasswordResetMail;
+use App\Services\PasswordResetCodeService;
 
 class AdminController extends Controller
 {
+    public function __construct(private PasswordResetCodeService $passwordResets) {}
+
     public function index(Request $request): JsonResponse
     {
         $perPage = (int) $request->query('per_page', 25);
@@ -307,15 +309,8 @@ class AdminController extends Controller
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
 
-        $currentPassword = (string) $request->input('current_password', '');
-        $newPassword = (string) $request->input('new_password', '');
-
-        if ($currentPassword === '' || $newPassword === '') {
-            return response()->json(['message' => 'Current and new password are required.'], 422);
-        }
-        if (strlen($newPassword) < 8) {
-            return response()->json(['message' => 'New password must be at least 8 characters.'], 422);
-        }
+        $data = $request->validate(['current_password' => ['required', 'string'], 'new_password' => ['required', 'string', 'min:8', 'confirmed']]);
+        $currentPassword = $data['current_password']; $newPassword = $data['new_password'];
         if ($currentPassword === $newPassword) {
             return response()->json(['message' => 'New password must be different from current password.'], 422);
         }
@@ -326,36 +321,26 @@ class AdminController extends Controller
         $admin->forceFill([
             'password' => Hash::make($newPassword),
         ])->save();
+        $admin->tokens()->delete();
 
         return response()->json(['message' => 'Password updated successfully.']);
     }
 
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        $data = $request->validate(['email' => ['required', 'email']]);
+        $admin = Admin::where('email', $data['email'])->first();
+        if ($admin) $this->passwordResets->send($admin, 'admin');
+        return response()->json(['message' => 'If that email exists, a code has been sent.']);
+    }
+
     public function resetPassword(Request $request): JsonResponse
     {
-        /** @var Admin|null $actor */
-        $actor = $request->user();
-        if (!$actor || $actor->role !== 'super_admin') {
-            return response()->json(['message' => 'Forbidden.'], 403);
-        }
-
-        $data = $request->validate([
-            'email' => ['required', 'email'],
-        ]);
-
+        $data = $request->validate(['email' => ['required', 'email'], 'code' => ['required', 'digits:6'], 'password' => ['required', 'string', 'min:8', 'confirmed']]);
         $admin = Admin::where('email', $data['email'])->first();
-        if (!$admin) {
-            return response()->json(['message' => 'Admin not found.'], 404);
-        }
-
-        $passwordPlain = bin2hex(random_bytes(4));
-
-        $admin->forceFill([
-            'password' => $passwordPlain,
-        ])->save();
-
-        Mail::to($admin->email)->send(new AdminPasswordResetMail($admin, $passwordPlain));
-
-        return response()->json(['message' => 'Password reset and emailed.']);
+        if (!$admin || !$this->passwordResets->consume($admin, 'admin', $data['code'])) return response()->json(['message' => 'Invalid or expired code.'], 422);
+        $admin->forceFill(['password' => $data['password']])->save(); $admin->tokens()->delete();
+        return response()->json(['message' => 'Password reset successfully.']);
     }
 
     private function abilitiesForRole(string $role): array

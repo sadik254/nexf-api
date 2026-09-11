@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Mail\SellerApprovedMail;
 use App\Models\Admin;
 use App\Models\Seller;
+use App\Services\PasswordResetCodeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -15,6 +16,8 @@ use Uploadcare\Configuration;
 
 class SellerController extends Controller
 {
+    public function __construct(private PasswordResetCodeService $passwordResets) {}
+
     public function index(Request $request): JsonResponse
     {
         $perPage = (int) $request->query('per_page', 25);
@@ -194,15 +197,8 @@ class SellerController extends Controller
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
 
-        $currentPassword = (string) $request->input('current_password', '');
-        $newPassword = (string) $request->input('new_password', '');
-
-        if ($currentPassword === '' || $newPassword === '') {
-            return response()->json(['message' => 'Current and new password are required.'], 422);
-        }
-        if (strlen($newPassword) < 8) {
-            return response()->json(['message' => 'New password must be at least 8 characters.'], 422);
-        }
+        $data = $request->validate(['current_password' => ['required', 'string'], 'new_password' => ['required', 'string', 'min:8', 'confirmed']]);
+        $currentPassword = $data['current_password']; $newPassword = $data['new_password'];
         if ($currentPassword === $newPassword) {
             return response()->json(['message' => 'New password must be different from current password.'], 422);
         }
@@ -213,8 +209,26 @@ class SellerController extends Controller
         $seller->forceFill([
             'password' => Hash::make($newPassword),
         ])->save();
+        $seller->tokens()->delete();
 
         return response()->json(['message' => 'Password updated successfully.']);
+    }
+
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        $data = $request->validate(['email' => ['required', 'email']]);
+        $seller = Seller::where('email', $data['email'])->first();
+        if ($seller) $this->passwordResets->send($seller, 'seller');
+        return response()->json(['message' => 'If that email exists, a code has been sent.']);
+    }
+
+    public function resetPassword(Request $request): JsonResponse
+    {
+        $data = $request->validate(['email' => ['required', 'email'], 'code' => ['required', 'digits:6'], 'password' => ['required', 'string', 'min:8', 'confirmed']]);
+        $seller = Seller::where('email', $data['email'])->first();
+        if (!$seller || !$this->passwordResets->consume($seller, 'seller', $data['code'])) return response()->json(['message' => 'Invalid or expired code.'], 422);
+        $seller->forceFill(['password' => $data['password']])->save(); $seller->tokens()->delete();
+        return response()->json(['message' => 'Password reset successfully.']);
     }
 
     public function approve(Seller $seller, Request $request): JsonResponse
