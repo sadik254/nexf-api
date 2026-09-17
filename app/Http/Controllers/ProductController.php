@@ -7,6 +7,7 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\ProductLot;
 use App\Models\Seller;
+use App\Models\SizeChart;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -137,6 +138,7 @@ class ProductController extends Controller
             'gallery.*' => ['file', 'image', 'max:5120'],
             'default_buying_price' => ['nullable', 'numeric', 'min:0'],
             'default_selling_price' => ['nullable', 'numeric', 'min:0'],
+            'size_chart_id' => ['nullable', 'integer', 'exists:size_charts,id'],
         ]);
 
         $slug = $this->uniqueSlug($data['name']);
@@ -160,6 +162,8 @@ class ProductController extends Controller
             }
         }
 
+        $this->authorizeSizeChart($data['size_chart_id'] ?? null, $actor);
+
         $product = Product::create([
             'seller_id' => $actor instanceof Seller ? $actor->id : null,
             'created_by_admin_id' => $actor instanceof Admin ? $actor->id : null,
@@ -173,6 +177,7 @@ class ProductController extends Controller
             'gallery' => $galleryUrls,
             'default_buying_price' => $data['default_buying_price'] ?? null,
             'default_selling_price' => $data['default_selling_price'] ?? null,
+            'size_chart_id' => $data['size_chart_id'] ?? null,
         ]);
 
         return response()->json([
@@ -196,10 +201,15 @@ class ProductController extends Controller
             'gallery.*' => ['file', 'image', 'max:5120'],
             'default_buying_price' => ['sometimes', 'numeric', 'min:0'],
             'default_selling_price' => ['sometimes', 'numeric', 'min:0'],
+            'size_chart_id' => ['sometimes', 'nullable', 'integer', 'exists:size_charts,id'],
         ]);
 
         if (array_key_exists('name', $data)) {
             $product->slug = $this->uniqueSlug($data['name'], $product->id);
+        }
+
+        if (array_key_exists('size_chart_id', $data)) {
+            $this->authorizeSizeChart($data['size_chart_id'], $request->user());
         }
 
         $uploadcare = $this->uploadcare();
@@ -231,6 +241,7 @@ class ProductController extends Controller
             'gallery' => $galleryUrls,
             'default_buying_price' => $data['default_buying_price'] ?? $product->default_buying_price,
             'default_selling_price' => $data['default_selling_price'] ?? $product->default_selling_price,
+            'size_chart_id' => array_key_exists('size_chart_id', $data) ? $data['size_chart_id'] : $product->size_chart_id,
         ])->save();
 
         return response()->json([
@@ -252,6 +263,18 @@ class ProductController extends Controller
         $product->delete();
 
         return response()->json(['message' => 'Product deleted successfully.']);
+    }
+
+    /** Admin-store products may use global charts; sellers may use global or their own. */
+    private function authorizeSizeChart(?int $sizeChartId, $actor): void
+    {
+        if ($sizeChartId === null) return;
+
+        $chart = SizeChart::findOrFail($sizeChartId);
+        if ($actor instanceof Admin && $chart->seller_id === null) return;
+        if ($actor instanceof Seller && ($chart->seller_id === null || (int) $chart->seller_id === (int) $actor->id)) return;
+
+        abort(403, 'You cannot use this size chart.');
     }
 
     private function authorizeProductRead(Product $product, $actor): void

@@ -13,6 +13,7 @@ use App\Http\Controllers\StoreProductController;
 use App\Http\Controllers\PaymentMethodController;
 use App\Http\Controllers\ShippingMethodController;
 use App\Http\Controllers\CouponController;
+use App\Http\Controllers\SizeChartController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\SteadfastWebhookController;
 
@@ -113,6 +114,11 @@ Route::prefix('admin')->group(function () {
 });
 
 Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(function () {
+    Route::get('/size-charts', [SizeChartController::class, 'indexAdmin']);
+    Route::post('/size-charts', [SizeChartController::class, 'storeAdmin']);
+    Route::post('/size-charts/{sizeChart}', [SizeChartController::class, 'updateAdmin']);
+    Route::post('/size-charts/{sizeChart}/delete', [SizeChartController::class, 'destroyAdmin']);
+
     Route::get('/product-categories', [ProductCategoryController::class, 'index']);
     Route::post('/product-categories', [ProductCategoryController::class, 'store']);
     Route::get('/product-categories/{category}', [ProductCategoryController::class, 'show']);
@@ -138,6 +144,11 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 });
 
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
+    Route::get('/size-charts', [SizeChartController::class, 'indexSeller']);
+    Route::post('/size-charts', [SizeChartController::class, 'storeSeller']);
+    Route::post('/size-charts/{sizeChart}', [SizeChartController::class, 'updateSeller']);
+    Route::post('/size-charts/{sizeChart}/delete', [SizeChartController::class, 'destroySeller']);
+
     Route::get('/orders', [OrderController::class, 'indexSeller']);
     Route::get('/orders/{order}', [OrderController::class, 'showSeller']);
     Route::post('/orders/{order}/items/{item}/fulfillment', [OrderController::class, 'fulfillSellerItem']);
