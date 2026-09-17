@@ -69,6 +69,8 @@ class StoreProductController extends Controller
         $query = Product::query()
             ->where('status', 'active')
             ->whereNull('seller_id');
+        if ($request->filled('exclude')) $query->where('slug', '!=', $request->query('exclude'));
+        if ($request->filled('limit')) $request->merge(['per_page' => min((int) $request->query('limit'), 100)]);
 
         $this->applyCommonEagerLoads($query);
         $this->applySearchFilters($query, $request);
@@ -177,6 +179,7 @@ class StoreProductController extends Controller
             'name' => $product->name,
             'slug' => $product->slug,
             'description' => $product->description,
+            'specifications' => $product->specifications ?? [],
             'product_type' => $product->product_type,
             'status' => $product->status,
             'thumbnail' => $product->thumbnail,
@@ -244,6 +247,7 @@ class StoreProductController extends Controller
             'name',
             'slug',
             'description',
+            'specifications',
             'product_type',
             'status',
             'thumbnail',

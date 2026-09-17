@@ -108,7 +108,7 @@ class ProductController extends Controller
         $actor = $request->user();
         if (!$actor instanceof Admin || $actor->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
         if ((int) $product->seller_id !== (int) $seller->id) return response()->json(['message' => 'Product does not belong to seller.'], 422);
-        $data = $request->validate(['category_id' => ['sometimes', 'integer', 'exists:product_categories,id'], 'name' => ['sometimes', 'string', 'max:255'], 'description' => ['sometimes', 'nullable', 'string'], 'status' => ['sometimes', 'in:draft,active,inactive']]);
+        $data = $request->validate(['category_id' => ['sometimes', 'integer', 'exists:product_categories,id'], 'name' => ['sometimes', 'string', 'max:255'], 'description' => ['sometimes', 'nullable', 'string'], 'specifications' => ['sometimes', 'nullable', 'array'], 'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'], 'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'], 'status' => ['sometimes', 'in:draft,active,inactive']]);
         $product->fill($data)->save();
         return response()->json(['message' => 'Seller product updated successfully.', 'product' => $product->fresh(['category', 'seller', 'variations'])]);
     }
@@ -131,6 +131,9 @@ class ProductController extends Controller
             'category_id' => ['required', 'integer', 'exists:product_categories,id'],
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
+            'specifications' => ['nullable', 'array'],
+            'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'],
+            'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'],
             'product_type' => ['required', 'in:simple,variable'],
             'status' => ['nullable', 'in:draft,active,inactive'],
             'thumbnail' => ['nullable', 'file', 'image', 'max:5120'],
@@ -171,6 +174,7 @@ class ProductController extends Controller
             'name' => $data['name'],
             'slug' => $slug,
             'description' => $data['description'] ?? null,
+            'specifications' => $data['specifications'] ?? null,
             'product_type' => $data['product_type'],
             'status' => $data['status'] ?? 'draft',
             'thumbnail' => $thumbnailUrl,
@@ -194,6 +198,9 @@ class ProductController extends Controller
             'category_id' => ['sometimes', 'integer', 'exists:product_categories,id'],
             'name' => ['sometimes', 'string', 'max:255'],
             'description' => ['sometimes', 'string'],
+            'specifications' => ['sometimes', 'nullable', 'array'],
+            'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'],
+            'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'],
             'product_type' => ['sometimes', 'in:simple,variable'],
             'status' => ['sometimes', 'in:draft,active,inactive'],
             'thumbnail' => ['sometimes', 'file', 'image', 'max:5120'],
@@ -235,6 +242,7 @@ class ProductController extends Controller
             'category_id' => $data['category_id'] ?? $product->category_id,
             'name' => $data['name'] ?? $product->name,
             'description' => $data['description'] ?? $product->description,
+            'specifications' => array_key_exists('specifications', $data) ? $data['specifications'] : $product->specifications,
             'product_type' => $data['product_type'] ?? $product->product_type,
             'status' => $data['status'] ?? $product->status,
             'thumbnail' => $thumbnailUrl,

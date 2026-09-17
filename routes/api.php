@@ -17,6 +17,7 @@ use App\Http\Controllers\SizeChartController;
 use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\SteadfastWebhookController;
+use App\Http\Controllers\ProductEngagementController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -39,6 +40,8 @@ Route::prefix('customers')->group(function () {
         Route::post('/orders', [OrderController::class, 'store']);
         Route::get('/orders/{order}', [OrderController::class, 'showCustomer']);
         Route::post('/orders/{order}/cancel', [OrderController::class, 'cancelCustomer']);
+        Route::post('/products/{product:slug}/reviews', [ProductEngagementController::class, 'review']);
+        Route::post('/products/{product:slug}/questions', [ProductEngagementController::class, 'ask']);
         Route::post('/me/ping', function () {
             return response()->json(['ok' => true]);
         });
@@ -115,6 +118,7 @@ Route::prefix('admin')->group(function () {
 });
 
 Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(function () {
+    Route::post('/product-questions/{question}/answer', [ProductEngagementController::class, 'answer']);
     Route::get('/inventory', [InventoryController::class, 'indexAdmin']);
     Route::get('/size-charts', [SizeChartController::class, 'indexAdmin']);
     Route::post('/size-charts', [SizeChartController::class, 'storeAdmin']);
@@ -146,6 +150,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 });
 
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
+    Route::post('/product-questions/{question}/answer', [ProductEngagementController::class, 'answer']);
     Route::get('/inventory', [InventoryController::class, 'indexSeller']);
     Route::get('/size-charts', [SizeChartController::class, 'indexSeller']);
     Route::post('/size-charts', [SizeChartController::class, 'storeSeller']);
@@ -184,6 +189,7 @@ Route::prefix('store')->group(function () {
     Route::get('/products', [StoreProductController::class, 'indexAll']);
     Route::get('/products/{product:slug}', [StoreProductController::class, 'show']);
     Route::get('/products/{product:slug}/reviews', [StoreProductController::class, 'reviews']);
+    Route::get('/products/{product:slug}/questions', [ProductEngagementController::class, 'questions']);
     Route::get('/categories/{category:slug}/products', [StoreProductController::class, 'indexByCategory']);
     Route::get('/sellers/{seller:store_slug}/products', [StoreProductController::class, 'indexBySeller']);
     Route::get('/admin/products', [StoreProductController::class, 'indexAdminStore']);

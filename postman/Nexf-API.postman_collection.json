@@ -24,6 +24,7 @@
     {"key":"coupon_id","value":"1","type":"string"},
     {"key":"order_id","value":"1","type":"string"},
     {"key":"order_item_id","value":"1","type":"string"},
+    {"key":"question_id","value":"1","type":"string"},
     {"key":"image_path","value":"","type":"string"},
     {"key":"kyc_document_path","value":"","type":"string"}
     ,{"key":"steadfast_webhook_token","value":"","type":"string"}
@@ -39,6 +40,7 @@
         {"name":"All store products","request":{"method":"GET","url":"{{base_url}}/api/store/products?per_page=20&search="}},
         {"name":"Product details by slug","request":{"method":"GET","url":"{{base_url}}/api/store/products/{{product_slug}}"}},
         {"name":"Product reviews","request":{"method":"GET","url":"{{base_url}}/api/store/products/{{product_slug}}/reviews?page=1&per_page=10"}},
+        {"name":"Product questions","request":{"method":"GET","url":"{{base_url}}/api/store/products/{{product_slug}}/questions?page=1&per_page=10"}},
         {"name":"Store products by category","request":{"method":"GET","url":"{{base_url}}/api/store/categories/{{category_slug}}/products"}},
         {"name":"Store products by seller","request":{"method":"GET","url":"{{base_url}}/api/store/sellers/{{seller_id}}/products?exclude={{product_slug}}&limit=4"}},
         {"name":"Admin-store public products","request":{"method":"GET","url":"{{base_url}}/api/store/admin/products"}}
@@ -61,6 +63,8 @@
         {"name":"Place order","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 201) { const order = pm.response.json().order; pm.collectionVariables.set('order_id', order.id); pm.collectionVariables.set('order_item_id', order.items[0].id); }"]}}],"request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\n  \"items\": [{\"product_id\": {{product_id}}, \"quantity\": 1}],\n  \"payment_method_id\": {{payment_method_id}},\n  \"shipping_method_id\": {{shipping_method_id}},\n  \"shipping_name\": \"Test Customer\",\n  \"shipping_phone\": \"01700000000\",\n  \"shipping_address\": \"Dhaka, Bangladesh\",\n  \"notes\": \"Postman test order\"\n}"},"url":"{{base_url}}/api/customers/orders"}},
         {"name":"Customer order details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"}],"url":"{{base_url}}/api/customers/orders/{{order_id}}"}},
         {"name":"Cancel pending customer order","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"}],"url":"{{base_url}}/api/customers/orders/{{order_id}}/cancel"}},
+        {"name":"Submit delivered-product review","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"rating\":5,\"comment\":\"Excellent product.\"}"},"url":"{{base_url}}/api/customers/products/{{product_slug}}/reviews"}},
+        {"name":"Ask product question","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 201) { pm.collectionVariables.set('question_id', pm.response.json().question.id); }"]}}],"request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"question\":\"Does this product run true to size?\"}"},"url":"{{base_url}}/api/customers/products/{{product_slug}}/questions"}},
         {"name":"Customer logout","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"}],"url":"{{base_url}}/api/customers/logout"}}
       ]
     },
@@ -94,6 +98,7 @@
         {"name":"Seller delete variation","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/products/{{product_id}}/variations/{{variation_id}}/delete"}},
         {"name":"Seller add variation lot","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"lot_number\":\"LOT-VAR-001\",\"buying_price\":100,\"selling_price\":150,\"quantity\":10}"},"url":"{{base_url}}/api/seller/products/{{product_id}}/variations/{{variation_id}}/lots"}},
         {"name":"Seller consume variation","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"quantity\":1}"},"url":"{{base_url}}/api/seller/products/{{product_id}}/variations/{{variation_id}}/consume"}},
+        {"name":"Seller answer product question","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"answer\":\"Yes, it follows the listed size chart.\"}"},"url":"{{base_url}}/api/seller/product-questions/{{question_id}}/answer"}},
         {"name":"Seller logout","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/sellers/logout"}}
       ]
     },
@@ -126,6 +131,7 @@
         {"name":"Admin create size chart","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 201) { pm.collectionVariables.set('size_chart_id', pm.response.json().size_chart.id); }"]}}],"request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"Women's Coat Size Guide\",\"url\":\"https://example.com/size-charts/womens-coat\"}"},"url":"{{base_url}}/api/admin/size-charts"}},
         {"name":"Admin update size chart","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"Updated Women's Coat Size Guide\"}"},"url":"{{base_url}}/api/admin/size-charts/{{size_chart_id}}"}},
         {"name":"Admin delete size chart","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/size-charts/{{size_chart_id}}/delete"}},
+        {"name":"Admin answer product question","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"answer\":\"Please follow the attached size chart.\"}"},"url":"{{base_url}}/api/admin/product-questions/{{question_id}}/answer"}},
         {"name":"List categories","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/product-categories?per_page=25"}},
         {"name":"Create category","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 201) { pm.collectionVariables.set('category_id', pm.response.json().category.id); pm.collectionVariables.set('category_slug', pm.response.json().category.slug); }"]}}],"request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"Electronics\",\"description\":\"Devices and accessories\",\"is_active\":true}"},"url":"{{base_url}}/api/admin/product-categories"}},
         {"name":"Category details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/product-categories/{{category_id}}"}},

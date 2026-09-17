@@ -20,6 +20,7 @@ class Product extends Model
         'name',
         'slug',
         'description',
+        'specifications',
         'product_type',
         'status',
         'thumbnail',
@@ -33,6 +34,7 @@ class Product extends Model
     {
         return [
             'gallery' => 'array',
+            'specifications' => 'array',
             'option_groups' => 'array',
             'compare_at_price' => 'decimal:2',
         ];
@@ -92,5 +94,6 @@ class Product extends Model
     }
 
     public function reviews(): HasMany { return $this->hasMany(Review::class); }
+    public function questions(): HasMany { return $this->hasMany(ProductQuestion::class); }
     public function sizeChart(): BelongsTo { return $this->belongsTo(SizeChart::class); }
 }
