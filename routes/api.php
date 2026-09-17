@@ -169,6 +169,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 Route::prefix('store')->group(function () {
     Route::get('/products', [StoreProductController::class, 'indexAll']);
     Route::get('/products/{product:slug}', [StoreProductController::class, 'show']);
+    Route::get('/products/{product:slug}/reviews', [StoreProductController::class, 'reviews']);
     Route::get('/categories/{category:slug}/products', [StoreProductController::class, 'indexByCategory']);
     Route::get('/sellers/{seller:store_slug}/products', [StoreProductController::class, 'indexBySeller']);
     Route::get('/admin/products', [StoreProductController::class, 'indexAdminStore']);

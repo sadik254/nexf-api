@@ -37,8 +37,9 @@
         {"name":"Validate coupon","request":{"method":"POST","header":[{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\n  \"code\": \"WELCOME10\",\n  \"subtotal\": 1000\n}"},"url":"{{base_url}}/api/coupons/validate"}},
         {"name":"All store products","request":{"method":"GET","url":"{{base_url}}/api/store/products?per_page=20&search="}},
         {"name":"Product details by slug","request":{"method":"GET","url":"{{base_url}}/api/store/products/{{product_slug}}"}},
+        {"name":"Product reviews","request":{"method":"GET","url":"{{base_url}}/api/store/products/{{product_slug}}/reviews?page=1&per_page=10"}},
         {"name":"Store products by category","request":{"method":"GET","url":"{{base_url}}/api/store/categories/{{category_slug}}/products"}},
-        {"name":"Store products by seller","request":{"method":"GET","url":"{{base_url}}/api/store/sellers/{{seller_id}}/products"}},
+        {"name":"Store products by seller","request":{"method":"GET","url":"{{base_url}}/api/store/sellers/{{seller_id}}/products?exclude={{product_slug}}&limit=4"}},
         {"name":"Admin-store public products","request":{"method":"GET","url":"{{base_url}}/api/store/admin/products"}}
       ]
     },

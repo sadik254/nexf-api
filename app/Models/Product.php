@@ -26,12 +26,15 @@ class Product extends Model
         'gallery',
         'default_buying_price',
         'default_selling_price',
+        'compare_at_price', 'option_groups', 'size_chart_id',
     ];
 
     protected function casts(): array
     {
         return [
             'gallery' => 'array',
+            'option_groups' => 'array',
+            'compare_at_price' => 'decimal:2',
         ];
     }
 
@@ -87,4 +90,7 @@ class Product extends Model
     {
         return $this->hasMany(OrderItem::class);
     }
+
+    public function reviews(): HasMany { return $this->hasMany(Review::class); }
+    public function sizeChart(): BelongsTo { return $this->belongsTo(SizeChart::class); }
 }
