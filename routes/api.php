@@ -14,6 +14,7 @@ use App\Http\Controllers\PaymentMethodController;
 use App\Http\Controllers\ShippingMethodController;
 use App\Http\Controllers\CouponController;
 use App\Http\Controllers\SizeChartController;
+use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\SteadfastWebhookController;
 
@@ -114,6 +115,7 @@ Route::prefix('admin')->group(function () {
 });
 
 Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(function () {
+    Route::get('/inventory', [InventoryController::class, 'indexAdmin']);
     Route::get('/size-charts', [SizeChartController::class, 'indexAdmin']);
     Route::post('/size-charts', [SizeChartController::class, 'storeAdmin']);
     Route::post('/size-charts/{sizeChart}', [SizeChartController::class, 'updateAdmin']);
@@ -144,6 +146,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 });
 
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
+    Route::get('/inventory', [InventoryController::class, 'indexSeller']);
     Route::get('/size-charts', [SizeChartController::class, 'indexSeller']);
     Route::post('/size-charts', [SizeChartController::class, 'storeSeller']);
     Route::post('/size-charts/{sizeChart}', [SizeChartController::class, 'updateSeller']);
