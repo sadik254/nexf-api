@@ -14,6 +14,20 @@ use Illuminate\Http\Request;
 
 class ProductEngagementController extends Controller
 {
+    public function reviewsForAdmin(Request $request): JsonResponse
+    {
+        $status = $request->validate(['status' => ['sometimes', 'in:pending,approved,rejected']])['status'] ?? 'pending';
+        $perPage = max(1, min((int) $request->query('per_page', 25), 100));
+        return response()->json(Review::with(['customer:id,name', 'product:id,name,slug'])->where('status', $status)->latest()->paginate($perPage));
+    }
+
+    public function moderateReview(Review $review, Request $request): JsonResponse
+    {
+        $data = $request->validate(['status' => ['required', 'in:approved,rejected']]);
+        $review->update(['status' => $data['status']]);
+        return response()->json(['message' => "Review {$data['status']} successfully.", 'review' => $review->fresh(['customer:id,name', 'product:id,name,slug'])]);
+    }
+
     public function questions(Product $product, Request $request): JsonResponse
     {
         abort_unless($product->status === 'active', 404);

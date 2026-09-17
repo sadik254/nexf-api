@@ -25,6 +25,7 @@
     {"key":"order_id","value":"1","type":"string"},
     {"key":"order_item_id","value":"1","type":"string"},
     {"key":"question_id","value":"1","type":"string"},
+    {"key":"review_id","value":"1","type":"string"},
     {"key":"image_path","value":"","type":"string"},
     {"key":"kyc_document_path","value":"","type":"string"}
     ,{"key":"steadfast_webhook_token","value":"","type":"string"}
@@ -132,6 +133,8 @@
         {"name":"Admin update size chart","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"Updated Women's Coat Size Guide\"}"},"url":"{{base_url}}/api/admin/size-charts/{{size_chart_id}}"}},
         {"name":"Admin delete size chart","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/size-charts/{{size_chart_id}}/delete"}},
         {"name":"Admin answer product question","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"answer\":\"Please follow the attached size chart.\"}"},"url":"{{base_url}}/api/admin/product-questions/{{question_id}}/answer"}},
+        {"name":"Pending product reviews","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/product-reviews?status=pending&per_page=25"}},
+        {"name":"Approve product review","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"status\":\"approved\"}"},"url":"{{base_url}}/api/admin/product-reviews/{{review_id}}/moderate"}},
         {"name":"List categories","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/product-categories?per_page=25"}},
         {"name":"Create category","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 201) { pm.collectionVariables.set('category_id', pm.response.json().category.id); pm.collectionVariables.set('category_slug', pm.response.json().category.slug); }"]}}],"request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"Electronics\",\"description\":\"Devices and accessories\",\"is_active\":true}"},"url":"{{base_url}}/api/admin/product-categories"}},
         {"name":"Category details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/product-categories/{{category_id}}"}},

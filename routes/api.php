@@ -118,6 +118,8 @@ Route::prefix('admin')->group(function () {
 });
 
 Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(function () {
+    Route::get('/product-reviews', [ProductEngagementController::class, 'reviewsForAdmin']);
+    Route::post('/product-reviews/{review}/moderate', [ProductEngagementController::class, 'moderateReview']);
     Route::post('/product-questions/{question}/answer', [ProductEngagementController::class, 'answer']);
     Route::get('/inventory', [InventoryController::class, 'indexAdmin']);
     Route::get('/size-charts', [SizeChartController::class, 'indexAdmin']);
