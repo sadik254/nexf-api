@@ -22,6 +22,31 @@ class OrderLifecycleTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_coupon_validation_reports_the_exact_unavailable_reason(): void
+    {
+        $base = [
+            'discount_type' => 'fixed',
+            'discount_value' => 50,
+        ];
+
+        Coupon::create($base + ['code' => 'INACTIVE', 'is_active' => false]);
+        Coupon::create($base + ['code' => 'FUTURE', 'is_active' => true, 'starts_at' => now()->addHour()]);
+        Coupon::create($base + ['code' => 'EXPIRED', 'is_active' => true, 'expires_at' => now()->subHour()]);
+        Coupon::create($base + ['code' => 'EXHAUSTED', 'is_active' => true, 'usage_limit' => 1, 'used_count' => 1]);
+
+        foreach ([
+            'MISSING' => 'Coupon code was not found.',
+            'INACTIVE' => 'Coupon is inactive.',
+            'FUTURE' => 'Coupon is not active yet.',
+            'EXPIRED' => 'Coupon has expired.',
+            'EXHAUSTED' => 'Coupon usage limit has been reached.',
+        ] as $code => $message) {
+            $this->postJson('/api/coupons/validate', ['code' => $code, 'subtotal' => 1280])
+                ->assertUnprocessable()
+                ->assertJsonPath('message', $message);
+        }
+    }
+
     public function test_checkout_snapshots_images_and_prevents_overselling(): void
     {
         [$customer, $product] = $this->checkoutFixtures(2);

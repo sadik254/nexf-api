@@ -615,9 +615,15 @@ class OrderController extends Controller
             ->lockForUpdate()
             ->first();
 
-        if (!$coupon || !$coupon->isUsable()) {
+        if (!$coupon) {
             throw ValidationException::withMessages([
-                'coupon_code' => ['Coupon is invalid or expired.'],
+                'coupon_code' => ['Coupon code was not found.'],
+            ]);
+        }
+
+        if ($reason = $coupon->unusableReason()) {
+            throw ValidationException::withMessages([
+                'coupon_code' => [$reason],
             ]);
         }
 

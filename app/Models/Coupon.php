@@ -63,23 +63,28 @@ class Coupon extends Model
 
     public function isUsable(): bool
     {
+        return $this->unusableReason() === null;
+    }
+
+    public function unusableReason(): ?string
+    {
         if (!$this->is_active) {
-            return false;
+            return 'Coupon is inactive.';
         }
 
         if ($this->starts_at !== null && $this->starts_at->isFuture()) {
-            return false;
+            return 'Coupon is not active yet.';
         }
 
         if ($this->expires_at !== null && $this->expires_at->isPast()) {
-            return false;
+            return 'Coupon has expired.';
         }
 
         if ($this->usage_limit !== null && $this->used_count >= $this->usage_limit) {
-            return false;
+            return 'Coupon usage limit has been reached.';
         }
 
-        return true;
+        return null;
     }
 
     public function discountForSubtotal(float $subtotal): float

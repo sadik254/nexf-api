@@ -163,8 +163,12 @@ class CouponController extends Controller
         $code = $this->normalizeCode($data['code']);
         $coupon = Coupon::where('code', $code)->first();
 
-        if (!$coupon || !$coupon->isUsable()) {
-            return response()->json(['message' => 'Coupon is invalid or expired.'], 422);
+        if (!$coupon) {
+            return response()->json(['message' => 'Coupon code was not found.'], 422);
+        }
+
+        if ($reason = $coupon->unusableReason()) {
+            return response()->json(['message' => $reason], 422);
         }
 
         $subtotal = (float) $data['subtotal'];

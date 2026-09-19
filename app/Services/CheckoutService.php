@@ -54,7 +54,8 @@ class CheckoutService
     {
         if (!$couponCode) return null;
         $coupon = Coupon::where('code', preg_replace('/[^A-Z0-9_-]/', '', Str::upper($couponCode)))->first();
-        if (!$coupon || !$coupon->isUsable()) throw ValidationException::withMessages(['coupon_code' => ['Coupon is invalid or expired.']]);
+        if (!$coupon) throw ValidationException::withMessages(['coupon_code' => ['Coupon code was not found.']]);
+        if ($reason = $coupon->unusableReason()) throw ValidationException::withMessages(['coupon_code' => [$reason]]);
         if ($coupon->minimum_order_amount !== null && $subtotal < (float) $coupon->minimum_order_amount) throw ValidationException::withMessages(['coupon_code' => ['Minimum order amount not reached for this coupon.']]);
         if ($coupon->per_customer_limit !== null && CouponRedemption::where('coupon_id', $coupon->id)->where('customer_id', $customer->id)->count() >= $coupon->per_customer_limit) throw ValidationException::withMessages(['coupon_code' => ['Coupon usage limit reached for this customer.']]);
         return $coupon;
