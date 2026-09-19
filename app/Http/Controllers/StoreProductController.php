@@ -41,8 +41,9 @@ class StoreProductController extends Controller
 
     public function indexByCategory(ProductCategory $category, Request $request): JsonResponse
     {
+        $categoryIds = $category->children()->pluck('id')->prepend($category->id);
         $query = $this->baseStoreQuery()
-            ->where('category_id', $category->id);
+            ->whereIn('category_id', $categoryIds);
 
         return $this->paginateProducts($query, $request);
     }

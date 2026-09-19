@@ -60,6 +60,7 @@ Route::post('/test', function() {
 
 Route::get('/payment-methods', [PaymentMethodController::class, 'index']);
 Route::get('/shipping-methods', [ShippingMethodController::class, 'index']);
+Route::get('/store/categories', [ProductCategoryController::class, 'indexPublic']);
 Route::get('/homepage/banners', [HomepageBannerController::class, 'index']);
 Route::post('/coupons/validate', [CouponController::class, 'validateCode']);
 
