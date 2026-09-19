@@ -18,6 +18,7 @@ use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\SteadfastWebhookController;
 use App\Http\Controllers\ProductEngagementController;
+use App\Http\Controllers\HomepageBannerController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -59,6 +60,7 @@ Route::post('/test', function() {
 
 Route::get('/payment-methods', [PaymentMethodController::class, 'index']);
 Route::get('/shipping-methods', [ShippingMethodController::class, 'index']);
+Route::get('/homepage/banners', [HomepageBannerController::class, 'index']);
 Route::post('/coupons/validate', [CouponController::class, 'validateCode']);
 
 Route::prefix('admin')->group(function () {
@@ -118,6 +120,10 @@ Route::prefix('admin')->group(function () {
 });
 
 Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(function () {
+    Route::get('/homepage/banners', [HomepageBannerController::class, 'indexAdmin']);
+    Route::post('/homepage/banners', [HomepageBannerController::class, 'store']);
+    Route::post('/homepage/banners/{homepageBanner}', [HomepageBannerController::class, 'update']);
+    Route::post('/homepage/banners/{homepageBanner}/delete', [HomepageBannerController::class, 'destroy']);
     Route::get('/product-reviews', [ProductEngagementController::class, 'reviewsForAdmin']);
     Route::post('/product-reviews/{review}/moderate', [ProductEngagementController::class, 'moderateReview']);
     Route::post('/product-questions/{question}/answer', [ProductEngagementController::class, 'answer']);

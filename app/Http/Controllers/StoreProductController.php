@@ -18,6 +18,7 @@ class StoreProductController extends Controller
     public function indexAll(Request $request): JsonResponse
     {
         $query = $this->baseStoreQuery();
+        $this->applySearchFilters($query, $request);
 
         return $this->paginateProducts($query, $request);
     }

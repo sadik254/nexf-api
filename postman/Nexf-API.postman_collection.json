@@ -37,6 +37,7 @@
         {"name":"Health test","request":{"method":"POST","url":"{{base_url}}/api/test"}},
         {"name":"Payment methods","request":{"method":"GET","url":"{{base_url}}/api/payment-methods"}},
         {"name":"Shipping methods","request":{"method":"GET","url":"{{base_url}}/api/shipping-methods"}},
+        {"name":"Homepage banners","request":{"method":"GET","url":"{{base_url}}/api/homepage/banners"}},
         {"name":"Validate coupon","request":{"method":"POST","header":[{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\n  \"code\": \"WELCOME10\",\n  \"subtotal\": 1000\n}"},"url":"{{base_url}}/api/coupons/validate"}},
         {"name":"All store products","request":{"method":"GET","url":"{{base_url}}/api/store/products?per_page=20&search="}},
         {"name":"Product details by slug","request":{"method":"GET","url":"{{base_url}}/api/store/products/{{product_slug}}"}},
@@ -157,6 +158,13 @@
         {"name":"Seller product detail (admin view)","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/products/{{product_id}}"}},
         {"name":"Update seller product (super admin)","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"status\":\"inactive\"}"},"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/products/{{product_id}}"}},
         {"name":"Delete seller product (super admin)","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/products/{{product_id}}/delete"}}
+      ]
+    },
+    {
+      "name": "Admin - homepage",
+      "item": [
+        {"name":"List homepage banners","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/homepage/banners"}},
+        {"name":"Create hero banner (multipart)","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"body":{"mode":"formdata","formdata":[{"key":"placement","value":"hero","type":"text"},{"key":"image","type":"file","src":"{{image_path}}"},{"key":"href","value":"/shop","type":"text"},{"key":"title","value":"New season","type":"text"},{"key":"emphasis","value":"is here","type":"text"},{"key":"subtitle","value":"Explore the collection","type":"text"},{"key":"sort_order","value":"0","type":"text"},{"key":"is_active","value":"1","type":"text"}]},"url":"{{base_url}}/api/admin/homepage/banners"}}
       ]
     },
     {
