@@ -47,6 +47,21 @@ class OrderLifecycleTest extends TestCase
         }
     }
 
+    public function test_valid_coupon_can_be_serialized_in_validation_response(): void
+    {
+        Coupon::create([
+            'code' => 'NEW50',
+            'discount_type' => 'fixed',
+            'discount_value' => 50,
+            'is_active' => true,
+        ]);
+
+        $this->postJson('/api/coupons/validate', ['code' => 'NEW50', 'subtotal' => 1280])
+            ->assertOk()
+            ->assertJsonPath('coupon.code', 'NEW50')
+            ->assertJsonPath('discount_amount', 50);
+    }
+
     public function test_checkout_snapshots_images_and_prevents_overselling(): void
     {
         [$customer, $product] = $this->checkoutFixtures(2);

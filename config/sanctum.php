@@ -34,7 +34,10 @@ return [
     |
     */
 
-    'guard' => ['customer'],
+    // This API authenticates with Sanctum bearer tokens. The `customer`
+    // guard also uses Sanctum, so listing it here makes Sanctum call itself
+    // recursively whenever an optional user is resolved on a public route.
+    'guard' => [],
 
     /*
     |--------------------------------------------------------------------------
