@@ -4,8 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\Admin;
 use App\Models\Coupon;
-use App\Models\CouponRedemption;
-use App\Models\Customer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -177,17 +175,6 @@ class CouponController extends Controller
                 'message' => 'Minimum order amount not reached.',
                 'minimum_order_amount' => (string) $coupon->minimum_order_amount,
             ], 422);
-        }
-
-        $customer = $request->user();
-        if ($customer instanceof Customer && $coupon->per_customer_limit !== null) {
-            $usedByCustomer = CouponRedemption::where('coupon_id', $coupon->id)
-                ->where('customer_id', $customer->id)
-                ->count();
-
-            if ($usedByCustomer >= $coupon->per_customer_limit) {
-                return response()->json(['message' => 'Coupon usage limit reached for this customer.'], 422);
-            }
         }
 
         return response()->json([
