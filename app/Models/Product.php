@@ -28,6 +28,7 @@ class Product extends Model
         'default_buying_price',
         'default_selling_price',
         'compare_at_price', 'option_groups', 'size_chart_id',
+        'homepage_trending', 'homepage_new_arrival', 'homepage_featured', 'homepage_sort_order',
     ];
 
     protected function casts(): array
@@ -37,6 +38,10 @@ class Product extends Model
             'specifications' => 'array',
             'option_groups' => 'array',
             'compare_at_price' => 'decimal:2',
+            'homepage_trending' => 'boolean',
+            'homepage_new_arrival' => 'boolean',
+            'homepage_featured' => 'boolean',
+            'homepage_sort_order' => 'integer',
         ];
     }
 

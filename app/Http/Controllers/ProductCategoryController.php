@@ -28,9 +28,15 @@ class ProductCategoryController extends Controller
 
     public function indexPublic(): JsonResponse
     {
-        return response()->json(ProductCategory::query()->whereNull('parent_id')->where('is_active', true)
-            ->with(['children' => fn ($q) => $q->where('is_active', true)->withCount('products')->orderBy('name')])
-            ->withCount('products')->orderBy('name')->get());
+        $activeProducts = fn ($q) => $q->where('status', 'active');
+        $categories = ProductCategory::query()->whereNull('parent_id')->where('is_active', true)
+            ->with(['children' => fn ($q) => $q->where('is_active', true)->withCount(['products' => $activeProducts])->orderBy('name')])
+            ->withCount(['products' => $activeProducts])->orderBy('name')->get();
+        $categories->each(fn ($category) => $category->setAttribute(
+            'total_products_count',
+            $category->products_count + $category->children->sum('products_count')
+        ));
+        return response()->json($categories);
     }
 
     public function store(Request $request): JsonResponse

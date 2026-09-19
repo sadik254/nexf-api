@@ -19,8 +19,21 @@ class StoreProductController extends Controller
     {
         $query = $this->baseStoreQuery();
         $this->applySearchFilters($query, $request);
+        $this->applyHomepageFilter($query, $request);
 
         return $this->paginateProducts($query, $request);
+    }
+
+    public function testimonials(): JsonResponse
+    {
+        $reviews = Review::query()->where('status', 'approved')->whereNotNull('comment')
+            ->whereHas('product', fn ($q) => $q->where('status', 'active'))
+            ->with(['customer:id,name,profile_picture', 'product:id,name,slug'])->latest()->limit(12)->get();
+        return response()->json($reviews->map(fn ($review) => [
+            'id' => $review->id, 'rating' => $review->rating, 'body' => $review->comment,
+            'author' => $review->customer?->name ?? 'Customer', 'avatar' => $review->customer?->profile_picture,
+            'purchased' => $review->product?->name, 'product_slug' => $review->product?->slug, 'verified' => true,
+        ]));
     }
 
     public function show(string $product): JsonResponse
@@ -103,7 +116,9 @@ class StoreProductController extends Controller
         $perPage = (int) $request->query('per_page', 20);
         $perPage = max(1, min($perPage, 100));
 
-        $products = $query->latest()->paginate($perPage);
+        $products = $request->filled('homepage')
+            ? $query->orderBy('homepage_sort_order')->latest()->paginate($perPage)
+            : $query->latest()->paginate($perPage);
 
         $products->getCollection()->transform(function (Product $product) {
             return $this->transformProduct($product);
@@ -240,6 +255,17 @@ class StoreProductController extends Controller
         }
     }
 
+    private function applyHomepageFilter(Builder $query, Request $request): void
+    {
+        $column = match ($request->query('homepage')) {
+            'trending' => 'homepage_trending',
+            'new_arrival' => 'homepage_new_arrival',
+            'featured' => 'homepage_featured',
+            default => null,
+        };
+        if ($column) $query->where($column, true);
+    }
+
     private function applyPriceStockSubselects(Builder $query): void
     {
         $query->select([
@@ -255,6 +281,7 @@ class StoreProductController extends Controller
             'thumbnail',
             'gallery',
             'compare_at_price', 'option_groups', 'size_chart_id',
+            'homepage_trending', 'homepage_new_arrival', 'homepage_featured', 'homepage_sort_order',
         ])->selectSub($this->productCurrentPriceSubquery(), 'current_selling_price')
             ->selectSub($this->productAvailableQtySubquery(), 'available_quantity');
     }

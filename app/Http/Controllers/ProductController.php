@@ -108,7 +108,7 @@ class ProductController extends Controller
         $actor = $request->user();
         if (!$actor instanceof Admin || $actor->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
         if ((int) $product->seller_id !== (int) $seller->id) return response()->json(['message' => 'Product does not belong to seller.'], 422);
-        $data = $request->validate(['category_id' => ['sometimes', 'integer', 'exists:product_categories,id'], 'name' => ['sometimes', 'string', 'max:255'], 'description' => ['sometimes', 'nullable', 'string'], 'specifications' => ['sometimes', 'nullable', 'array'], 'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'], 'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'], 'status' => ['sometimes', 'in:draft,active,inactive']]);
+        $data = $request->validate(['category_id' => ['sometimes', 'integer', 'exists:product_categories,id'], 'name' => ['sometimes', 'string', 'max:255'], 'description' => ['sometimes', 'nullable', 'string'], 'specifications' => ['sometimes', 'nullable', 'array'], 'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'], 'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'], 'status' => ['sometimes', 'in:draft,active,inactive'], 'homepage_trending' => ['sometimes', 'boolean'], 'homepage_new_arrival' => ['sometimes', 'boolean'], 'homepage_featured' => ['sometimes', 'boolean'], 'homepage_sort_order' => ['sometimes', 'integer', 'min:0']]);
         $product->fill($data)->save();
         return response()->json(['message' => 'Seller product updated successfully.', 'product' => $product->fresh(['category', 'seller', 'variations'])]);
     }
@@ -142,7 +142,15 @@ class ProductController extends Controller
             'default_buying_price' => ['nullable', 'numeric', 'min:0'],
             'default_selling_price' => ['nullable', 'numeric', 'min:0'],
             'size_chart_id' => ['nullable', 'integer', 'exists:size_charts,id'],
+            'homepage_trending' => ['nullable', 'boolean'],
+            'homepage_new_arrival' => ['nullable', 'boolean'],
+            'homepage_featured' => ['nullable', 'boolean'],
+            'homepage_sort_order' => ['nullable', 'integer', 'min:0'],
         ]);
+
+        if ($actor instanceof Seller) {
+            unset($data['homepage_trending'], $data['homepage_new_arrival'], $data['homepage_featured'], $data['homepage_sort_order']);
+        }
 
         $slug = $this->uniqueSlug($data['name']);
 
@@ -182,6 +190,10 @@ class ProductController extends Controller
             'default_buying_price' => $data['default_buying_price'] ?? null,
             'default_selling_price' => $data['default_selling_price'] ?? null,
             'size_chart_id' => $data['size_chart_id'] ?? null,
+            'homepage_trending' => (bool) ($data['homepage_trending'] ?? false),
+            'homepage_new_arrival' => (bool) ($data['homepage_new_arrival'] ?? false),
+            'homepage_featured' => (bool) ($data['homepage_featured'] ?? false),
+            'homepage_sort_order' => $data['homepage_sort_order'] ?? 0,
         ]);
 
         return response()->json([
@@ -209,7 +221,15 @@ class ProductController extends Controller
             'default_buying_price' => ['sometimes', 'numeric', 'min:0'],
             'default_selling_price' => ['sometimes', 'numeric', 'min:0'],
             'size_chart_id' => ['sometimes', 'nullable', 'integer', 'exists:size_charts,id'],
+            'homepage_trending' => ['sometimes', 'boolean'],
+            'homepage_new_arrival' => ['sometimes', 'boolean'],
+            'homepage_featured' => ['sometimes', 'boolean'],
+            'homepage_sort_order' => ['sometimes', 'integer', 'min:0'],
         ]);
+
+        if ($request->user() instanceof Seller) {
+            unset($data['homepage_trending'], $data['homepage_new_arrival'], $data['homepage_featured'], $data['homepage_sort_order']);
+        }
 
         if (array_key_exists('name', $data)) {
             $product->slug = $this->uniqueSlug($data['name'], $product->id);
@@ -250,6 +270,10 @@ class ProductController extends Controller
             'default_buying_price' => $data['default_buying_price'] ?? $product->default_buying_price,
             'default_selling_price' => $data['default_selling_price'] ?? $product->default_selling_price,
             'size_chart_id' => array_key_exists('size_chart_id', $data) ? $data['size_chart_id'] : $product->size_chart_id,
+            'homepage_trending' => $data['homepage_trending'] ?? $product->homepage_trending,
+            'homepage_new_arrival' => $data['homepage_new_arrival'] ?? $product->homepage_new_arrival,
+            'homepage_featured' => $data['homepage_featured'] ?? $product->homepage_featured,
+            'homepage_sort_order' => $data['homepage_sort_order'] ?? $product->homepage_sort_order,
         ])->save();
 
         return response()->json([
