@@ -191,6 +191,74 @@ class OrderLifecycleTest extends TestCase
             ->assertOk()->assertJsonPath('order.status', 'cancelled');
     }
 
+    public function test_checkout_charges_delivery_once_per_distinct_store(): void
+    {
+        [$customer, $firstProduct] = $this->checkoutFixtures(2, true);
+        $secondSeller = Seller::create([
+            'seller_name' => 'Second Seller',
+            'email' => 'second-seller@example.test',
+            'store_name' => 'Second Store',
+            'store_slug' => 'second-store',
+            'kyc_type' => 'nid',
+            'kyc_number' => '654321',
+            'kyc_document_url' => 'https://example.test/second-kyc',
+            'product_category' => 'Category',
+            'status' => 'approved',
+            'is_active' => true,
+            'password' => 'password123',
+        ]);
+        $secondProduct = Product::create([
+            'seller_id' => $secondSeller->id,
+            'category_id' => $firstProduct->category_id,
+            'name' => 'Second Product',
+            'slug' => 'second-product',
+            'product_type' => 'simple',
+            'status' => 'active',
+        ]);
+        ProductLot::create([
+            'product_id' => $secondProduct->id,
+            'lot_number' => 'LOT-2',
+            'buying_price' => 40,
+            'selling_price' => 60,
+            'quantity' => 2,
+            'quantity_remaining' => 2,
+        ]);
+
+        $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+        $payload = [
+            'items' => [
+                ['product_id' => $firstProduct->id, 'quantity' => 1],
+                ['product_id' => $secondProduct->id, 'quantity' => 1],
+            ],
+            'payment_method_id' => PaymentMethod::firstOrFail()->id,
+            'shipping_method_id' => ShippingMethod::firstOrFail()->id,
+        ];
+
+        $this->withToken($token)->postJson('/api/customers/orders/preview', $payload)
+            ->assertOk()
+            ->assertJsonPath('subtotal', 160)
+            ->assertJsonCount(2, 'shipping_groups')
+            ->assertJsonPath('shipping_charge', 40)
+            ->assertJsonPath('total', 200);
+
+        $order = $this->withToken($token)->postJson('/api/customers/orders', $payload + [
+            'shipping_name' => 'Customer',
+            'shipping_phone' => '01700000000',
+            'shipping_address' => 'Dhaka',
+        ])->assertCreated()
+            ->assertJsonCount(2, 'order.store_groups')
+            ->assertJsonPath('order.shipping_charge', '40.00')
+            ->assertJsonPath('order.total', '200.00')
+            ->json('order');
+
+        $this->assertDatabaseCount('order_store_groups', 2);
+        $this->assertDatabaseHas('order_store_groups', [
+            'order_id' => $order['id'],
+            'seller_id' => $firstProduct->seller_id,
+            'shipping_charge' => 20,
+        ]);
+    }
+
     public function test_steadfast_webhook_requires_authentication_and_acknowledges_unknown_consignment(): void
     {
         config(['services.steadfast.webhook_token' => 'webhook-test-token']);

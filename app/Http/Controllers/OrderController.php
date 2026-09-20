@@ -17,6 +17,7 @@ use App\Services\InventoryService;
 use App\Services\CheckoutService;
 use App\Services\OrderNotificationService;
 use App\Services\SteadfastService;
+use App\Services\StoreShippingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -25,7 +26,7 @@ use Illuminate\Validation\ValidationException;
 
 class OrderController extends Controller
 {
-    public function __construct(private InventoryService $inventory, private CheckoutService $checkout, private OrderNotificationService $notifications, private SteadfastService $steadfast)
+    public function __construct(private InventoryService $inventory, private CheckoutService $checkout, private OrderNotificationService $notifications, private SteadfastService $steadfast, private StoreShippingService $storeShipping)
     {
     }
 
@@ -38,7 +39,7 @@ class OrderController extends Controller
 
         return response()->json(
             $customer->orders()
-                ->with('items')
+                ->with(['items', 'storeGroups'])
                 ->latest()
                 ->paginate($perPage)
         );
@@ -53,7 +54,7 @@ class OrderController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        return response()->json($order->load(['items', 'paymentMethod', 'shippingMethod', 'coupon']));
+        return response()->json($order->load(['items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']));
     }
 
     public function preview(Request $request): JsonResponse
@@ -71,7 +72,9 @@ class OrderController extends Controller
             ])->values(),
             'payment_method' => $preview['paymentMethod'], 'shipping_method' => $preview['shippingMethod'],
             'coupon' => $preview['coupon'], 'subtotal' => $preview['subtotal'],
-            'discount_total' => $preview['discount_total'], 'shipping_charge' => $preview['shippingMethod']->charge, 'total' => $preview['total'],
+            'discount_total' => $preview['discount_total'],
+            'shipping_groups' => $preview['shipping_groups'],
+            'shipping_charge' => $preview['shipping_charge'], 'total' => $preview['total'],
         ]);
     }
 
@@ -99,7 +102,7 @@ class OrderController extends Controller
         $search = (string) $request->query('search', '');
 
         $query = Order::query()
-            ->with(['customer', 'items'])
+            ->with(['customer', 'items', 'storeGroups'])
             ->whereDoesntHave('items', fn ($q) => $q->whereNotNull('seller_id'))
             ->latest();
 
@@ -132,21 +135,21 @@ class OrderController extends Controller
             return response()->json(['message' => 'Seller orders are available through the super-admin seller-order endpoints.'], 403);
         }
 
-        return response()->json($order->load(['customer', 'items', 'paymentMethod', 'shippingMethod', 'coupon']));
+        return response()->json($order->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']));
     }
 
     public function indexSellerOrdersForSuperAdmin(Request $request, Seller $seller): JsonResponse
     {
         if (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
         $perPage = max(1, min((int) $request->query('per_page', 25), 100));
-        return response()->json(Order::whereHas('items', fn ($q) => $q->where('seller_id', $seller->id))->with(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id)])->latest()->paginate($perPage));
+        return response()->json(Order::whereHas('items', fn ($q) => $q->where('seller_id', $seller->id))->with(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => fn ($q) => $q->where('seller_id', $seller->id)])->latest()->paginate($perPage));
     }
 
     public function showSellerOrderForSuperAdmin(Request $request, Seller $seller, Order $order): JsonResponse
     {
         if (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
         if (!$order->items()->where('seller_id', $seller->id)->exists()) return response()->json(['message' => 'Order does not contain items from this seller.'], 404);
-        return response()->json($order->load(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'paymentMethod', 'shippingMethod', 'coupon']));
+        return response()->json($order->load(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => fn ($q) => $q->where('seller_id', $seller->id), 'paymentMethod', 'shippingMethod', 'coupon']));
     }
 
     public function cancelSellerOrderForSuperAdmin(Request $request, Seller $seller, Order $order): JsonResponse
@@ -170,6 +173,7 @@ class OrderController extends Controller
                 ->with([
                     'customer:id,name,email,phone',
                     'items' => fn ($query) => $query->where('seller_id', $seller->id),
+                    'storeGroups' => fn ($query) => $query->where('seller_id', $seller->id),
                     'shippingMethod',
                 ])
                 ->latest()
@@ -188,6 +192,7 @@ class OrderController extends Controller
         return response()->json($order->load([
             'customer:id,name,email,phone',
             'items' => fn ($query) => $query->where('seller_id', $seller->id),
+            'storeGroups' => fn ($query) => $query->where('seller_id', $seller->id),
             'shippingMethod',
         ]));
     }
@@ -458,7 +463,7 @@ class OrderController extends Controller
                 'payment_method_name' => $paymentMethod->name,
                 'shipping_method_code' => $shippingMethod->code,
                 'shipping_method_name' => $shippingMethod->name,
-                'shipping_charge' => $shippingMethod->charge,
+                'shipping_charge' => 0,
                 'shipping_currency' => $shippingMethod->currency,
                 'subtotal' => 0,
                 'discount_total' => 0,
@@ -471,6 +476,7 @@ class OrderController extends Controller
             ]);
 
             $subtotal = 0.0;
+            $shippingLines = [];
 
             foreach ($data['items'] as $itemData) {
                 $product = Product::query()
@@ -552,17 +558,22 @@ class OrderController extends Controller
                 ]);
 
                 $subtotal = round($subtotal + $lineSubtotal, 2);
+                $shippingLines[] = ['product' => $product, 'subtotal' => $lineSubtotal];
             }
 
             $coupon = $this->resolveCoupon($data['coupon_code'] ?? null, $subtotal, $customer);
             $discountTotal = $coupon ? $coupon->discountForSubtotal($subtotal) : 0.0;
-            $total = round($subtotal + (float) $shippingMethod->charge - $discountTotal, 2);
+            $shipping = $this->storeShipping->quote($shippingLines, $shippingMethod);
+            $total = round($subtotal + $shipping['total'] - $discountTotal, 2);
+
+            $order->storeGroups()->createMany($shipping['groups']);
 
             $order->fill([
                 'coupon_id' => $coupon?->id,
                 'coupon_code' => $coupon?->code,
                 'subtotal' => $subtotal,
                 'discount_total' => $discountTotal,
+                'shipping_charge' => $shipping['total'],
                 'total' => $total,
             ])->save();
 
@@ -579,7 +590,7 @@ class OrderController extends Controller
                 ]);
             }
 
-            return $order->load(['items', 'paymentMethod', 'shippingMethod', 'coupon']);
+            return $order->load(['items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
 
         $this->notifications->placed($order->load(['customer', 'items.seller']));

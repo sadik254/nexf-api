@@ -14,7 +14,10 @@ use Illuminate\Validation\ValidationException;
 
 class CheckoutService
 {
-    public function __construct(private InventoryService $inventory) {}
+    public function __construct(
+        private InventoryService $inventory,
+        private StoreShippingService $storeShipping,
+    ) {}
 
     public function preview(Customer $customer, array $data): array
     {
@@ -44,9 +47,16 @@ class CheckoutService
 
         $coupon = $this->resolveCoupon($data['coupon_code'] ?? null, $subtotal, $customer);
         $discount = $coupon ? $coupon->discountForSubtotal($subtotal) : 0.0;
+        $shipping = $this->storeShipping->quote(array_map(fn ($item) => [
+            'product' => $item['product'],
+            'subtotal' => $item['quote']['subtotal'],
+        ], $items), $shippingMethod);
+
         return compact('paymentMethod', 'shippingMethod', 'items', 'coupon', 'subtotal') + [
             'discount_total' => $discount,
-            'total' => round($subtotal + (float) $shippingMethod->charge - $discount, 2),
+            'shipping_groups' => $shipping['groups'],
+            'shipping_charge' => $shipping['total'],
+            'total' => round($subtotal + $shipping['total'] - $discount, 2),
         ];
     }
 
