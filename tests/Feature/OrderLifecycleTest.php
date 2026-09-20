@@ -139,18 +139,19 @@ class OrderLifecycleTest extends TestCase
             ->assertJsonPath('order.items.0.fulfillment_status', 'confirmed');
 
         $this->withToken($token)
-            ->postJson("/api/seller/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'shipped'])
-            ->assertForbidden();
-
-        $admin = Admin::create(['name' => 'Shipping Admin', 'email' => 'shipping-admin@example.test', 'password' => 'password123', 'role' => 'super_admin']);
-        $adminToken = $admin->createToken('test', ['admin:orders'])->plainTextToken;
-        $this->withToken($adminToken)
-            ->postJson('/api/admin/orders/bulk-ship', ['order_item_ids' => [$itemId]])
+            ->postJson("/api/seller/orders/{$order['id']}/items/{$itemId}/fulfillment", [
+                'status' => 'shipped',
+                'courier_provider' => 'Pathao Courier',
+                'tracking_number' => 'PATHAO-123',
+            ])
             ->assertOk()
-            ->assertJsonPath('successful_item_ids.0', $itemId);
+            ->assertJsonPath('order.status', 'shipped')
+            ->assertJsonPath('order.items.0.courier_provider', 'Pathao Courier')
+            ->assertJsonPath('order.items.0.tracking_number', 'PATHAO-123')
+            ->assertJsonPath('order.items.0.courier_consignment_id', null);
 
-        $this->withToken($adminToken)
-            ->postJson("/api/admin/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'delivered'])
+        $this->withToken($token)
+            ->postJson("/api/seller/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'delivered'])
             ->assertOk()
             ->assertJsonPath('order.status', 'delivered');
     }

@@ -217,10 +217,6 @@ class OrderController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        if ($request->input('status') !== 'confirmed') {
-            return response()->json(['message' => 'Only admins can ship or deliver order items.'], 403);
-        }
-
         return $this->fulfillItem($request, $order, $item, $seller->id);
     }
 
@@ -344,9 +340,16 @@ class OrderController extends Controller
         $data = $request->validate([
             'status' => ['required', 'in:confirmed,shipped,delivered'],
             'tracking_number' => ['nullable', 'string', 'max:255'],
+            'courier_provider' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $order = DB::transaction(function () use ($order, $item, $data) {
+        if ($sellerId !== null && $data['status'] === 'shipped' && empty($data['courier_provider'])) {
+            throw ValidationException::withMessages([
+                'courier_provider' => ['Parcel service is required when marking an item shipped.'],
+            ]);
+        }
+
+        $order = DB::transaction(function () use ($order, $item, $data, $sellerId) {
             $lockedOrder = Order::query()->lockForUpdate()->findOrFail($order->id);
             if ($lockedOrder->status === 'cancelled') {
                 throw ValidationException::withMessages(['order' => ['Cancelled orders cannot be fulfilled.']]);
@@ -366,14 +369,14 @@ class OrderController extends Controller
             }
 
             $courier = null;
-            if ($data['status'] === 'shipped' && !$lockedItem->courier_consignment_id) {
+            if ($sellerId === null && $data['status'] === 'shipped' && !$lockedItem->courier_consignment_id) {
                 $courier = $this->steadfast->createConsignment($lockedItem);
             }
 
             $lockedItem->update([
                 'fulfillment_status' => $data['status'],
                 'tracking_number' => $courier['tracking_code'] ?? ($data['tracking_number'] ?? $lockedItem->tracking_number),
-                'courier_provider' => $courier['provider'] ?? $lockedItem->courier_provider,
+                'courier_provider' => $courier['provider'] ?? ($data['courier_provider'] ?? $lockedItem->courier_provider),
                 'courier_consignment_id' => $courier['consignment_id'] ?? $lockedItem->courier_consignment_id,
                 'courier_invoice' => $courier['invoice'] ?? $lockedItem->courier_invoice,
                 'courier_status' => $courier['status'] ?? $lockedItem->courier_status,
