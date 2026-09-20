@@ -43,6 +43,9 @@ Route::prefix('customers')->group(function () {
         Route::post('/orders/{order}/cancel', [OrderController::class, 'cancelCustomer']);
         Route::post('/products/{product:slug}/reviews', [ProductEngagementController::class, 'review']);
         Route::post('/products/{product:slug}/questions', [ProductEngagementController::class, 'ask']);
+        Route::get('/reviews', [ProductEngagementController::class, 'reviewsForCustomer']);
+        Route::get('/reviewable-items', [ProductEngagementController::class, 'reviewableItems']);
+        Route::get('/questions', [ProductEngagementController::class, 'questionsForCustomer']);
         Route::post('/me/ping', function () {
             return response()->json(['ok' => true]);
         });

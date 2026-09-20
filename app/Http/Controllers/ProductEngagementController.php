@@ -14,6 +14,40 @@ use Illuminate\Http\Request;
 
 class ProductEngagementController extends Controller
 {
+    public function reviewsForCustomer(Request $request): JsonResponse
+    {
+        $customer = $request->user();
+        $perPage = max(1, min((int) $request->query('per_page', 20), 100));
+        return response()->json(Review::query()
+            ->where('customer_id', $customer->id)
+            ->with('product:id,name,slug,thumbnail,gallery')
+            ->latest()->paginate($perPage));
+    }
+
+    public function reviewableItems(Request $request): JsonResponse
+    {
+        $customer = $request->user();
+        $perPage = max(1, min((int) $request->query('per_page', 20), 100));
+        return response()->json(OrderItem::query()
+            ->where('fulfillment_status', 'delivered')
+            ->whereHas('order', fn ($query) => $query->where('customer_id', $customer->id))
+            ->whereDoesntHave('review')
+            ->latest()->paginate($perPage));
+    }
+
+    public function questionsForCustomer(Request $request): JsonResponse
+    {
+        $customer = $request->user();
+        $perPage = max(1, min((int) $request->query('per_page', 20), 100));
+        $questions = ProductQuestion::query()->where('customer_id', $customer->id)
+            ->with('product:id,name,slug,thumbnail,gallery')->latest()->paginate($perPage);
+        $questions->getCollection()->transform(fn (ProductQuestion $question) => [
+            ...$this->questionPayload($question),
+            'product' => $question->product,
+        ]);
+        return response()->json($questions);
+    }
+
     public function reviewsForAdmin(Request $request): JsonResponse
     {
         $status = $request->validate(['status' => ['sometimes', 'in:pending,approved,rejected']])['status'] ?? 'pending';
