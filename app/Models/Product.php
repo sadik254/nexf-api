@@ -66,10 +66,10 @@ class Product extends Model
 
         return [
             'preview' => $url,
-            'card' => "{$baseUrl}/-/scale_crop/750x1000/smart/-/format/auto/-/quality/smart",
+            'card' => "{$baseUrl}/-/scale_crop/750x1000/smart/-/format/auto/-/quality/smart/",
             'pdp_defaults' => "{$baseUrl}/-/resize/x1000/-/format/auto/-/quality/smart/",
             'pdp_zoom' => "{$baseUrl}/-/resize/x2000/-/format/auto/-/quality/better/",
-            'thumb' => "{$baseUrl}/-/scale_crop/256x256/smart/-/format/auto",
+            'thumb' => "{$baseUrl}/-/scale_crop/256x256/smart/-/format/auto/",
         ];
     }
 

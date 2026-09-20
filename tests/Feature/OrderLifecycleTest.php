@@ -69,7 +69,7 @@ class OrderLifecycleTest extends TestCase
         $response = $this->placeOrder($customer, $product, 2);
         $response->assertCreated()
             ->assertJsonPath('order.items.0.product_thumbnail', 'https://ucarecdn.com/product/-/preview/')
-            ->assertJsonPath('order.items.0.product_image_variants.thumbnail.thumb', 'https://ucarecdn.com/product/-/scale_crop/256x256/smart/-/format/auto');
+            ->assertJsonPath('order.items.0.product_image_variants.thumbnail.thumb', 'https://ucarecdn.com/product/-/scale_crop/256x256/smart/-/format/auto/');
 
         $this->assertDatabaseHas('product_lots', ['product_id' => $product->id, 'quantity_remaining' => 0]);
 
