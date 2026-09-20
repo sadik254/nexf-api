@@ -50,16 +50,31 @@ class ProductEngagementController extends Controller
 
     public function reviewsForAdmin(Request $request): JsonResponse
     {
-        $status = $request->validate(['status' => ['sometimes', 'in:pending,approved,rejected']])['status'] ?? 'pending';
-        $perPage = max(1, min((int) $request->query('per_page', 25), 100));
-        return response()->json(Review::with(['customer:id,name', 'product:id,name,slug'])->where('status', $status)->latest()->paginate($perPage));
+        return $this->moderationReviews($request, null);
     }
 
     public function moderateReview(Review $review, Request $request): JsonResponse
     {
-        $data = $request->validate(['status' => ['required', 'in:approved,rejected']]);
-        $review->update(['status' => $data['status']]);
-        return response()->json(['message' => "Review {$data['status']} successfully.", 'review' => $review->fresh(['customer:id,name', 'product:id,name,slug'])]);
+        abort_if($review->product()->whereNotNull('seller_id')->exists(), 403, 'Seller product reviews must be moderated by the product owner.');
+
+        return $this->applyReviewModeration($review, $request);
+    }
+
+    public function reviewsForSeller(Request $request): JsonResponse
+    {
+        /** @var Seller $seller */
+        $seller = $request->user();
+
+        return $this->moderationReviews($request, $seller->id);
+    }
+
+    public function moderateReviewForSeller(Review $review, Request $request): JsonResponse
+    {
+        /** @var Seller $seller */
+        $seller = $request->user();
+        abort_unless((int) $review->product()->value('seller_id') === (int) $seller->id, 403, 'You can only moderate reviews for your own products.');
+
+        return $this->applyReviewModeration($review, $request);
     }
 
     public function questions(Product $product, Request $request): JsonResponse
@@ -119,5 +134,32 @@ class ProductEngagementController extends Controller
         if ($question->answered_by_type === 'seller') $answeredBy = Seller::find($question->answered_by_id)?->store_name;
         if ($question->answered_by_type === 'admin') $answeredBy = Admin::find($question->answered_by_id)?->name ?? 'NEXF Lifestyle';
         return ['id' => $question->id, 'question' => $question->question, 'customer_name' => $question->customer?->name, 'answer' => $question->answer, 'answered_by' => $answeredBy, 'created_at' => $question->created_at?->toDateString(), 'answered_at' => $question->answered_at?->toDateString()];
+    }
+
+    private function moderationReviews(Request $request, ?int $sellerId): JsonResponse
+    {
+        $status = $request->validate(['status' => ['sometimes', 'in:pending,approved,rejected']])['status'] ?? 'pending';
+        $perPage = max(1, min((int) $request->query('per_page', 25), 100));
+        $reviews = Review::query()
+            ->with(['customer:id,name', 'product:id,name,slug,thumbnail,seller_id'])
+            ->where('status', $status)
+            ->whereHas('product', fn ($query) => $sellerId === null
+                ? $query->whereNull('seller_id')
+                : $query->where('seller_id', $sellerId))
+            ->latest()
+            ->paginate($perPage);
+
+        return response()->json($reviews);
+    }
+
+    private function applyReviewModeration(Review $review, Request $request): JsonResponse
+    {
+        $data = $request->validate(['status' => ['required', 'in:approved,rejected']]);
+        $review->update(['status' => $data['status']]);
+
+        return response()->json([
+            'message' => "Review {$data['status']} successfully.",
+            'review' => $review->fresh(['customer:id,name', 'product:id,name,slug,thumbnail,seller_id']),
+        ]);
     }
 }
