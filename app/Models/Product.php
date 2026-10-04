@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Product extends Model
@@ -17,6 +18,7 @@ class Product extends Model
         'seller_id',
         'created_by_admin_id',
         'category_id',
+        'brand_id',
         'name',
         'slug',
         'description',
@@ -82,6 +84,9 @@ class Product extends Model
     {
         return $this->belongsTo(ProductCategory::class, 'category_id');
     }
+
+    public function brand(): BelongsTo { return $this->belongsTo(Brand::class); }
+    public function tags(): BelongsToMany { return $this->belongsToMany(Tag::class); }
 
     public function variations(): HasMany
     {

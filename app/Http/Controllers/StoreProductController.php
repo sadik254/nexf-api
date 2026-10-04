@@ -207,6 +207,8 @@ class StoreProductController extends Controller
                 'name' => $product->category->name,
                 'slug' => $product->category->slug,
             ] : null,
+            'brand' => $product->brand?->name,
+            'tags' => $product->tags->pluck('slug')->values()->all(),
             'store' => $store,
             'compare_at_price' => $compareAt,
             'discount' => $discount,
@@ -234,6 +236,8 @@ class StoreProductController extends Controller
     {
         $query->with([
             'category:id,name,slug',
+            'brand:id,name,slug',
+            'tags:id,name,slug',
             'seller:id,store_name,store_slug,store_logo,store_image,city,country,created_at,positive_rating_percentage,on_time_shipping_percentage,chat_response_percentage',
             'sizeChart:id,name,url',
             'variations' => function ($q) {
@@ -246,11 +250,16 @@ class StoreProductController extends Controller
 
     private function applySearchFilters(Builder $query, Request $request): void
     {
+        $request->validate(['brand' => ['sometimes', 'string', 'max:255'], 'tag' => ['sometimes', 'string', 'max:255']]);
+        if ($request->filled('brand')) $query->whereHas('brand', fn (Builder $brand) => $brand->where('slug', $request->query('brand')));
+        if ($request->filled('tag')) $query->whereHas('tags', fn (Builder $tag) => $tag->where('slug', $request->query('tag')));
         $search = (string) $request->query('search', '');
         if ($search !== '') {
             $query->where(function (Builder $q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('slug', 'like', "%{$search}%");
+                    ->orWhere('slug', 'like', "%{$search}%")
+                    ->orWhereHas('brand', fn (Builder $brand) => $brand->where('name', 'like', "%{$search}%"))
+                    ->orWhereHas('tags', fn (Builder $tag) => $tag->where('name', 'like', "%{$search}%"));
             });
         }
     }
@@ -272,6 +281,7 @@ class StoreProductController extends Controller
             'id',
             'seller_id',
             'category_id',
+            'brand_id',
             'name',
             'slug',
             'description',

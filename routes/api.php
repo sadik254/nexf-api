@@ -21,6 +21,7 @@ use App\Http\Controllers\SteadfastWebhookController;
 use App\Http\Controllers\ProductEngagementController;
 use App\Http\Controllers\HomepageBannerController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\CatalogTermController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -67,6 +68,8 @@ Route::get('/payment-methods', [PaymentMethodController::class, 'index']);
 Route::get('/shipping-methods', [ShippingMethodController::class, 'index']);
 Route::get('/store/categories', [ProductCategoryController::class, 'indexPublic']);
 Route::get('/homepage/banners', [HomepageBannerController::class, 'index']);
+Route::get('/store/brands', [CatalogTermController::class, 'brands']);
+Route::get('/store/tags', [CatalogTermController::class, 'tags']);
 Route::post('/coupons/validate', [CouponController::class, 'validateCode']);
 
 Route::prefix('admin')->group(function () {
@@ -128,6 +131,14 @@ Route::prefix('admin')->group(function () {
 });
 
 Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(function () {
+    Route::get('/brands', [CatalogTermController::class, 'brands']);
+    Route::post('/brands', [CatalogTermController::class, 'storeBrand']);
+    Route::post('/brands/{brand}', [CatalogTermController::class, 'updateBrand']);
+    Route::post('/brands/{brand}/delete', [CatalogTermController::class, 'deleteBrand']);
+    Route::get('/tags', [CatalogTermController::class, 'tags']);
+    Route::post('/tags', [CatalogTermController::class, 'storeTag']);
+    Route::post('/tags/{tag}', [CatalogTermController::class, 'updateTag']);
+    Route::post('/tags/{tag}/delete', [CatalogTermController::class, 'deleteTag']);
     Route::get('/dashboard', [DashboardController::class, 'admin']);
     Route::get('/homepage/banners', [HomepageBannerController::class, 'indexAdmin']);
     Route::post('/homepage/banners', [HomepageBannerController::class, 'store']);

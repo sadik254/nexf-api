@@ -27,7 +27,7 @@ class ProductController extends Controller
         }
 
         $query = Product::query()
-            ->with(['category', 'seller', 'variations'])
+            ->with(['category', 'brand', 'tags', 'seller', 'variations'])
             ->latest();
 
         // Admin-store products are those not owned by a seller.
@@ -48,7 +48,7 @@ class ProductController extends Controller
         }
 
         $query = Product::query()
-            ->with(['category', 'seller', 'variations'])
+            ->with(['category', 'brand', 'tags', 'seller', 'variations'])
             ->where('seller_id', $seller->id)
             ->latest();
         $this->withListMetrics($query);
@@ -67,7 +67,7 @@ class ProductController extends Controller
         }
 
         $query = Product::query()
-            ->with(['category', 'seller', 'variations'])
+            ->with(['category', 'brand', 'tags', 'seller', 'variations'])
             ->where('seller_id', $actor->id)
             ->latest();
         $this->withListMetrics($query);
@@ -80,7 +80,7 @@ class ProductController extends Controller
         $this->authorizeProductRead($product, $request->user());
 
         return response()->json(
-            $product->load(['category', 'seller', 'variations'])
+            $product->load(['category', 'brand', 'tags', 'seller', 'variations'])
         );
     }
 
@@ -96,7 +96,7 @@ class ProductController extends Controller
         }
 
         return response()->json(
-            $product->load(['category', 'seller', 'variations'])
+            $product->load(['category', 'brand', 'tags', 'seller', 'variations'])
         );
     }
 
@@ -105,9 +105,11 @@ class ProductController extends Controller
         $actor = $request->user();
         if (!$actor instanceof Admin || $actor->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
         if ((int) $product->seller_id !== (int) $seller->id) return response()->json(['message' => 'Product does not belong to seller.'], 422);
-        $data = $request->validate(['category_id' => ['sometimes', 'integer', 'exists:product_categories,id'], 'name' => ['sometimes', 'string', 'max:255'], 'description' => ['sometimes', 'nullable', 'string'], 'specifications' => ['sometimes', 'nullable', 'array'], 'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'], 'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'], 'status' => ['sometimes', 'in:draft,active,inactive'], 'homepage_trending' => ['sometimes', 'boolean'], 'homepage_new_arrival' => ['sometimes', 'boolean'], 'homepage_featured' => ['sometimes', 'boolean'], 'homepage_sort_order' => ['sometimes', 'integer', 'min:0']]);
+        $data = $request->validate(['category_id' => ['sometimes', 'integer', 'exists:product_categories,id'], 'brand_id' => ['sometimes', 'nullable', 'integer', 'exists:brands,id'], 'tag_ids' => ['sometimes', 'array'], 'tag_ids.*' => ['integer', 'distinct', 'exists:tags,id'], 'clear_tags' => ['sometimes', 'boolean'], 'name' => ['sometimes', 'string', 'max:255'], 'description' => ['sometimes', 'nullable', 'string'], 'specifications' => ['sometimes', 'nullable', 'array'], 'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'], 'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'], 'status' => ['sometimes', 'in:draft,active,inactive'], 'homepage_trending' => ['sometimes', 'boolean'], 'homepage_new_arrival' => ['sometimes', 'boolean'], 'homepage_featured' => ['sometimes', 'boolean'], 'homepage_sort_order' => ['sometimes', 'integer', 'min:0']]);
+        if (array_key_exists('tag_ids', $data) || !empty($data['clear_tags'])) $product->tags()->sync($data['tag_ids'] ?? []);
+        unset($data['tag_ids'], $data['clear_tags']);
         $product->fill($data)->save();
-        return response()->json(['message' => 'Seller product updated successfully.', 'product' => $product->fresh(['category', 'seller', 'variations'])]);
+        return response()->json(['message' => 'Seller product updated successfully.', 'product' => $product->fresh(['category', 'brand', 'tags', 'seller', 'variations'])]);
     }
 
     public function destroySellerProductForSuperAdmin(Seller $seller, Product $product, Request $request): JsonResponse
@@ -126,6 +128,10 @@ class ProductController extends Controller
 
         $data = $request->validate([
             'category_id' => ['required', 'integer', 'exists:product_categories,id'],
+            'brand_id' => ['nullable', 'integer', 'exists:brands,id'],
+            'tag_ids' => ['nullable', 'array'],
+            'tag_ids.*' => ['integer', 'distinct', 'exists:tags,id'],
+            'clear_tags' => ['sometimes', 'boolean'],
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'specifications' => ['nullable', 'array'],
@@ -176,6 +182,7 @@ class ProductController extends Controller
             'seller_id' => $actor instanceof Seller ? $actor->id : null,
             'created_by_admin_id' => $actor instanceof Admin ? $actor->id : null,
             'category_id' => $data['category_id'],
+            'brand_id' => $data['brand_id'] ?? null,
             'name' => $data['name'],
             'slug' => $slug,
             'description' => $data['description'] ?? null,
@@ -193,6 +200,8 @@ class ProductController extends Controller
             'homepage_sort_order' => $data['homepage_sort_order'] ?? 0,
         ]);
 
+        if (!empty($data['tag_ids'])) $product->tags()->sync($data['tag_ids']);
+
         return response()->json([
             'message' => 'Product created successfully.',
             'product' => $product,
@@ -205,6 +214,10 @@ class ProductController extends Controller
 
         $data = $request->validate([
             'category_id' => ['sometimes', 'integer', 'exists:product_categories,id'],
+            'brand_id' => ['sometimes', 'nullable', 'integer', 'exists:brands,id'],
+            'tag_ids' => ['sometimes', 'array'],
+            'tag_ids.*' => ['integer', 'distinct', 'exists:tags,id'],
+            'clear_tags' => ['sometimes', 'boolean'],
             'name' => ['sometimes', 'string', 'max:255'],
             'description' => ['sometimes', 'string'],
             'specifications' => ['sometimes', 'nullable', 'array'],
@@ -227,6 +240,9 @@ class ProductController extends Controller
         if ($request->user() instanceof Seller) {
             unset($data['homepage_trending'], $data['homepage_new_arrival'], $data['homepage_featured'], $data['homepage_sort_order']);
         }
+
+        $tagIds = array_key_exists('tag_ids', $data) || !empty($data['clear_tags']) ? ($data['tag_ids'] ?? []) : null;
+        unset($data['tag_ids'], $data['clear_tags']);
 
         if (array_key_exists('name', $data)) {
             $product->slug = $this->uniqueSlug($data['name'], $product->id);
@@ -257,6 +273,7 @@ class ProductController extends Controller
 
         $product->fill([
             'category_id' => $data['category_id'] ?? $product->category_id,
+            'brand_id' => array_key_exists('brand_id', $data) ? $data['brand_id'] : $product->brand_id,
             'name' => $data['name'] ?? $product->name,
             'description' => $data['description'] ?? $product->description,
             'specifications' => array_key_exists('specifications', $data) ? $data['specifications'] : $product->specifications,
@@ -273,9 +290,11 @@ class ProductController extends Controller
             'homepage_sort_order' => $data['homepage_sort_order'] ?? $product->homepage_sort_order,
         ])->save();
 
+        if ($tagIds !== null) $product->tags()->sync($tagIds);
+
         return response()->json([
             'message' => 'Product updated successfully.',
-            'product' => $product,
+            'product' => $product->load(['brand', 'tags']),
         ]);
     }
 
