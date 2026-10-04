@@ -74,6 +74,8 @@ class DashboardController extends Controller
             'order_pipeline' => $this->pipeline($seller, $from, $to),
             'top_products' => $this->topProducts($seller, $from, $to),
             'top_sellers' => $seller ? [] : $this->topSellers($from, $to),
+            'sales_breakdown' => $this->salesBreakdown($seller, $from, $to),
+            'top_categories' => $this->topCategories($seller, $from, $to),
             'recent_orders' => $this->recentOrders($seller),
             'inventory_alerts' => $this->inventoryAlerts($productQuery),
         ];
@@ -86,7 +88,7 @@ class DashboardController extends Controller
 
     private function items(?Seller $seller): Builder
     {
-        return OrderItem::query()->when($seller, fn (Builder $q) => $q->where('seller_id', $seller->id));
+        return OrderItem::query()->when($seller, fn (Builder $q) => $q->where('order_items.seller_id', $seller->id));
     }
 
     private function revenue(?Seller $seller, CarbonImmutable $from, CarbonImmutable $to): float
@@ -151,6 +153,26 @@ class DashboardController extends Controller
                 'units_sold' => (int) $row->units_sold, 'revenue' => (float) $row->revenue,
                 'product_count' => Product::where('seller_id', $row->seller_id)->count(), 'share' => $total ? round(((float) $row->revenue / $total) * 100, 1) : 0,
             ])->all();
+    }
+
+    private function salesBreakdown(?Seller $seller, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $items = $this->items($seller)->whereHas('order', fn (Builder $q) => $q->whereBetween('created_at', [$from, $to])->where('status', '!=', 'cancelled'));
+        $gross = (float) (clone $items)->sum('line_subtotal');
+        $profit = (float) (clone $items)->sum('line_profit');
+        $discounts = $seller ? 0 : (float) Order::whereBetween('created_at', [$from, $to])->where('status', '!=', 'cancelled')->sum('discount_total');
+        $shipping = $seller ? 0 : (float) Order::whereBetween('created_at', [$from, $to])->where('status', '!=', 'cancelled')->sum('shipping_charge');
+        return ['gross_sales' => round($gross, 2), 'discounts' => round($discounts, 2), 'net_sales' => round($gross - $discounts, 2), 'shipping' => round($shipping, 2), 'total_sales' => round($gross - $discounts + $shipping, 2), 'profit' => round($profit, 2)];
+    }
+
+    private function topCategories(?Seller $seller, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        return $this->items($seller)->whereHas('order', fn (Builder $q) => $q->whereBetween('created_at', [$from, $to])->where('status', '!=', 'cancelled'))
+            ->join('products', 'products.id', '=', 'order_items.product_id')
+            ->join('product_categories', 'product_categories.id', '=', 'products.category_id')
+            ->selectRaw('product_categories.id, product_categories.name, sum(order_items.quantity) as units_sold, sum(order_items.line_subtotal) as revenue')
+            ->groupBy('product_categories.id', 'product_categories.name')->orderByDesc('revenue')->limit(6)->get()
+            ->map(fn ($row) => ['category_id' => $row->id, 'name' => $row->name, 'units_sold' => (int) $row->units_sold, 'revenue' => (float) $row->revenue])->all();
     }
 
     private function recentOrders(?Seller $seller): array

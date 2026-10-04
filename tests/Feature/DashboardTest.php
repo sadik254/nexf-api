@@ -42,12 +42,15 @@ class DashboardTest extends TestCase
         $adminToken = $admin->createToken('test', ['admin:basic'])->plainTextToken;
         $this->withToken($adminToken)->getJson("/api/admin/dashboard?from={$from}&to={$to}")
             ->assertOk()->assertJsonPath('stats.revenue', 380)->assertJsonPath('stats.orders', 1)
-            ->assertJsonPath('stats.units_sold', 3)->assertJsonPath('top_products.0.name', 'Seller Product');
+            ->assertJsonPath('stats.units_sold', 3)->assertJsonPath('top_products.0.name', 'Seller Product')
+            ->assertJsonPath('sales_breakdown.gross_sales', 300)->assertJsonPath('sales_breakdown.shipping', 80)
+            ->assertJsonPath('top_categories.0.name', 'Clothing');
 
         $sellerToken = $seller->createToken('test', ['seller:basic'])->plainTextToken;
         $this->withToken($sellerToken)->getJson("/api/seller/dashboard?from={$from}&to={$to}")
             ->assertOk()->assertJsonPath('stats.revenue', 200)->assertJsonPath('stats.orders', 1)
             ->assertJsonPath('stats.units_sold', 2)->assertJsonPath('top_products.0.name', 'Seller Product')
+            ->assertJsonPath('sales_breakdown.gross_sales', 200)->assertJsonPath('sales_breakdown.profit', 100)
             ->assertJsonCount(0, 'top_sellers');
     }
 }
