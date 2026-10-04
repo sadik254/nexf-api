@@ -7,11 +7,31 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Seller;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class InventoryHistoryTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_product_status_counts_select_only_grouped_columns(): void
+    {
+        $admin = Admin::create(['name' => 'Admin', 'email' => 'products-admin@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);
+        $queries = [];
+        DB::listen(function ($query) use (&$queries) {
+            $sql = strtolower(str_replace('"', '`', $query->sql));
+            if (str_contains($sql, 'group by `products`.`status`')) {
+                $queries[] = $sql;
+            }
+        });
+
+        $this->withToken($admin->createToken('test', ['admin:basic'])->plainTextToken)
+            ->getJson('/api/admin/products')->assertOk();
+
+        $this->assertNotEmpty($queries);
+        $this->assertStringNotContainsString('products`.*', $queries[0]);
+        $this->assertStringNotContainsString('products`.`id`', $queries[0]);
+    }
 
     public function test_receipts_are_scoped_to_the_owner_and_summary_covers_all_pages(): void
     {

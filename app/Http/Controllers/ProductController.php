@@ -335,7 +335,8 @@ class ProductController extends Controller
             'product_type' => ['sometimes', 'in:simple,variable'],
         ]);
         $this->applyListFilters($query, $request, false);
-        $counts = (clone $query)->reorder()->selectRaw('status, count(*) as count')->groupBy('status')->pluck('count', 'status')->map(fn ($count) => (int) $count)->all();
+        $counts = (clone $query)->reorder()->select('products.status')->selectRaw('count(*) as count')
+            ->groupBy('products.status')->pluck('count', 'status')->map(fn ($count) => (int) $count)->all();
         if ($request->filled('status')) $query->where('status', $request->query('status'));
         $page = $query->paginate($perPage);
         $page->getCollection()->each(fn (Product $product) => $product->setAttribute('available_quantity', $product->product_type === 'simple'
