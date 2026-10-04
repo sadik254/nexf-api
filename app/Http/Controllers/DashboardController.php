@@ -19,8 +19,12 @@ class DashboardController extends Controller
     public function admin(Request $request): JsonResponse
     {
         abort_unless($request->user() instanceof Admin, 403);
+        $data = $request->validate([
+            'seller_id' => ['sometimes', 'nullable', 'integer', 'exists:sellers,id'],
+        ]);
+        $seller = isset($data['seller_id']) ? Seller::findOrFail($data['seller_id']) : null;
         [$from, $to, $previousFrom, $previousTo] = $this->period($request);
-        return response()->json($this->payload(null, $from, $to, $previousFrom, $previousTo));
+        return response()->json($this->payload($seller, $from, $to, $previousFrom, $previousTo));
     }
 
     public function seller(Request $request): JsonResponse

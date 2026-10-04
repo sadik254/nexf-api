@@ -46,6 +46,11 @@ class DashboardTest extends TestCase
             ->assertJsonPath('sales_breakdown.gross_sales', 300)->assertJsonPath('sales_breakdown.shipping', 80)
             ->assertJsonPath('top_categories.0.name', 'Clothing');
 
+        $this->withToken($adminToken)->getJson("/api/admin/dashboard?from={$from}&to={$to}&seller_id={$seller->id}")
+            ->assertOk()->assertJsonPath('stats.revenue', 200)->assertJsonPath('stats.orders', 1)
+            ->assertJsonPath('stats.units_sold', 2)->assertJsonPath('stats.products', 1)
+            ->assertJsonPath('top_products.0.name', 'Seller Product')->assertJsonCount(0, 'top_sellers');
+
         $sellerToken = $seller->createToken('test', ['seller:basic'])->plainTextToken;
         $this->withToken($sellerToken)->getJson("/api/seller/dashboard?from={$from}&to={$to}")
             ->assertOk()->assertJsonPath('stats.revenue', 200)->assertJsonPath('stats.orders', 1)
