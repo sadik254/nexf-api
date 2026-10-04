@@ -19,6 +19,7 @@ use App\Http\Controllers\OrderController;
 use App\Http\Controllers\SteadfastWebhookController;
 use App\Http\Controllers\ProductEngagementController;
 use App\Http\Controllers\HomepageBannerController;
+use App\Http\Controllers\DashboardController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -124,6 +125,7 @@ Route::prefix('admin')->group(function () {
 });
 
 Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(function () {
+    Route::get('/dashboard', [DashboardController::class, 'admin']);
     Route::get('/homepage/banners', [HomepageBannerController::class, 'indexAdmin']);
     Route::post('/homepage/banners', [HomepageBannerController::class, 'store']);
     Route::post('/homepage/banners/{homepageBanner}', [HomepageBannerController::class, 'update']);
@@ -163,6 +165,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 });
 
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
+    Route::get('/dashboard', [DashboardController::class, 'seller']);
     Route::get('/product-reviews', [ProductEngagementController::class, 'reviewsForSeller']);
     Route::post('/product-reviews/{review}/moderate', [ProductEngagementController::class, 'moderateReviewForSeller']);
     Route::get('/product-questions', [ProductEngagementController::class, 'questionsForSeller']);
