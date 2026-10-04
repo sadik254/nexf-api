@@ -33,6 +33,11 @@ return [
         'secret_key' => env('UPLOADCARE_SECRET_KEY'),
     ],
 
+    'turnstile' => [
+        // Cloudflare Turnstile. Unset = checkout does not ask for a token.
+        'secret_key' => env('TURNSTILE_SECRET_KEY'),
+    ],
+
     'steadfast' => [
         'base_url' => env('STEADFAST_BASE_URL', 'https://portal.packzy.com/api/v1'),
         'api_key' => env('STEADFAST_API_KEY'),

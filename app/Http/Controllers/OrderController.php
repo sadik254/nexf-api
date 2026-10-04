@@ -18,6 +18,7 @@ use App\Services\CheckoutService;
 use App\Services\OrderNotificationService;
 use App\Services\SteadfastService;
 use App\Services\StoreShippingService;
+use App\Services\TurnstileService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -26,7 +27,7 @@ use Illuminate\Validation\ValidationException;
 
 class OrderController extends Controller
 {
-    public function __construct(private InventoryService $inventory, private CheckoutService $checkout, private OrderNotificationService $notifications, private SteadfastService $steadfast, private StoreShippingService $storeShipping)
+    public function __construct(private InventoryService $inventory, private CheckoutService $checkout, private OrderNotificationService $notifications, private SteadfastService $steadfast, private StoreShippingService $storeShipping, private TurnstileService $turnstile)
     {
     }
 
@@ -435,7 +436,11 @@ class OrderController extends Controller
             'shipping_phone' => ['required', 'string', 'max:32'],
             'shipping_address' => ['required', 'string'],
             'notes' => ['nullable', 'string'],
+            // Cloudflare Turnstile token - required once TURNSTILE_SECRET_KEY is set.
+            'turnstile_token' => ['nullable', 'string', 'max:2048'],
         ]);
+
+        $this->turnstile->assertHuman($request);
 
         // Uses the same validation, availability, and pricing rules as checkout preview.
         $this->checkout->preview($customer, $data);
