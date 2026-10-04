@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Customer;
 use App\Models\Admin;
 use App\Models\Product;
+use App\Models\ProductQuestion;
 use App\Models\ProductCategory;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -115,6 +116,40 @@ class ProductEngagementTest extends TestCase
 
         $this->assertDatabaseHas('reviews', ['id' => $houseReview->id, 'status' => 'approved']);
         $this->assertDatabaseHas('reviews', ['id' => $sellerReview->id, 'status' => 'approved']);
+    }
+
+    public function test_question_inboxes_are_scoped_to_the_product_owner(): void
+    {
+        [$customer, $houseProduct] = $this->fixtures();
+        $seller = Seller::create([
+            'seller_name' => 'Seller', 'email' => 'question-seller@example.test',
+            'store_name' => 'Question Store', 'store_slug' => 'question-store',
+            'kyc_type' => 'nid', 'kyc_number' => '456',
+            'kyc_document_url' => 'https://example.test/kyc', 'product_category' => 'Clothing',
+            'status' => 'approved', 'is_active' => true, 'password' => 'password123',
+        ]);
+        $sellerProduct = Product::create([
+            'seller_id' => $seller->id, 'category_id' => $houseProduct->category_id,
+            'name' => 'Seller Trousers', 'slug' => 'seller-trousers',
+            'product_type' => 'simple', 'status' => 'active',
+        ]);
+        $houseQuestion = ProductQuestion::create(['product_id' => $houseProduct->id, 'customer_id' => $customer->id, 'question' => 'House question?']);
+        $sellerQuestion = ProductQuestion::create(['product_id' => $sellerProduct->id, 'customer_id' => $customer->id, 'question' => 'Seller question?']);
+        $admin = Admin::create(['name' => 'Admin', 'email' => 'question-admin@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);
+
+        $adminToken = $admin->createToken('test', ['admin:basic'])->plainTextToken;
+        $this->withToken($adminToken)->getJson('/api/admin/product-questions')
+            ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $houseQuestion->id);
+        $this->withToken($adminToken)->postJson("/api/admin/product-questions/{$houseQuestion->id}/answer", ['answer' => 'House answer'])
+            ->assertOk();
+
+        $sellerToken = $seller->createToken('test', ['seller:basic'])->plainTextToken;
+        $this->withToken($sellerToken)->getJson('/api/seller/product-questions')
+            ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $sellerQuestion->id);
+        $this->withToken($sellerToken)->postJson("/api/seller/product-questions/{$houseQuestion->id}/answer", ['answer' => 'Forbidden answer'])
+            ->assertForbidden();
+        $this->withToken($sellerToken)->postJson("/api/seller/product-questions/{$sellerQuestion->id}/answer", ['answer' => 'Seller answer'])
+            ->assertOk();
     }
 
     private function fixtures(): array

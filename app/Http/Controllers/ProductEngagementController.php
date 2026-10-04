@@ -68,6 +68,19 @@ class ProductEngagementController extends Controller
         return $this->moderationReviews($request, $seller->id);
     }
 
+    public function questionsForAdmin(Request $request): JsonResponse
+    {
+        return $this->moderationQuestions($request, null);
+    }
+
+    public function questionsForSeller(Request $request): JsonResponse
+    {
+        /** @var Seller $seller */
+        $seller = $request->user();
+
+        return $this->moderationQuestions($request, $seller->id);
+    }
+
     public function moderateReviewForSeller(Review $review, Request $request): JsonResponse
     {
         /** @var Seller $seller */
@@ -150,6 +163,28 @@ class ProductEngagementController extends Controller
             ->paginate($perPage);
 
         return response()->json($reviews);
+    }
+
+    private function moderationQuestions(Request $request, ?int $sellerId): JsonResponse
+    {
+        $state = $request->validate(['state' => ['sometimes', 'in:unanswered,answered,all']])['state'] ?? 'unanswered';
+        $perPage = max(1, min((int) $request->query('per_page', 25), 100));
+        $questions = ProductQuestion::query()
+            ->with(['customer:id,name', 'product:id,name,slug,thumbnail,gallery,seller_id'])
+            ->whereHas('product', fn ($query) => $sellerId === null
+                ? $query->whereNull('seller_id')
+                : $query->where('seller_id', $sellerId))
+            ->when($state === 'unanswered', fn ($query) => $query->whereNull('answer'))
+            ->when($state === 'answered', fn ($query) => $query->whereNotNull('answer'))
+            ->latest()
+            ->paginate($perPage);
+
+        $questions->getCollection()->transform(fn (ProductQuestion $question) => [
+            ...$this->questionPayload($question),
+            'product' => $question->product,
+        ]);
+
+        return response()->json($questions);
     }
 
     private function applyReviewModeration(Review $review, Request $request): JsonResponse

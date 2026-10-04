@@ -130,6 +130,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/homepage/banners/{homepageBanner}/delete', [HomepageBannerController::class, 'destroy']);
     Route::get('/product-reviews', [ProductEngagementController::class, 'reviewsForAdmin']);
     Route::post('/product-reviews/{review}/moderate', [ProductEngagementController::class, 'moderateReview']);
+    Route::get('/product-questions', [ProductEngagementController::class, 'questionsForAdmin']);
     Route::post('/product-questions/{question}/answer', [ProductEngagementController::class, 'answer']);
     Route::get('/inventory', [InventoryController::class, 'indexAdmin']);
     Route::get('/size-charts', [SizeChartController::class, 'indexAdmin']);
@@ -164,6 +165,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
     Route::get('/product-reviews', [ProductEngagementController::class, 'reviewsForSeller']);
     Route::post('/product-reviews/{review}/moderate', [ProductEngagementController::class, 'moderateReviewForSeller']);
+    Route::get('/product-questions', [ProductEngagementController::class, 'questionsForSeller']);
     Route::post('/product-questions/{question}/answer', [ProductEngagementController::class, 'answer']);
     Route::get('/inventory', [InventoryController::class, 'indexSeller']);
     Route::get('/size-charts', [SizeChartController::class, 'indexSeller']);
