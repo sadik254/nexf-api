@@ -156,6 +156,35 @@ class OrderLifecycleTest extends TestCase
             ->assertJsonPath('order.status', 'delivered');
     }
 
+    public function test_super_admin_can_transition_seller_items_without_steadfast(): void
+    {
+        Http::fake();
+        [$customer, $product] = $this->checkoutFixtures(1, true);
+        $order = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
+        $itemId = $order['items'][0]['id'];
+        $sellerId = $product->seller_id;
+        $admin = Admin::create([
+            'name' => 'Super Admin',
+            'email' => 'seller-order-admin@example.test',
+            'password' => 'password123',
+            'role' => 'super_admin',
+        ]);
+        $token = $admin->createToken('test', ['admin:orders'])->plainTextToken;
+        $endpoint = "/api/admin/sellers/{$sellerId}/orders/{$order['id']}/items/{$itemId}/fulfillment";
+
+        $this->withToken($token)->postJson($endpoint, ['status' => 'confirmed'])
+            ->assertOk()->assertJsonPath('order.items.0.fulfillment_status', 'confirmed');
+        $this->withToken($token)->postJson($endpoint, [
+            'status' => 'shipped',
+            'courier_provider' => 'Pathao Courier',
+            'tracking_number' => 'PATHAO-ADMIN-1',
+        ])->assertOk()
+            ->assertJsonPath('order.items.0.courier_provider', 'Pathao Courier')
+            ->assertJsonPath('order.items.0.courier_consignment_id', null);
+
+        Http::assertNothingSent();
+    }
+
     public function test_products_referenced_by_orders_cannot_be_deleted(): void
     {
         [$customer, $product] = $this->checkoutFixtures(1);

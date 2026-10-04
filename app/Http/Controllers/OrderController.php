@@ -233,6 +233,18 @@ class OrderController extends Controller
         return $this->fulfillItem($request, $order, $item);
     }
 
+    public function fulfillSellerItemForSuperAdmin(Request $request, Seller $seller, Order $order, OrderItem $item): JsonResponse
+    {
+        if (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin') {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+        if ((int) $item->order_id !== (int) $order->id || (int) $item->seller_id !== (int) $seller->id) {
+            return response()->json(['message' => 'Order item does not belong to this seller order.'], 422);
+        }
+
+        return $this->fulfillItem($request, $order, $item, $seller->id);
+    }
+
     public function reconcileReturn(Request $request, Order $order, OrderItem $item): JsonResponse
     {
         if (!$request->user() instanceof Admin || (int) $item->order_id !== (int) $order->id) {

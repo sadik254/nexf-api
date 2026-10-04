@@ -106,6 +106,7 @@ Route::prefix('admin')->group(function () {
     Route::middleware('sanctum.type:admin,admin:orders')->get('/sellers/{seller}/orders', [OrderController::class, 'indexSellerOrdersForSuperAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->get('/sellers/{seller}/orders/{order}', [OrderController::class, 'showSellerOrderForSuperAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/sellers/{seller}/orders/{order}/cancel', [OrderController::class, 'cancelSellerOrderForSuperAdmin']);
+    Route::middleware('sanctum.type:admin,admin:orders')->post('/sellers/{seller}/orders/{order}/items/{item}/fulfillment', [OrderController::class, 'fulfillSellerItemForSuperAdmin']);
 });
 
 Route::prefix('sellers')->group(function () {
