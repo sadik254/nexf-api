@@ -25,7 +25,11 @@ class SellerController extends Controller
         $search = (string) $request->query('search', '');
         $status = (string) $request->query('status', '');
 
-        $query = Seller::query()->latest();
+        $query = Seller::query()
+            ->withCount('products')
+            ->withSum(['orderItems as units_sold' => fn ($items) => $items->whereHas('order', fn ($orders) => $orders->where('status', '!=', 'cancelled'))], 'quantity')
+            ->withSum(['orderItems as revenue' => fn ($items) => $items->whereHas('order', fn ($orders) => $orders->where('status', '!=', 'cancelled'))], 'line_subtotal')
+            ->latest();
 
         if ($search !== '') {
             $query->where(function ($q) use ($search) {

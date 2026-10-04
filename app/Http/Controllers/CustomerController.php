@@ -23,8 +23,16 @@ class CustomerController extends Controller
     {
         $perPage = (int) $request->query('per_page', 25);
         $perPage = max(1, min($perPage, 100));
+        $search = trim((string) $request->query('search', ''));
 
         $customers = Customer::query()
+            ->when($search !== '', fn ($query) => $query->where(fn ($match) => $match
+                ->where('name', 'like', "%{$search}%")
+                ->orWhere('email', 'like', "%{$search}%")
+                ->orWhere('phone', 'like', "%{$search}%")))
+            ->withCount('orders')
+            ->withCount(['orders as received_orders_count' => fn ($orders) => $orders->whereIn('status', ['delivered', 'completed'])])
+            ->withSum(['orders as total_spent' => fn ($orders) => $orders->where('status', '!=', 'cancelled')], 'total')
             ->latest()
             ->paginate($perPage);
 

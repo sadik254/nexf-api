@@ -46,6 +46,13 @@ class DashboardTest extends TestCase
             ->assertJsonPath('sales_breakdown.gross_sales', 300)->assertJsonPath('sales_breakdown.shipping', 80)
             ->assertJsonPath('top_categories.0.name', 'Clothing');
 
+        $adminSeries = $this->withToken($adminToken)->getJson("/api/admin/dashboard?from={$from}&to={$to}")
+            ->assertOk()->json('metric_trends');
+        $this->assertEquals(380, collect($adminSeries['sales'])->sum('value'));
+        $this->assertEquals(150, collect($adminSeries['profit'])->sum('value'));
+        $this->assertEquals(1, collect($adminSeries['orders'])->sum('value'));
+        $this->assertEquals(3, collect($adminSeries['units'])->sum('value'));
+
         $this->withToken($adminToken)->getJson("/api/admin/dashboard?from={$from}&to={$to}&seller_id={$seller->id}")
             ->assertOk()->assertJsonPath('stats.revenue', 200)->assertJsonPath('stats.orders', 1)
             ->assertJsonPath('stats.units_sold', 2)->assertJsonPath('stats.products', 1)
@@ -57,5 +64,10 @@ class DashboardTest extends TestCase
             ->assertJsonPath('stats.units_sold', 2)->assertJsonPath('top_products.0.name', 'Seller Product')
             ->assertJsonPath('sales_breakdown.gross_sales', 200)->assertJsonPath('sales_breakdown.profit', 100)
             ->assertJsonCount(0, 'top_sellers');
+        $sellerSeries = $this->withToken($sellerToken)->getJson("/api/seller/dashboard?from={$from}&to={$to}")
+            ->assertOk()->json('metric_trends');
+        $this->assertEquals(200, collect($sellerSeries['sales'])->sum('value'));
+        $this->assertEquals(100, collect($sellerSeries['profit'])->sum('value'));
+        $this->assertEquals(2, collect($sellerSeries['units'])->sum('value'));
     }
 }

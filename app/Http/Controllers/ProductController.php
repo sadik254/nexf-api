@@ -32,10 +32,9 @@ class ProductController extends Controller
 
         // Admin-store products are those not owned by a seller.
         $query->whereNull('seller_id');
+        $this->withListMetrics($query);
 
-        $this->applyListFilters($query, $request);
-
-        return response()->json($query->paginate($perPage));
+        return response()->json($this->paginateProductList($query, $request, $perPage));
     }
 
     public function indexSellerProductsForAdmin(Seller $seller, Request $request): JsonResponse
@@ -52,10 +51,9 @@ class ProductController extends Controller
             ->with(['category', 'seller', 'variations'])
             ->where('seller_id', $seller->id)
             ->latest();
+        $this->withListMetrics($query);
 
-        $this->applyListFilters($query, $request);
-
-        return response()->json($query->paginate($perPage));
+        return response()->json($this->paginateProductList($query, $request, $perPage));
     }
 
     public function indexSellerSelf(Request $request): JsonResponse
@@ -72,10 +70,9 @@ class ProductController extends Controller
             ->with(['category', 'seller', 'variations'])
             ->where('seller_id', $actor->id)
             ->latest();
+        $this->withListMetrics($query);
 
-        $this->applyListFilters($query, $request);
-
-        return response()->json($query->paginate($perPage));
+        return response()->json($this->paginateProductList($query, $request, $perPage));
     }
 
     public function show(Product $product, Request $request): JsonResponse
@@ -329,7 +326,35 @@ class ProductController extends Controller
         }
     }
 
-    private function applyListFilters($query, Request $request): void
+    private function paginateProductList($query, Request $request, int $perPage): array
+    {
+        $request->validate([
+            'status' => ['sometimes', 'in:draft,active,inactive'],
+            'search' => ['sometimes', 'string', 'max:100'],
+            'category_id' => ['sometimes', 'integer', 'min:1'],
+            'product_type' => ['sometimes', 'in:simple,variable'],
+        ]);
+        $this->applyListFilters($query, $request, false);
+        $counts = (clone $query)->reorder()->selectRaw('status, count(*) as count')->groupBy('status')->pluck('count', 'status')->map(fn ($count) => (int) $count)->all();
+        if ($request->filled('status')) $query->where('status', $request->query('status'));
+        $page = $query->paginate($perPage);
+        $page->getCollection()->each(fn (Product $product) => $product->setAttribute('available_quantity', $product->product_type === 'simple'
+            ? (int) ($product->direct_stock ?? 0)
+            : (int) $product->variations->sum('stock')));
+        return array_merge($page->toArray(), ['status_counts' => $counts]);
+    }
+
+    private function withListMetrics($query): void
+    {
+        $query->with(['variations' => fn ($variations) => $variations->withSum('lots as stock', 'quantity_remaining')])
+            ->withSum('lots as direct_stock', 'quantity_remaining')
+            ->withSum(['orderItems as sold_count' => fn ($items) => $items->whereHas('order', fn ($orders) => $orders->where('status', '!=', 'cancelled'))], 'quantity')
+            ->withSum(['orderItems as profit_total' => fn ($items) => $items->whereHas('order', fn ($orders) => $orders->where('status', '!=', 'cancelled'))], 'line_profit')
+            ->withAvg(['reviews as average_rating' => fn ($reviews) => $reviews->where('status', 'approved')], 'rating')
+            ->withCount(['reviews as review_count' => fn ($reviews) => $reviews->where('status', 'approved')]);
+    }
+
+    private function applyListFilters($query, Request $request, bool $includeStatus = true): void
     {
         $search = (string) $request->query('search', '');
         $categoryId = $request->query('category_id');
@@ -346,7 +371,7 @@ class ProductController extends Controller
         if ($categoryId !== null && (string) $categoryId !== '') {
             $query->where('category_id', (int) $categoryId);
         }
-        if ($status !== null && (string) $status !== '') {
+        if ($includeStatus && $status !== null && (string) $status !== '') {
             $query->where('status', (string) $status);
         }
         if ($productType !== null && (string) $productType !== '') {

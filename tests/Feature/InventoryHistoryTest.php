@@ -1,0 +1,67 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\Admin;
+use App\Models\Product;
+use App\Models\ProductCategory;
+use App\Models\Seller;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class InventoryHistoryTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_receipts_are_scoped_to_the_owner_and_summary_covers_all_pages(): void
+    {
+        $category = ProductCategory::create(['name' => 'Clothing', 'slug' => 'clothing']);
+        $admin = Admin::create(['name' => 'Admin', 'email' => 'inventory-admin@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);
+        $seller = Seller::create([
+            'seller_name' => 'Seller', 'email' => 'inventory-seller@example.test', 'store_name' => 'Inventory Store',
+            'store_slug' => 'inventory-store', 'kyc_type' => 'nid', 'kyc_number' => '123',
+            'kyc_document_url' => 'https://example.test/kyc', 'product_category' => 'Clothing',
+            'status' => 'approved', 'is_active' => true, 'password' => 'password123',
+        ]);
+        $house = Product::create(['category_id' => $category->id, 'name' => 'House', 'slug' => 'house', 'product_type' => 'simple', 'status' => 'active']);
+        $second = Product::create(['category_id' => $category->id, 'name' => 'Second', 'slug' => 'second', 'product_type' => 'simple', 'status' => 'active']);
+        $sellerProduct = Product::create(['seller_id' => $seller->id, 'category_id' => $category->id, 'name' => 'Seller', 'slug' => 'seller', 'product_type' => 'simple', 'status' => 'active']);
+
+        $adminToken = $admin->createToken('test', ['admin:basic'])->plainTextToken;
+        $sellerToken = $seller->createToken('test', ['seller:basic'])->plainTextToken;
+        foreach ([[$house, 5, $adminToken, 'admin'], [$second, 2, $adminToken, 'admin'], [$sellerProduct, 9, $sellerToken, 'seller']] as [$product, $quantity, $token, $prefix]) {
+            $this->withToken($token)->postJson("/api/{$prefix}/products/{$product->id}/lots", [
+                'lot_number' => "LOT-{$product->id}", 'buying_price' => 10, 'selling_price' => 20, 'quantity' => $quantity,
+            ])->assertCreated();
+        }
+
+        $this->withToken($adminToken)->getJson('/api/admin/inventory?per_page=1')->assertOk()
+            ->assertJsonPath('total', 2)->assertJsonPath('summary.available_units', 7);
+        $this->withToken($adminToken)->getJson('/api/admin/products?per_page=1')->assertOk()
+            ->assertJsonPath('total', 2)->assertJsonPath('status_counts.active', 2);
+        $this->withToken($adminToken)->getJson('/api/admin/products?search=House')->assertOk()
+            ->assertJsonPath('data.0.available_quantity', 5);
+        $this->withToken($adminToken)->getJson('/api/admin/products?status=draft')->assertOk()
+            ->assertJsonPath('total', 0)->assertJsonPath('status_counts.active', 2);
+        $this->withToken($adminToken)->getJson('/api/admin/inventory/history')->assertOk()
+            ->assertJsonPath('total', 2)->assertJsonPath('data.0.reason', 'received');
+        $this->withToken($sellerToken)->getJson('/api/seller/inventory/history')->assertOk()
+            ->assertJsonPath('total', 1)->assertJsonPath('data.0.lot.lot_number', "LOT-{$sellerProduct->id}");
+        $this->withToken($sellerToken)->getJson('/api/seller/inventory?per_page=1')->assertOk()
+            ->assertJsonPath('summary.available_units', 9);
+
+        $houseLotId = $this->withToken($adminToken)->getJson('/api/admin/inventory')->json('data.0.lots.0.id');
+        $this->withToken($sellerToken)->postJson("/api/seller/inventory/lots/{$houseLotId}/adjust", [
+            'quantity_change' => -1, 'reason' => 'damaged',
+        ])->assertForbidden();
+        $this->withToken($adminToken)->postJson("/api/admin/inventory/lots/{$houseLotId}/adjust", [
+            'quantity_change' => -100, 'reason' => 'damaged',
+        ])->assertUnprocessable();
+        $this->withToken($adminToken)->postJson("/api/admin/inventory/lots/{$houseLotId}/adjust", [
+            'quantity_change' => -1, 'reason' => 'damaged', 'note' => 'Found during count',
+        ])->assertOk();
+        $this->withToken($adminToken)->getJson('/api/admin/inventory/history?reason=adjustment')->assertOk()
+            ->assertJsonPath('total', 1)->assertJsonPath('data.0.quantity_change', -1)
+            ->assertJsonPath('data.0.meta.reason', 'damaged');
+    }
+}

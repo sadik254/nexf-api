@@ -16,6 +16,7 @@ use App\Http\Controllers\CouponController;
 use App\Http\Controllers\SizeChartController;
 use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\OrderController;
+use App\Http\Controllers\OrderReturnController;
 use App\Http\Controllers\SteadfastWebhookController;
 use App\Http\Controllers\ProductEngagementController;
 use App\Http\Controllers\HomepageBannerController;
@@ -97,6 +98,7 @@ Route::prefix('admin')->group(function () {
     Route::middleware('sanctum.type:admin,admin:coupons')->post('/coupons/{coupon}/delete', [CouponController::class, 'destroy']);
 
     Route::middleware('sanctum.type:admin,admin:orders')->get('/orders', [OrderController::class, 'indexAdmin']);
+    Route::middleware('sanctum.type:admin,admin:orders')->get('/returns', [OrderReturnController::class, 'index']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/bulk-ship', [OrderController::class, 'bulkShipAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->get('/orders/{order}', [OrderController::class, 'showAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}', [OrderController::class, 'updateStatus']);
@@ -136,6 +138,8 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::get('/product-questions', [ProductEngagementController::class, 'questionsForAdmin']);
     Route::post('/product-questions/{question}/answer', [ProductEngagementController::class, 'answer']);
     Route::get('/inventory', [InventoryController::class, 'indexAdmin']);
+    Route::get('/inventory/history', [InventoryController::class, 'historyAdmin']);
+    Route::post('/inventory/lots/{lot}/adjust', [ProductLotController::class, 'adjust']);
     Route::get('/size-charts', [SizeChartController::class, 'indexAdmin']);
     Route::post('/size-charts', [SizeChartController::class, 'storeAdmin']);
     Route::post('/size-charts/{sizeChart}', [SizeChartController::class, 'updateAdmin']);
@@ -172,6 +176,8 @@ Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(f
     Route::get('/product-questions', [ProductEngagementController::class, 'questionsForSeller']);
     Route::post('/product-questions/{question}/answer', [ProductEngagementController::class, 'answer']);
     Route::get('/inventory', [InventoryController::class, 'indexSeller']);
+    Route::get('/inventory/history', [InventoryController::class, 'historySeller']);
+    Route::post('/inventory/lots/{lot}/adjust', [ProductLotController::class, 'adjust']);
     Route::get('/size-charts', [SizeChartController::class, 'indexSeller']);
     Route::post('/size-charts', [SizeChartController::class, 'storeSeller']);
     Route::post('/size-charts/{sizeChart}', [SizeChartController::class, 'updateSeller']);

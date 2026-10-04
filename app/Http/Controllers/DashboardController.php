@@ -75,6 +75,7 @@ class DashboardController extends Controller
                 'review_count' => $seller ? $reviewQuery->count() : null,
             ],
             'sales_trend' => $this->trend($seller, $from, $to),
+            'metric_trends' => $this->metricTrends($seller, $from, $to),
             'order_pipeline' => $this->pipeline($seller, $from, $to),
             'top_products' => $this->topProducts($seller, $from, $to),
             'top_sellers' => $seller ? [] : $this->topSellers($from, $to),
@@ -129,6 +130,46 @@ class DashboardController extends Controller
             $points[] = ['label' => $label, 'value' => round((float) $value, 2)];
         }
         return $points;
+    }
+
+    private function metricTrends(?Seller $seller, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $monthly = $from->diffInDays($to) > 62;
+        $bucket = fn ($date) => CarbonImmutable::parse($date)->format($monthly ? 'Y-m' : 'Y-m-d');
+        $orders = $this->orders($seller)->whereBetween('orders.created_at', [$from, $to])
+            ->get(['id', 'created_at', 'total', 'status']);
+        $items = $this->items($seller)->whereHas('order', fn (Builder $q) => $q
+            ->whereBetween('created_at', [$from, $to])->where('status', '!=', 'cancelled'))
+            ->with('order:id,created_at')->get(['id', 'order_id', 'quantity', 'line_subtotal', 'line_profit']);
+        $customerRows = $seller
+            ? Review::query()->where('status', 'approved')->whereBetween('created_at', [$from, $to])
+                ->whereHas('product', fn (Builder $q) => $q->where('seller_id', $seller->id))->get(['id', 'created_at'])
+            : Customer::query()->whereBetween('created_at', [$from, $to])->get(['id', 'created_at']);
+
+        $orderBuckets = $orders->groupBy(fn ($order) => $bucket($order->created_at));
+        $itemBuckets = $items->groupBy(fn ($item) => $bucket($item->order->created_at));
+        $customerBuckets = $customerRows->groupBy(fn ($row) => $bucket($row->created_at));
+        $result = ['sales' => [], 'profit' => [], 'orders' => [], 'units' => [], 'average' => [], 'customers' => []];
+        for ($cursor = $from; $cursor <= $to; $cursor = $monthly ? $cursor->addMonth()->startOfMonth() : $cursor->addDay()) {
+            $key = $bucket($cursor);
+            $label = $monthly ? $cursor->format('M Y') : ($from->diffInDays($to) <= 14 ? $cursor->format('M j') : $cursor->format('M j'));
+            $periodOrders = $orderBuckets->get($key, collect());
+            $periodItems = $itemBuckets->get($key, collect());
+            $count = $periodOrders->count();
+            $sales = $seller ? (float) $periodItems->sum('line_subtotal') : (float) $periodOrders->where('status', '!=', 'cancelled')->sum('total');
+            $values = [
+                'sales' => round($sales, 2),
+                'profit' => round((float) $periodItems->sum('line_profit'), 2),
+                'orders' => $count,
+                'units' => (int) $periodItems->sum('quantity'),
+                'average' => $count ? round($sales / $count, 2) : 0,
+                'customers' => $customerBuckets->get($key, collect())->count(),
+            ];
+            foreach ($values as $metric => $value) {
+                $result[$metric][] = ['label' => $label, 'value' => $value];
+            }
+        }
+        return $result;
     }
 
     private function pipeline(?Seller $seller, CarbonImmutable $from, CarbonImmutable $to): array

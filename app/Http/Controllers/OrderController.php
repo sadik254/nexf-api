@@ -35,15 +35,7 @@ class OrderController extends Controller
     {
         /** @var Customer $customer */
         $customer = $request->user();
-        $perPage = (int) $request->query('per_page', 25);
-        $perPage = max(1, min($perPage, 100));
-
-        return response()->json(
-            $customer->orders()
-                ->with(['items', 'storeGroups'])
-                ->latest()
-                ->paginate($perPage)
-        );
+        return response()->json($this->paginateOrderList($customer->orders()->with(['items', 'storeGroups'])->latest(), $request));
     }
 
     public function showCustomer(Request $request, Order $order): JsonResponse
@@ -96,34 +88,12 @@ class OrderController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        $perPage = (int) $request->query('per_page', 25);
-        $perPage = max(1, min($perPage, 100));
-        $status = (string) $request->query('status', '');
-        $paymentStatus = (string) $request->query('payment_status', '');
-        $search = (string) $request->query('search', '');
-
         $query = Order::query()
             ->with(['customer', 'items', 'storeGroups'])
             ->whereDoesntHave('items', fn ($q) => $q->whereNotNull('seller_id'))
             ->latest();
 
-        if ($status !== '') {
-            $query->where('status', $status);
-        }
-
-        if ($paymentStatus !== '') {
-            $query->where('payment_status', $paymentStatus);
-        }
-
-        if ($search !== '') {
-            $query->where(function ($q) use ($search) {
-                $q->where('order_number', 'like', "%{$search}%")
-                    ->orWhere('shipping_name', 'like', "%{$search}%")
-                    ->orWhere('shipping_phone', 'like', "%{$search}%");
-            });
-        }
-
-        return response()->json($query->paginate($perPage));
+        return response()->json($this->paginateOrderList($query, $request));
     }
 
     public function showAdmin(Request $request, Order $order): JsonResponse
@@ -142,8 +112,7 @@ class OrderController extends Controller
     public function indexSellerOrdersForSuperAdmin(Request $request, Seller $seller): JsonResponse
     {
         if (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
-        $perPage = max(1, min((int) $request->query('per_page', 25), 100));
-        return response()->json(Order::whereHas('items', fn ($q) => $q->where('seller_id', $seller->id))->with(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => fn ($q) => $q->where('seller_id', $seller->id)])->latest()->paginate($perPage));
+        return response()->json($this->paginateOrderList(Order::whereHas('items', fn ($q) => $q->where('seller_id', $seller->id))->with(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => fn ($q) => $q->where('seller_id', $seller->id)])->latest(), $request));
     }
 
     public function showSellerOrderForSuperAdmin(Request $request, Seller $seller, Order $order): JsonResponse
@@ -166,9 +135,7 @@ class OrderController extends Controller
     {
         /** @var Seller $seller */
         $seller = $request->user();
-        $perPage = max(1, min((int) $request->query('per_page', 25), 100));
-
-        return response()->json(
+        return response()->json($this->paginateOrderList(
             Order::query()
                 ->whereHas('items', fn ($query) => $query->where('seller_id', $seller->id))
                 ->with([
@@ -177,9 +144,8 @@ class OrderController extends Controller
                     'storeGroups' => fn ($query) => $query->where('seller_id', $seller->id),
                     'shippingMethod',
                 ])
-                ->latest()
-                ->paginate($perPage)
-        );
+                ->latest(), $request
+        ));
     }
 
     public function showSeller(Request $request, Order $order): JsonResponse
@@ -226,7 +192,7 @@ class OrderController extends Controller
         if (!$request->user() instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
-        if ((int) $item->order_id !== (int) $order->id) {
+        if ((int) $item->order_id !== (int) $order->id || $item->seller_id !== null) {
             return response()->json(['message' => 'Order item does not belong to this order.'], 422);
         }
 
@@ -272,6 +238,9 @@ class OrderController extends Controller
         if (!$admin instanceof Admin) return response()->json(['message' => 'Forbidden.'], 403);
         $ids = $request->validate(['order_item_ids' => ['required', 'array', 'min:1', 'max:500'], 'order_item_ids.*' => ['integer', 'distinct', 'exists:order_items,id']])['order_item_ids'];
         $items = OrderItem::query()->with(['order.customer'])->whereIn('id', $ids)->get();
+        if ($items->contains(fn ($item) => $item->seller_id !== null)) {
+            return response()->json(['message' => 'Seller parcels must be fulfilled manually through the seller order endpoint.'], 422);
+        }
         return $this->bulkShipItems($items, $ids);
     }
 
@@ -686,5 +655,27 @@ class OrderController extends Controller
         } while (Order::where('order_number', $orderNumber)->exists());
 
         return $orderNumber;
+    }
+
+    private function paginateOrderList($query, Request $request): array
+    {
+        $filters = $request->validate([
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+            'status' => ['sometimes', 'in:pending,confirmed,shipped,delivered,completed,cancelled,return_pending'],
+            'payment_status' => ['sometimes', 'in:unpaid,paid,failed,refunded'],
+            'search' => ['sometimes', 'string', 'max:100'],
+        ]);
+        if (isset($filters['payment_status'])) $query->where('payment_status', $filters['payment_status']);
+        if (!empty($filters['search'])) {
+            $search = trim($filters['search']);
+            $query->where(fn ($q) => $q->where('order_number', 'like', "%{$search}%")
+                ->orWhere('shipping_name', 'like', "%{$search}%")
+                ->orWhere('shipping_phone', 'like', "%{$search}%"));
+        }
+        $counts = (clone $query)->reorder()->selectRaw('status, count(*) as count')->groupBy('status')->pluck('count', 'status')->map(fn ($count) => (int) $count)->all();
+        if (isset($filters['status'])) $query->where('status', $filters['status']);
+        $page = $query->paginate($filters['per_page'] ?? 25);
+        return array_merge($page->toArray(), ['status_counts' => $counts]);
     }
 }

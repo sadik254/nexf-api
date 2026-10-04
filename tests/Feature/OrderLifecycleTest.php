@@ -174,6 +174,10 @@ class OrderLifecycleTest extends TestCase
 
         $this->withToken($token)->postJson($endpoint, ['status' => 'confirmed'])
             ->assertOk()->assertJsonPath('order.items.0.fulfillment_status', 'confirmed');
+        $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'shipped'])
+            ->assertUnprocessable();
+        $this->withToken($token)->postJson('/api/admin/orders/bulk-ship', ['order_item_ids' => [$itemId]])
+            ->assertUnprocessable();
         $this->withToken($token)->postJson($endpoint, [
             'status' => 'shipped',
             'courier_provider' => 'Pathao Courier',
