@@ -275,14 +275,21 @@ class OrderLifecycleTest extends TestCase
             ->assertJsonPath('shipping_charge', 40)
             ->assertJsonPath('total', 200);
 
+        $sellerToken = $secondSeller->createToken('test', ['seller:basic'])->plainTextToken;
+        $this->withToken($sellerToken)->postJson('/api/seller/delivery-rates', ['rates' => [[
+            'shipping_method_id' => $payload['shipping_method_id'], 'charge' => 35,
+        ]]])->assertOk()->assertJsonPath('0.charge', '35.00');
+        $this->withToken($token)->postJson('/api/customers/orders/preview', $payload)
+            ->assertOk()->assertJsonPath('shipping_charge', 55)->assertJsonPath('total', 215);
+
         $order = $this->withToken($token)->postJson('/api/customers/orders', $payload + [
             'shipping_name' => 'Customer',
             'shipping_phone' => '01700000000',
             'shipping_address' => 'Dhaka',
         ])->assertCreated()
             ->assertJsonCount(2, 'order.store_groups')
-            ->assertJsonPath('order.shipping_charge', '40.00')
-            ->assertJsonPath('order.total', '200.00')
+            ->assertJsonPath('order.shipping_charge', '55.00')
+            ->assertJsonPath('order.total', '215.00')
             ->json('order');
 
         $this->assertDatabaseCount('order_store_groups', 2);
@@ -290,6 +297,11 @@ class OrderLifecycleTest extends TestCase
             'order_id' => $order['id'],
             'seller_id' => $firstProduct->seller_id,
             'shipping_charge' => 20,
+        ]);
+        $this->assertDatabaseHas('order_store_groups', [
+            'order_id' => $order['id'],
+            'seller_id' => $secondSeller->id,
+            'shipping_charge' => 35,
         ]);
     }
 

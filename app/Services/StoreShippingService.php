@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Product;
 use App\Models\ShippingMethod;
+use App\Models\SellerShippingRate;
 
 class StoreShippingService
 {
@@ -17,6 +18,9 @@ class StoreShippingService
     public function quote(array $lines, ShippingMethod $shippingMethod): array
     {
         $groups = [];
+        $sellerIds = collect($lines)->pluck('product.seller_id')->filter()->unique()->values();
+        $sellerRates = SellerShippingRate::query()->where('shipping_method_id', $shippingMethod->id)
+            ->whereIn('seller_id', $sellerIds)->pluck('charge', 'seller_id');
 
         foreach ($lines as $line) {
             $product = $line['product'];
@@ -32,7 +36,8 @@ class StoreShippingService
                     'subtotal' => 0.0,
                     'shipping_method_code' => $shippingMethod->code,
                     'shipping_method_name' => $shippingMethod->name,
-                    'shipping_charge' => (float) $shippingMethod->charge,
+                    'shipping_charge' => $sellerId !== null && $sellerRates->has($sellerId)
+                        ? (float) $sellerRates[$sellerId] : (float) $shippingMethod->charge,
                     'shipping_currency' => $shippingMethod->currency,
                 ];
             }

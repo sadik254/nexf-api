@@ -22,6 +22,8 @@ use App\Http\Controllers\ProductEngagementController;
 use App\Http\Controllers\HomepageBannerController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\CatalogTermController;
+use App\Http\Controllers\SellerShippingRateController;
+use App\Http\Controllers\HomepageNoticeController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -68,6 +70,7 @@ Route::get('/payment-methods', [PaymentMethodController::class, 'index']);
 Route::get('/shipping-methods', [ShippingMethodController::class, 'index']);
 Route::get('/store/categories', [ProductCategoryController::class, 'indexPublic']);
 Route::get('/homepage/banners', [HomepageBannerController::class, 'index']);
+Route::get('/homepage/notices', [HomepageNoticeController::class, 'publicIndex']);
 Route::get('/store/brands', [CatalogTermController::class, 'brands']);
 Route::get('/store/tags', [CatalogTermController::class, 'tags']);
 Route::post('/coupons/validate', [CouponController::class, 'validateCode']);
@@ -139,8 +142,14 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/tags', [CatalogTermController::class, 'storeTag']);
     Route::post('/tags/{tag}', [CatalogTermController::class, 'updateTag']);
     Route::post('/tags/{tag}/delete', [CatalogTermController::class, 'deleteTag']);
+    Route::get('/sellers/{seller}/delivery-rates', [SellerShippingRateController::class, 'adminIndex']);
+    Route::post('/sellers/{seller}/delivery-rates', [SellerShippingRateController::class, 'adminUpdate']);
     Route::get('/dashboard', [DashboardController::class, 'admin']);
     Route::get('/homepage/banners', [HomepageBannerController::class, 'indexAdmin']);
+    Route::get('/homepage/notices', [HomepageNoticeController::class, 'index']);
+    Route::post('/homepage/notices', [HomepageNoticeController::class, 'store']);
+    Route::post('/homepage/notices/{notice}', [HomepageNoticeController::class, 'update']);
+    Route::post('/homepage/notices/{notice}/delete', [HomepageNoticeController::class, 'destroy']);
     Route::post('/homepage/banners', [HomepageBannerController::class, 'store']);
     Route::post('/homepage/banners/{homepageBanner}', [HomepageBannerController::class, 'update']);
     Route::post('/homepage/banners/{homepageBanner}/delete', [HomepageBannerController::class, 'destroy']);
@@ -181,6 +190,8 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 });
 
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
+    Route::get('/delivery-rates', [SellerShippingRateController::class, 'sellerIndex']);
+    Route::post('/delivery-rates', [SellerShippingRateController::class, 'sellerUpdate']);
     Route::get('/dashboard', [DashboardController::class, 'seller']);
     Route::get('/product-reviews', [ProductEngagementController::class, 'reviewsForSeller']);
     Route::post('/product-reviews/{review}/moderate', [ProductEngagementController::class, 'moderateReviewForSeller']);

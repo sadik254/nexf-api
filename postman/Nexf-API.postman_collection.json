@@ -25,6 +25,7 @@
     {"key":"payment_method_id","value":"1","type":"string"},
     {"key":"shipping_method_id","value":"1","type":"string"},
     {"key":"coupon_id","value":"1","type":"string"},
+    {"key":"notice_id","value":"1","type":"string"},
     {"key":"order_id","value":"1","type":"string"},
     {"key":"order_item_id","value":"1","type":"string"},
     {"key":"question_id","value":"1","type":"string"},
@@ -54,6 +55,7 @@
         {"name":"Product questions","request":{"method":"GET","url":"{{base_url}}/api/store/products/{{product_slug}}/questions?page=1&per_page=10"}},
         {"name":"Store products by category","request":{"method":"GET","url":"{{base_url}}/api/store/categories/{{category_slug}}/products"}},
         {"name":"Store products by seller","request":{"method":"GET","url":"{{base_url}}/api/store/sellers/{{seller_id}}/products?exclude={{product_slug}}&limit=4"}},
+        {"name":"Homepage notices","request":{"method":"GET","url":"{{base_url}}/api/homepage/notices"}},
         {"name":"Admin-store public products","request":{"method":"GET","url":"{{base_url}}/api/store/admin/products"}}
       ]
     },
@@ -117,6 +119,8 @@
         {"name":"Seller answer product question","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"answer\":\"Yes, it follows the listed size chart.\"}"},"url":"{{base_url}}/api/seller/product-questions/{{question_id}}/answer"}},
         {"name":"Seller product reviews","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/product-reviews?status=pending&per_page=25"}},
         {"name":"Seller moderate product review","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"status\":\"approved\"}"},"url":"{{base_url}}/api/seller/product-reviews/{{review_id}}/moderate"}},
+        {"name":"List my delivery rates","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/delivery-rates"}},
+        {"name":"Save my delivery rates","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"rates\":[{\"shipping_method_id\":1,\"charge\":80},{\"shipping_method_id\":2,\"charge\":150}]}"},"url":"{{base_url}}/api/seller/delivery-rates"}},
         {"name":"Seller logout","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/sellers/logout"}}
       ]
     },
@@ -194,12 +198,18 @@
       "name": "Admin - homepage",
       "item": [
         {"name":"List homepage banners","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/homepage/banners"}},
+        {"name":"List homepage notices","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/homepage/notices"}},
+        {"name":"Create homepage notice","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"text\":\"Free delivery in Dhaka\",\"enabled\":true}"},"url":"{{base_url}}/api/admin/homepage/notices"}},
+        {"name":"Update homepage notice","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"text\":\"Updated notice\",\"enabled\":true,\"sort_order\":0}"},"url":"{{base_url}}/api/admin/homepage/notices/{{notice_id}}"}},
+        {"name":"Delete homepage notice","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/homepage/notices/{{notice_id}}/delete"}},
         {"name":"Create hero banner (multipart)","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"body":{"mode":"formdata","formdata":[{"key":"placement","value":"hero","type":"text"},{"key":"image","type":"file","src":"{{image_path}}"},{"key":"href","value":"/shop","type":"text"},{"key":"title","value":"New season","type":"text"},{"key":"emphasis","value":"is here","type":"text"},{"key":"subtitle","value":"Explore the collection","type":"text"},{"key":"sort_order","value":"0","type":"text"},{"key":"is_active","value":"1","type":"text"}]},"url":"{{base_url}}/api/admin/homepage/banners"}}
       ]
     },
     {
       "name": "Admin - payment, shipping, coupons and orders",
       "item": [
+        {"name":"List seller delivery rates","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/delivery-rates"}},
+        {"name":"Save seller delivery rates","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"rates\":[{\"shipping_method_id\":1,\"charge\":80},{\"shipping_method_id\":2,\"charge\":150}]}"},"url":"{{base_url}}/api/admin/sellers/{{seller_id}}/delivery-rates"}},
         {"name":"Create payment method","event":[{"listen":"test","script":{"exec":["if (pm.response.code === 201) { pm.collectionVariables.set('payment_method_id', pm.response.json().payment_method.id); }"]}}],"request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"Test Payment\",\"code\":\"test_payment\",\"is_active\":true,\"sort_order\":10}"},"url":"{{base_url}}/api/admin/payment-methods"}},
         {"name":"Update payment method","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"description\":\"Updated payment method\"}"},"url":"{{base_url}}/api/admin/payment-methods/{{payment_method_id}}"}},
         {"name":"Delete payment method","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/payment-methods/{{payment_method_id}}/delete"}},
