@@ -24,6 +24,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\CatalogTermController;
 use App\Http\Controllers\SellerShippingRateController;
 use App\Http\Controllers\HomepageNoticeController;
+use App\Http\Controllers\HomepageTrustBadgeController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -71,6 +72,7 @@ Route::get('/shipping-methods', [ShippingMethodController::class, 'index']);
 Route::get('/store/categories', [ProductCategoryController::class, 'indexPublic']);
 Route::get('/homepage/banners', [HomepageBannerController::class, 'index']);
 Route::get('/homepage/notices', [HomepageNoticeController::class, 'publicIndex']);
+Route::get('/homepage/trust-badges', [HomepageTrustBadgeController::class, 'publicIndex']);
 Route::get('/store/brands', [CatalogTermController::class, 'brands']);
 Route::get('/store/tags', [CatalogTermController::class, 'tags']);
 Route::post('/coupons/validate', [CouponController::class, 'validateCode']);
@@ -150,6 +152,8 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/homepage/notices', [HomepageNoticeController::class, 'store']);
     Route::post('/homepage/notices/{notice}', [HomepageNoticeController::class, 'update']);
     Route::post('/homepage/notices/{notice}/delete', [HomepageNoticeController::class, 'destroy']);
+    Route::get('/homepage/trust-badges', [HomepageTrustBadgeController::class, 'index']);
+    Route::post('/homepage/trust-badges', [HomepageTrustBadgeController::class, 'replace']);
     Route::post('/homepage/banners', [HomepageBannerController::class, 'store']);
     Route::post('/homepage/banners/{homepageBanner}', [HomepageBannerController::class, 'update']);
     Route::post('/homepage/banners/{homepageBanner}/delete', [HomepageBannerController::class, 'destroy']);
