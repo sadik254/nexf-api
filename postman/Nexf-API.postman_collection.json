@@ -55,6 +55,7 @@
         {"name":"Product questions","request":{"method":"GET","url":"{{base_url}}/api/store/products/{{product_slug}}/questions?page=1&per_page=10"}},
         {"name":"Store products by category","request":{"method":"GET","url":"{{base_url}}/api/store/categories/{{category_slug}}/products"}},
         {"name":"Store products by seller","request":{"method":"GET","url":"{{base_url}}/api/store/sellers/{{seller_id}}/products?exclude={{product_slug}}&limit=4"}},
+        {"name":"Public site info","request":{"method":"GET","url":"{{base_url}}/api/site-info"}},
         {"name":"Homepage trust badges","request":{"method":"GET","url":"{{base_url}}/api/homepage/trust-badges"}},
         {"name":"Homepage notices","request":{"method":"GET","url":"{{base_url}}/api/homepage/notices"}},
         {"name":"Admin-store public products","request":{"method":"GET","url":"{{base_url}}/api/store/admin/products"}}
@@ -199,6 +200,8 @@
       "name": "Admin - homepage",
       "item": [
         {"name":"List homepage banners","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/homepage/banners"}},
+        {"name":"Admin site info","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/site-info"}},
+        {"name":"Update site info","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"NEXF Lifestyle Ltd.\",\"blurb\":\"Multivendor marketplace\",\"address\":\"Dhaka\",\"helpline\":\"01700000000\",\"email\":\"support@nexf.com\",\"hours\":\"Every day\",\"copyright\":\"NEXF Lifestyle Ltd. All Rights Reserved.\",\"contactTitle\":\"Get in Touch\",\"locatorLabel\":\"Store Locator\",\"locatorHref\":\"/stores\",\"helplineLabel\":\"Call Helpline\",\"socials\":[],\"supportButtons\":[],\"footerColumns\":[]}"},"url":"{{base_url}}/api/admin/site-info"}},
         {"name":"List homepage trust badges","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/homepage/trust-badges"}},
         {"name":"Replace homepage trust badges","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"badges\":[{\"icon\":\"Truck\",\"label\":\"Cash on Delivery\",\"tone\":\"emerald\",\"hidden\":false}]}"},"url":"{{base_url}}/api/admin/homepage/trust-badges"}},
         {"name":"List homepage notices","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/homepage/notices"}},
