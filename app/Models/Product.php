@@ -87,6 +87,7 @@ class Product extends Model
 
     public function brand(): BelongsTo { return $this->belongsTo(Brand::class); }
     public function tags(): BelongsToMany { return $this->belongsToMany(Tag::class); }
+    public function collections(): BelongsToMany { return $this->belongsToMany(ProductCollection::class, 'collection_product'); }
 
     public function variations(): HasMany
     {

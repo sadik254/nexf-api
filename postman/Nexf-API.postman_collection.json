@@ -25,6 +25,7 @@
     {"key":"payment_method_id","value":"1","type":"string"},
     {"key":"shipping_method_id","value":"1","type":"string"},
     {"key":"coupon_id","value":"1","type":"string"},
+    {"key":"collection_id","value":"1","type":"string"},
     {"key":"notice_id","value":"1","type":"string"},
     {"key":"order_id","value":"1","type":"string"},
     {"key":"order_item_id","value":"1","type":"string"},
@@ -123,6 +124,12 @@
         {"name":"Seller moderate product review","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"status\":\"approved\"}"},"url":"{{base_url}}/api/seller/product-reviews/{{review_id}}/moderate"}},
         {"name":"List my delivery rates","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/delivery-rates"}},
         {"name":"Save my delivery rates","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"rates\":[{\"shipping_method_id\":1,\"charge\":80},{\"shipping_method_id\":2,\"charge\":150}]}"},"url":"{{base_url}}/api/seller/delivery-rates"}},
+        {"name":"Seller collections","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/collections?search="}},
+        {"name":"Seller collection products","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/collection-products?search="}},
+        {"name":"Create seller collection","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"Fall picks\",\"product_ids\":[1]}"},"url":"{{base_url}}/api/seller/collections"}},
+        {"name":"Seller collection details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/collections/{{collection_id}}"}},
+        {"name":"Update seller collection","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"Fall favourites\",\"product_ids\":[1]}"},"url":"{{base_url}}/api/seller/collections/{{collection_id}}"}},
+        {"name":"Delete seller collection","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/collections/{{collection_id}}/delete"}},
         {"name":"Seller logout","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/sellers/logout"}}
       ]
     },
@@ -200,6 +207,12 @@
       "name": "Admin - homepage",
       "item": [
         {"name":"List homepage banners","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/homepage/banners"}},
+        {"name":"Admin collections","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/collections?search="}},
+        {"name":"Admin collection products","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/collection-products?search="}},
+        {"name":"Create sitewide collection","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"Fall picks\",\"seller_id\":null,\"product_ids\":[1]}"},"url":"{{base_url}}/api/admin/collections"}},
+        {"name":"Admin collection details","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/collections/{{collection_id}}"}},
+        {"name":"Update collection","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"Fall favourites\",\"seller_id\":null,\"product_ids\":[1]}"},"url":"{{base_url}}/api/admin/collections/{{collection_id}}"}},
+        {"name":"Delete collection","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/collections/{{collection_id}}/delete"}},
         {"name":"Admin site info","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/site-info"}},
         {"name":"Update site info","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"name\":\"NEXF Lifestyle Ltd.\",\"blurb\":\"Multivendor marketplace\",\"address\":\"Dhaka\",\"helpline\":\"01700000000\",\"email\":\"support@nexf.com\",\"hours\":\"Every day\",\"copyright\":\"NEXF Lifestyle Ltd. All Rights Reserved.\",\"contactTitle\":\"Get in Touch\",\"locatorLabel\":\"Store Locator\",\"locatorHref\":\"/stores\",\"helplineLabel\":\"Call Helpline\",\"socials\":[],\"supportButtons\":[],\"footerColumns\":[]}"},"url":"{{base_url}}/api/admin/site-info"}},
         {"name":"List homepage trust badges","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/homepage/trust-badges"}},

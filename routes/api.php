@@ -26,6 +26,7 @@ use App\Http\Controllers\SellerShippingRateController;
 use App\Http\Controllers\HomepageNoticeController;
 use App\Http\Controllers\HomepageTrustBadgeController;
 use App\Http\Controllers\SiteInfoController;
+use App\Http\Controllers\ProductCollectionController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -138,6 +139,12 @@ Route::prefix('admin')->group(function () {
 });
 
 Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(function () {
+    Route::get('/collection-products', [ProductCollectionController::class, 'candidates']);
+    Route::get('/collections', [ProductCollectionController::class, 'index']);
+    Route::post('/collections', [ProductCollectionController::class, 'store']);
+    Route::get('/collections/{collection}', [ProductCollectionController::class, 'show']);
+    Route::post('/collections/{collection}', [ProductCollectionController::class, 'update']);
+    Route::post('/collections/{collection}/delete', [ProductCollectionController::class, 'destroy']);
     Route::get('/brands', [CatalogTermController::class, 'brands']);
     Route::post('/brands', [CatalogTermController::class, 'storeBrand']);
     Route::post('/brands/{brand}', [CatalogTermController::class, 'updateBrand']);
@@ -198,6 +205,12 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 });
 
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
+    Route::get('/collection-products', [ProductCollectionController::class, 'candidates']);
+    Route::get('/collections', [ProductCollectionController::class, 'index']);
+    Route::post('/collections', [ProductCollectionController::class, 'store']);
+    Route::get('/collections/{collection}', [ProductCollectionController::class, 'show']);
+    Route::post('/collections/{collection}', [ProductCollectionController::class, 'update']);
+    Route::post('/collections/{collection}/delete', [ProductCollectionController::class, 'destroy']);
     Route::get('/delivery-rates', [SellerShippingRateController::class, 'sellerIndex']);
     Route::post('/delivery-rates', [SellerShippingRateController::class, 'sellerUpdate']);
     Route::get('/dashboard', [DashboardController::class, 'seller']);
