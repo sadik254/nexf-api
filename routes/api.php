@@ -28,6 +28,7 @@ use App\Http\Controllers\HomepageTrustBadgeController;
 use App\Http\Controllers\SiteInfoController;
 use App\Http\Controllers\ProductCollectionController;
 use App\Http\Controllers\MediaAssetController;
+use App\Http\Controllers\HomepageCategoryCardController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -76,6 +77,7 @@ Route::get('/store/categories', [ProductCategoryController::class, 'indexPublic'
 Route::get('/homepage/banners', [HomepageBannerController::class, 'index']);
 Route::get('/homepage/notices', [HomepageNoticeController::class, 'publicIndex']);
 Route::get('/homepage/trust-badges', [HomepageTrustBadgeController::class, 'publicIndex']);
+Route::get('/homepage/category-cards', [HomepageCategoryCardController::class, 'publicIndex']);
 Route::get('/site-info', [SiteInfoController::class, 'show']);
 Route::get('/store/brands', [CatalogTermController::class, 'brands']);
 Route::get('/store/tags', [CatalogTermController::class, 'tags']);
@@ -169,6 +171,8 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/homepage/notices/{notice}/delete', [HomepageNoticeController::class, 'destroy']);
     Route::get('/homepage/trust-badges', [HomepageTrustBadgeController::class, 'index']);
     Route::post('/homepage/trust-badges', [HomepageTrustBadgeController::class, 'replace']);
+    Route::get('/homepage/category-cards', [HomepageCategoryCardController::class, 'index']);
+    Route::post('/homepage/category-cards', [HomepageCategoryCardController::class, 'replace']);
     Route::get('/site-info', [SiteInfoController::class, 'show']);
     Route::post('/site-info', [SiteInfoController::class, 'update']);
     Route::post('/homepage/banners', [HomepageBannerController::class, 'store']);
