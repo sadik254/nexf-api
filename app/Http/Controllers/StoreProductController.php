@@ -12,6 +12,7 @@ use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class StoreProductController extends Controller
 {
@@ -20,6 +21,13 @@ class StoreProductController extends Controller
         $query = $this->baseStoreQuery();
         $this->applySearchFilters($query, $request);
         $this->applyHomepageFilter($query, $request);
+        if ($request->filled('collection')) {
+            $value = (string) $request->query('collection');
+            $id = ctype_digit($value) ? (int) $value : \App\Models\ProductCollection::query()->get(['id', 'name'])
+                ->first(fn ($collection) => Str::slug($collection->name) === $value)?->id;
+            $query->whereIn('products.id', DB::table('collection_product')->select('product_id')
+                ->where('product_collection_id', $id ?? -1));
+        }
 
         return $this->paginateProducts($query, $request);
     }
