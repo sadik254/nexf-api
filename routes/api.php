@@ -67,6 +67,7 @@ Route::prefix('customers')->group(function () {
         Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);
         Route::post('/support-attachments', [SupportTicketController::class, 'upload']);
         Route::get('/chats', [StoreChatController::class, 'index']);
+        Route::get('/chats/stores', [StoreChatController::class, 'stores']);
         Route::post('/chats', [StoreChatController::class, 'start']);
         Route::get('/chats/{chat}', [StoreChatController::class, 'show']);
         Route::post('/chats/{chat}/messages', [StoreChatController::class, 'reply']);

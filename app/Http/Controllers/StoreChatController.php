@@ -13,6 +13,16 @@ use Illuminate\Validation\Rule;
 
 class StoreChatController extends Controller
 {
+    public function stores(Request $request): JsonResponse
+    {
+        abort_unless($this->actor($request) instanceof Customer, 403);
+        $search = substr((string) $request->query('search', ''), 0, 100);
+        return response()->json(Seller::query()->select(['id', 'store_name', 'store_slug', 'store_logo'])
+            ->where('status', 'approved')->where('is_active', true)
+            ->when($search !== '', fn ($query) => $query->where('store_name', 'like', "%{$search}%"))
+            ->orderBy('store_name')->paginate(50));
+    }
+
     public function index(Request $request): JsonResponse
     {
         $actor = $this->actor($request);
