@@ -33,6 +33,7 @@ use App\Http\Controllers\HomepageOfferBlockController;
 use App\Http\Controllers\HomepageLayoutController;
 use App\Http\Controllers\SupportTicketController;
 use App\Http\Controllers\StoreChatController;
+use App\Http\Controllers\ReturnRequestController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -69,6 +70,9 @@ Route::prefix('customers')->group(function () {
         Route::post('/chats', [StoreChatController::class, 'start']);
         Route::get('/chats/{chat}', [StoreChatController::class, 'show']);
         Route::post('/chats/{chat}/messages', [StoreChatController::class, 'reply']);
+        Route::get('/return-requests', [ReturnRequestController::class, 'index']);
+        Route::post('/return-requests', [ReturnRequestController::class, 'store']);
+        Route::get('/return-requests/{returnRequest}', [ReturnRequestController::class, 'show']);
         Route::post('/me/ping', function () {
             return response()->json(['ok' => true]);
         });
@@ -128,6 +132,9 @@ Route::prefix('admin')->group(function () {
 
     Route::middleware('sanctum.type:admin,admin:orders')->get('/orders', [OrderController::class, 'indexAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->get('/returns', [OrderReturnController::class, 'index']);
+    Route::middleware('sanctum.type:admin,admin:orders')->get('/return-requests', [ReturnRequestController::class, 'index']);
+    Route::middleware('sanctum.type:admin,admin:orders')->get('/return-requests/{returnRequest}', [ReturnRequestController::class, 'show']);
+    Route::middleware('sanctum.type:admin,admin:orders')->post('/return-requests/{returnRequest}', [ReturnRequestController::class, 'update']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/bulk-ship', [OrderController::class, 'bulkShipAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->get('/orders/{order}', [OrderController::class, 'showAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}', [OrderController::class, 'updateStatus']);
@@ -250,6 +257,9 @@ Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(f
     Route::get('/chats', [StoreChatController::class, 'index']);
     Route::get('/chats/{chat}', [StoreChatController::class, 'show']);
     Route::post('/chats/{chat}/messages', [StoreChatController::class, 'reply']);
+    Route::get('/return-requests', [ReturnRequestController::class, 'index']);
+    Route::get('/return-requests/{returnRequest}', [ReturnRequestController::class, 'show']);
+    Route::post('/return-requests/{returnRequest}', [ReturnRequestController::class, 'update']);
     Route::get('/media', [MediaAssetController::class, 'index']);
     Route::post('/media', [MediaAssetController::class, 'store']);
     Route::post('/media/link', [MediaAssetController::class, 'link']);
