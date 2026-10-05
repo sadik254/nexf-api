@@ -32,8 +32,14 @@ class ProductController extends Controller
             ->with(['category', 'brand', 'tags', 'seller', 'variations'])
             ->latest();
 
-        // Admin-store products are those not owned by a seller.
-        $query->whereNull('seller_id');
+        // The product list can show the whole marketplace. Other callers keep
+        // the existing admin-store default unless they explicitly opt in.
+        if ($request->query('scope') === 'all' && $actor->role === 'super_admin') {
+            if ($request->query('seller_id') === 'house') $query->whereNull('seller_id');
+            elseif ($request->filled('seller_id')) $query->where('seller_id', (int) $request->query('seller_id'));
+        } else {
+            $query->whereNull('seller_id');
+        }
         $this->withListMetrics($query);
 
         return response()->json($this->paginateProductList($query, $request, $perPage));
@@ -392,25 +398,46 @@ class ProductController extends Controller
     {
         $request->validate([
             'status' => ['sometimes', 'in:draft,active,inactive'],
+            'scope' => ['sometimes', 'in:all'],
+            'seller_id' => ['sometimes', 'regex:/^(house|[1-9][0-9]*)$/'],
+            'stock' => ['sometimes', 'in:ok,low,out'],
             'search' => ['sometimes', 'string', 'max:100'],
             'category_id' => ['sometimes', 'integer', 'min:1'],
             'product_type' => ['sometimes', 'in:simple,variable'],
         ]);
+        $stockCounts = [];
+        foreach (['ok', 'low', 'out'] as $level) {
+            $stockCounts[$level] = (clone $query)->reorder()->whereRaw($this->stockFilterSql($level))->count('products.id');
+        }
         $this->applyListFilters($query, $request, false);
         $counts = (clone $query)->reorder()->select('products.status')->selectRaw('count(*) as count')
             ->groupBy('products.status')->pluck('count', 'status')->map(fn ($count) => (int) $count)->all();
         if ($request->filled('status')) $query->where('status', $request->query('status'));
+        if ($request->filled('stock')) $query->whereRaw($this->stockFilterSql((string) $request->query('stock')));
         $page = $query->paginate($perPage);
         $page->getCollection()->each(fn (Product $product) => $product->setAttribute('available_quantity', $product->product_type === 'simple'
             ? (int) ($product->direct_stock ?? 0)
             : (int) $product->variations->sum('stock')));
-        return array_merge($page->toArray(), ['status_counts' => $counts]);
+        return array_merge($page->toArray(), ['status_counts' => $counts, 'stock_counts' => $stockCounts]);
+    }
+
+    private function stockFilterSql(string $level): string
+    {
+        $stock = "CASE WHEN products.product_type = 'simple' THEN "
+            . '(SELECT COALESCE(SUM(pl.quantity_remaining), 0) FROM product_lots pl WHERE pl.product_id = products.id AND pl.variation_id IS NULL) '
+            . 'ELSE (SELECT COALESCE(SUM(pl.quantity_remaining), 0) FROM product_lots pl '
+            . 'JOIN product_variations pv ON pv.id = pl.variation_id WHERE pv.product_id = products.id) END';
+        return match ($level) {
+            'ok' => "($stock) > 20",
+            'low' => "($stock) BETWEEN 1 AND 20",
+            default => "($stock) <= 0",
+        };
     }
 
     private function withListMetrics($query): void
     {
         $query->with(['variations' => fn ($variations) => $variations->withSum('lots as stock', 'quantity_remaining')])
-            ->withSum('lots as direct_stock', 'quantity_remaining')
+            ->withSum(['lots as direct_stock' => fn ($lots) => $lots->whereNull('variation_id')], 'quantity_remaining')
             ->withSum(['orderItems as sold_count' => fn ($items) => $items->whereHas('order', fn ($orders) => $orders->where('status', '!=', 'cancelled'))], 'quantity')
             ->withSum(['orderItems as profit_total' => fn ($items) => $items->whereHas('order', fn ($orders) => $orders->where('status', '!=', 'cancelled'))], 'line_profit')
             ->withAvg(['reviews as average_rating' => fn ($reviews) => $reviews->where('status', 'approved')], 'rating')
@@ -427,7 +454,9 @@ class ProductController extends Controller
         if ($search !== '') {
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('slug', 'like', "%{$search}%");
+                    ->orWhere('slug', 'like', "%{$search}%")
+                    ->orWhereHas('brand', fn ($brands) => $brands->where('name', 'like', "%{$search}%"))
+                    ->orWhereHas('seller', fn ($sellers) => $sellers->where('store_name', 'like', "%{$search}%"));
             });
         }
 
