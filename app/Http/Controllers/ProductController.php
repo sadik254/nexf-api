@@ -12,6 +12,7 @@ use App\Models\MediaAsset;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Uploadcare\Api;
 use Uploadcare\Configuration;
 
@@ -106,9 +107,11 @@ class ProductController extends Controller
         $actor = $request->user();
         if (!$actor instanceof Admin || $actor->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
         if ((int) $product->seller_id !== (int) $seller->id) return response()->json(['message' => 'Product does not belong to seller.'], 422);
-        $data = $request->validate(['category_id' => ['sometimes', 'integer', 'exists:product_categories,id'], 'brand_id' => ['sometimes', 'nullable', 'integer', 'exists:brands,id'], 'tag_ids' => ['sometimes', 'array'], 'tag_ids.*' => ['integer', 'distinct', 'exists:tags,id'], 'clear_tags' => ['sometimes', 'boolean'], 'name' => ['sometimes', 'string', 'max:255'], 'description' => ['sometimes', 'nullable', 'string'], 'specifications' => ['sometimes', 'nullable', 'array'], 'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'], 'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'], 'status' => ['sometimes', 'in:draft,active,inactive'], 'homepage_trending' => ['sometimes', 'boolean'], 'homepage_new_arrival' => ['sometimes', 'boolean'], 'homepage_featured' => ['sometimes', 'boolean'], 'homepage_sort_order' => ['sometimes', 'integer', 'min:0']]);
+        $data = $request->validate(['category_id' => ['sometimes', 'integer', 'exists:product_categories,id'], 'brand_id' => ['sometimes', 'nullable', 'integer', 'exists:brands,id'], 'tag_ids' => ['sometimes', 'array'], 'tag_ids.*' => ['integer', 'distinct', 'exists:tags,id'], 'clear_tags' => ['sometimes', 'boolean'], 'name' => ['sometimes', 'string', 'max:255'], 'slug' => ['sometimes', 'string', 'max:255', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/', Rule::unique('products', 'slug')->ignore($product->id)], 'seo_title' => ['sometimes', 'nullable', 'string', 'max:70'], 'seo_description' => ['sometimes', 'nullable', 'string', 'max:170'], 'description' => ['sometimes', 'nullable', 'string'], 'specifications' => ['sometimes', 'nullable', 'array'], 'clear_specifications' => ['sometimes', 'boolean'], 'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'], 'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'], 'status' => ['sometimes', 'in:draft,active,inactive'], 'homepage_trending' => ['sometimes', 'boolean'], 'homepage_new_arrival' => ['sometimes', 'boolean'], 'homepage_featured' => ['sometimes', 'boolean'], 'homepage_sort_order' => ['sometimes', 'integer', 'min:0']]);
         if (array_key_exists('tag_ids', $data) || !empty($data['clear_tags'])) $product->tags()->sync($data['tag_ids'] ?? []);
         unset($data['tag_ids'], $data['clear_tags']);
+        if (!empty($data['clear_specifications'])) $data['specifications'] = [];
+        unset($data['clear_specifications']);
         $product->fill($data)->save();
         return response()->json(['message' => 'Seller product updated successfully.', 'product' => $product->fresh(['category', 'brand', 'tags', 'seller', 'variations'])]);
     }
@@ -134,6 +137,9 @@ class ProductController extends Controller
             'tag_ids.*' => ['integer', 'distinct', 'exists:tags,id'],
             'clear_tags' => ['sometimes', 'boolean'],
             'name' => ['required', 'string', 'max:255'],
+            'slug' => ['nullable', 'string', 'max:255', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/', Rule::unique('products', 'slug')],
+            'seo_title' => ['nullable', 'string', 'max:70'],
+            'seo_description' => ['nullable', 'string', 'max:170'],
             'description' => ['nullable', 'string'],
             'specifications' => ['nullable', 'array'],
             'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'],
@@ -159,7 +165,7 @@ class ProductController extends Controller
             unset($data['homepage_trending'], $data['homepage_new_arrival'], $data['homepage_featured'], $data['homepage_sort_order']);
         }
 
-        $slug = $this->uniqueSlug($data['name']);
+        $slug = $data['slug'] ?? $this->uniqueSlug($data['name']);
 
         $uploadcare = $this->uploadcare();
 
@@ -198,6 +204,8 @@ class ProductController extends Controller
             'brand_id' => $data['brand_id'] ?? null,
             'name' => $data['name'],
             'slug' => $slug,
+            'seo_title' => $data['seo_title'] ?? null,
+            'seo_description' => $data['seo_description'] ?? null,
             'description' => $data['description'] ?? null,
             'specifications' => $data['specifications'] ?? null,
             'product_type' => $data['product_type'],
@@ -232,8 +240,12 @@ class ProductController extends Controller
             'tag_ids.*' => ['integer', 'distinct', 'exists:tags,id'],
             'clear_tags' => ['sometimes', 'boolean'],
             'name' => ['sometimes', 'string', 'max:255'],
+            'slug' => ['sometimes', 'string', 'max:255', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/', Rule::unique('products', 'slug')->ignore($product->id)],
+            'seo_title' => ['sometimes', 'nullable', 'string', 'max:70'],
+            'seo_description' => ['sometimes', 'nullable', 'string', 'max:170'],
             'description' => ['sometimes', 'string'],
             'specifications' => ['sometimes', 'nullable', 'array'],
+            'clear_specifications' => ['sometimes', 'boolean'],
             'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'],
             'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'],
             'product_type' => ['sometimes', 'in:simple,variable'],
@@ -259,8 +271,12 @@ class ProductController extends Controller
 
         $tagIds = array_key_exists('tag_ids', $data) || !empty($data['clear_tags']) ? ($data['tag_ids'] ?? []) : null;
         unset($data['tag_ids'], $data['clear_tags']);
+        if (!empty($data['clear_specifications'])) $data['specifications'] = [];
+        unset($data['clear_specifications']);
 
-        if (array_key_exists('name', $data)) {
+        if (array_key_exists('slug', $data)) {
+            $product->slug = $data['slug'];
+        } elseif (array_key_exists('name', $data)) {
             $product->slug = $this->uniqueSlug($data['name'], $product->id);
         }
 
@@ -300,6 +316,8 @@ class ProductController extends Controller
             'category_id' => $data['category_id'] ?? $product->category_id,
             'brand_id' => array_key_exists('brand_id', $data) ? $data['brand_id'] : $product->brand_id,
             'name' => $data['name'] ?? $product->name,
+            'seo_title' => array_key_exists('seo_title', $data) ? $data['seo_title'] : $product->seo_title,
+            'seo_description' => array_key_exists('seo_description', $data) ? $data['seo_description'] : $product->seo_description,
             'description' => $data['description'] ?? $product->description,
             'specifications' => array_key_exists('specifications', $data) ? $data['specifications'] : $product->specifications,
             'product_type' => $data['product_type'] ?? $product->product_type,
