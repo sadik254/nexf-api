@@ -68,6 +68,22 @@
       ]
     },
     {
+      "name": "Support tickets",
+      "item": [
+        {"name":"Customer tickets","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"}],"url":"{{base_url}}/api/customers/support-tickets"}},
+        {"name":"Open ticket","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"category\":\"Delivery\",\"subject\":\"Parcel delayed\",\"body\":\"Please check my order.\",\"order_id\":{{order_id}}}"},"url":"{{base_url}}/api/customers/support-tickets"}},
+        {"name":"Customer ticket thread","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"}],"url":"{{base_url}}/api/customers/support-tickets/{{ticket_id}}"}},
+        {"name":"Customer reply","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"body\":\"Is there an update?\"}"},"url":"{{base_url}}/api/customers/support-tickets/{{ticket_id}}/messages"}},
+        {"name":"Seller tickets","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/support-tickets"}},
+        {"name":"Seller reply","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"body\":\"We are checking with the courier.\"}"},"url":"{{base_url}}/api/seller/support-tickets/{{ticket_id}}/messages"}},
+        {"name":"Seller resolve","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/support-tickets/{{ticket_id}}/resolve"}},
+        {"name":"Admin tickets","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/support-tickets"}},
+        {"name":"Admin reply","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"body\":\"We are looking into it.\"}"},"url":"{{base_url}}/api/admin/support-tickets/{{ticket_id}}/messages"}},
+        {"name":"Admin resolve","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/support-tickets/{{ticket_id}}/resolve"}},
+        {"name":"Upload support attachment","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"}],"body":{"mode":"formdata","formdata":[{"key":"file","type":"file","src":"{{image_path}}"}]},"url":"{{base_url}}/api/customers/support-attachments"}}
+      ]
+    },
+    {
       "name": "Customer",
       "item": [
         {"name":"Register customer","request":{"method":"POST","header":[{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\n  \"name\": \"Test Customer\",\n  \"email\": \"customer@example.com\",\n  \"phone\": \"01700000000\",\n  \"password\": \"password123\"\n}"},"url":"{{base_url}}/api/customers"}},

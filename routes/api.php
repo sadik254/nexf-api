@@ -31,6 +31,7 @@ use App\Http\Controllers\MediaAssetController;
 use App\Http\Controllers\HomepageCategoryCardController;
 use App\Http\Controllers\HomepageOfferBlockController;
 use App\Http\Controllers\HomepageLayoutController;
+use App\Http\Controllers\SupportTicketController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -58,6 +59,11 @@ Route::prefix('customers')->group(function () {
         Route::get('/reviews', [ProductEngagementController::class, 'reviewsForCustomer']);
         Route::get('/reviewable-items', [ProductEngagementController::class, 'reviewableItems']);
         Route::get('/questions', [ProductEngagementController::class, 'questionsForCustomer']);
+        Route::get('/support-tickets', [SupportTicketController::class, 'index']);
+        Route::post('/support-tickets', [SupportTicketController::class, 'store']);
+        Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show']);
+        Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);
+        Route::post('/support-attachments', [SupportTicketController::class, 'upload']);
         Route::post('/me/ping', function () {
             return response()->json(['ok' => true]);
         });
@@ -146,6 +152,11 @@ Route::prefix('admin')->group(function () {
 });
 
 Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(function () {
+    Route::get('/support-tickets', [SupportTicketController::class, 'index']);
+    Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show']);
+    Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);
+    Route::post('/support-tickets/{ticket}/resolve', [SupportTicketController::class, 'resolve']);
+    Route::post('/support-attachments', [SupportTicketController::class, 'upload']);
     Route::get('/media', [MediaAssetController::class, 'index']);
     Route::post('/media', [MediaAssetController::class, 'store']);
     Route::post('/media/link', [MediaAssetController::class, 'link']);
@@ -223,6 +234,11 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 });
 
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
+    Route::get('/support-tickets', [SupportTicketController::class, 'index']);
+    Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show']);
+    Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);
+    Route::post('/support-tickets/{ticket}/resolve', [SupportTicketController::class, 'resolve']);
+    Route::post('/support-attachments', [SupportTicketController::class, 'upload']);
     Route::get('/media', [MediaAssetController::class, 'index']);
     Route::post('/media', [MediaAssetController::class, 'store']);
     Route::post('/media/link', [MediaAssetController::class, 'link']);
