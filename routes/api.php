@@ -30,6 +30,7 @@ use App\Http\Controllers\ProductCollectionController;
 use App\Http\Controllers\MediaAssetController;
 use App\Http\Controllers\HomepageCategoryCardController;
 use App\Http\Controllers\HomepageOfferBlockController;
+use App\Http\Controllers\HomepageLayoutController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -80,6 +81,7 @@ Route::get('/homepage/notices', [HomepageNoticeController::class, 'publicIndex']
 Route::get('/homepage/trust-badges', [HomepageTrustBadgeController::class, 'publicIndex']);
 Route::get('/homepage/category-cards', [HomepageCategoryCardController::class, 'publicIndex']);
 Route::get('/homepage/offer-blocks', [HomepageOfferBlockController::class, 'publicIndex']);
+Route::get('/homepage/layout', [HomepageLayoutController::class, 'show']);
 Route::get('/site-info', [SiteInfoController::class, 'show']);
 Route::get('/store/brands', [CatalogTermController::class, 'brands']);
 Route::get('/store/tags', [CatalogTermController::class, 'tags']);
@@ -177,6 +179,8 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/homepage/category-cards', [HomepageCategoryCardController::class, 'replace']);
     Route::get('/homepage/offer-blocks', [HomepageOfferBlockController::class, 'index']);
     Route::post('/homepage/offer-blocks/{block}', [HomepageOfferBlockController::class, 'update']);
+    Route::get('/homepage/layout', [HomepageLayoutController::class, 'show']);
+    Route::post('/homepage/layout', [HomepageLayoutController::class, 'update']);
     Route::get('/site-info', [SiteInfoController::class, 'show']);
     Route::post('/site-info', [SiteInfoController::class, 'update']);
     Route::post('/homepage/banners', [HomepageBannerController::class, 'store']);

@@ -1,6 +1,18 @@
 <?php
 
 return [
+    'home_layout' => [
+        ['id' => 'hero', 'type' => 'hero', 'enabled' => true],
+        ['id' => 'trust', 'type' => 'trust', 'enabled' => true],
+        ['id' => 'categories', 'type' => 'categories', 'enabled' => true, 'title' => 'Popular Categories'],
+        ['id' => 'trending', 'type' => 'trending', 'enabled' => true, 'title' => 'Trending Products'],
+        ['id' => 'offer-four', 'type' => 'offerFour', 'enabled' => true],
+        ['id' => 'offer-wide', 'type' => 'offerWide', 'enabled' => true],
+        ['id' => 'offer-two', 'type' => 'offerTwo', 'enabled' => true],
+        ['id' => 'reviews', 'type' => 'reviews', 'enabled' => true, 'title' => 'Customer Review'],
+        ['id' => 'featured', 'type' => 'featured', 'enabled' => true, 'title' => 'Featured Showcase'],
+        ['id' => 'support', 'type' => 'support', 'enabled' => true],
+    ],
     'footer' => [
         'name' => 'NEXF Lifestyle Ltd.',
         'blurb' => 'NEXF Lifestyle is a multivendor marketplace bringing together verified sellers, authentic products and dependable delivery across Bangladesh. Shop thousands of pieces from independent stores in one place.',

@@ -61,6 +61,7 @@
         {"name":"Homepage trust badges","request":{"method":"GET","url":"{{base_url}}/api/homepage/trust-badges"}},
         {"name":"Homepage category cards","request":{"method":"GET","url":"{{base_url}}/api/homepage/category-cards"}},
         {"name":"Homepage offer blocks","request":{"method":"GET","url":"{{base_url}}/api/homepage/offer-blocks"}},
+        {"name":"Homepage layout","request":{"method":"GET","url":"{{base_url}}/api/homepage/layout"}},
         {"name":"Products in collection","request":{"method":"GET","url":"{{base_url}}/api/store/products?collection={{collection_id}}&per_page=20"}},
         {"name":"Homepage notices","request":{"method":"GET","url":"{{base_url}}/api/homepage/notices"}},
         {"name":"Admin-store public products","request":{"method":"GET","url":"{{base_url}}/api/store/admin/products"}}
@@ -232,6 +233,8 @@
         {"name":"List homepage trust badges","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/homepage/trust-badges"}},
         {"name":"List homepage category cards","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/homepage/category-cards"}},
         {"name":"List homepage offer blocks","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/homepage/offer-blocks"}},
+        {"name":"Get homepage layout","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/homepage/layout"}},
+        {"name":"Save homepage layout","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"sections\":[{\"id\":\"hero\",\"type\":\"hero\",\"enabled\":true},{\"id\":\"categories\",\"type\":\"categories\",\"enabled\":true,\"title\":\"Popular Categories\"}]}"},"url":"{{base_url}}/api/admin/homepage/layout"}},
         {"name":"Update homepage offer block","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"title\":\"Autumn collection\",\"href\":\"/shop?category=women\",\"hidden\":false}"},"url":"{{base_url}}/api/admin/homepage/offer-blocks/{{offer_block_id}}"}},
         {"name":"Replace homepage category cards","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"cards\":[{\"category_id\":1,\"name\":\"For Men\",\"caption\":null,\"href\":\"/shop?category=men\",\"image\":\"/assets/category/men.png\",\"mobile_image\":null,\"cta\":\"Shop Now\",\"theme\":\"violet\",\"hidden\":false}]}"},"url":"{{base_url}}/api/admin/homepage/category-cards"}},
         {"name":"Replace homepage trust badges","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"body":{"mode":"raw","raw":"{\"badges\":[{\"icon\":\"Truck\",\"label\":\"Cash on Delivery\",\"tone\":\"emerald\",\"hidden\":false}]}"},"url":"{{base_url}}/api/admin/homepage/trust-badges"}},
