@@ -27,6 +27,7 @@ use App\Http\Controllers\HomepageNoticeController;
 use App\Http\Controllers\HomepageTrustBadgeController;
 use App\Http\Controllers\SiteInfoController;
 use App\Http\Controllers\ProductCollectionController;
+use App\Http\Controllers\MediaAssetController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -139,6 +140,11 @@ Route::prefix('admin')->group(function () {
 });
 
 Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(function () {
+    Route::get('/media', [MediaAssetController::class, 'index']);
+    Route::post('/media', [MediaAssetController::class, 'store']);
+    Route::post('/media/link', [MediaAssetController::class, 'link']);
+    Route::post('/media/{asset}', [MediaAssetController::class, 'update']);
+    Route::post('/media/{asset}/delete', [MediaAssetController::class, 'destroy']);
     Route::get('/collection-products', [ProductCollectionController::class, 'candidates']);
     Route::get('/collections', [ProductCollectionController::class, 'index']);
     Route::post('/collections', [ProductCollectionController::class, 'store']);
@@ -205,6 +211,11 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 });
 
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
+    Route::get('/media', [MediaAssetController::class, 'index']);
+    Route::post('/media', [MediaAssetController::class, 'store']);
+    Route::post('/media/link', [MediaAssetController::class, 'link']);
+    Route::post('/media/{asset}', [MediaAssetController::class, 'update']);
+    Route::post('/media/{asset}/delete', [MediaAssetController::class, 'destroy']);
     Route::get('/collection-products', [ProductCollectionController::class, 'candidates']);
     Route::get('/collections', [ProductCollectionController::class, 'index']);
     Route::post('/collections', [ProductCollectionController::class, 'store']);

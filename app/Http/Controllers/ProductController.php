@@ -8,6 +8,7 @@ use App\Models\ProductCategory;
 use App\Models\ProductLot;
 use App\Models\Seller;
 use App\Models\SizeChart;
+use App\Models\MediaAsset;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -140,8 +141,11 @@ class ProductController extends Controller
             'product_type' => ['required', 'in:simple,variable'],
             'status' => ['nullable', 'in:draft,active,inactive'],
             'thumbnail' => ['nullable', 'file', 'image', 'max:5120'],
+            'thumbnail_media_id' => ['nullable', 'integer', 'exists:media_assets,id'],
             'gallery' => ['nullable', 'array'],
             'gallery.*' => ['file', 'image', 'max:5120'],
+            'gallery_media_ids' => ['nullable', 'array', 'max:30'],
+            'gallery_media_ids.*' => ['integer', 'distinct', 'exists:media_assets,id'],
             'default_buying_price' => ['nullable', 'numeric', 'min:0'],
             'default_selling_price' => ['nullable', 'numeric', 'min:0'],
             'size_chart_id' => ['nullable', 'integer', 'exists:size_charts,id'],
@@ -166,6 +170,9 @@ class ProductController extends Controller
             );
             $thumbnailUrl = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
         }
+        if (!empty($data['thumbnail_media_id'])) {
+            $thumbnailUrl = $this->imageMediaUrl((int) $data['thumbnail_media_id'], $actor instanceof Seller ? $actor->id : null);
+        }
 
         $galleryUrls = null;
         if ($request->hasFile('gallery')) {
@@ -174,6 +181,12 @@ class ProductController extends Controller
                 $file = $uploadcare->uploader()->fromPath($image->getPathname());
                 $galleryUrls[] = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
             }
+        }
+        if (!empty($data['gallery_media_ids'])) {
+            $galleryUrls = array_merge($galleryUrls ?? [], array_map(
+                fn ($id) => $this->imageMediaUrl((int) $id, $actor instanceof Seller ? $actor->id : null),
+                $data['gallery_media_ids'],
+            ));
         }
 
         $this->authorizeSizeChart($data['size_chart_id'] ?? null, $actor);
@@ -226,8 +239,11 @@ class ProductController extends Controller
             'product_type' => ['sometimes', 'in:simple,variable'],
             'status' => ['sometimes', 'in:draft,active,inactive'],
             'thumbnail' => ['sometimes', 'file', 'image', 'max:5120'],
+            'thumbnail_media_id' => ['sometimes', 'nullable', 'integer', 'exists:media_assets,id'],
             'gallery' => ['sometimes', 'array'],
             'gallery.*' => ['file', 'image', 'max:5120'],
+            'gallery_media_ids' => ['sometimes', 'array', 'max:30'],
+            'gallery_media_ids.*' => ['integer', 'distinct', 'exists:media_assets,id'],
             'default_buying_price' => ['sometimes', 'numeric', 'min:0'],
             'default_selling_price' => ['sometimes', 'numeric', 'min:0'],
             'size_chart_id' => ['sometimes', 'nullable', 'integer', 'exists:size_charts,id'],
@@ -261,6 +277,9 @@ class ProductController extends Controller
             );
             $thumbnailUrl = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
         }
+        if (!empty($data['thumbnail_media_id'])) {
+            $thumbnailUrl = $this->imageMediaUrl((int) $data['thumbnail_media_id'], $product->seller_id);
+        }
 
         $galleryUrls = $product->gallery;
         if ($request->hasFile('gallery')) {
@@ -269,6 +288,12 @@ class ProductController extends Controller
                 $file = $uploadcare->uploader()->fromPath($image->getPathname());
                 $galleryUrls[] = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
             }
+        }
+        if (array_key_exists('gallery_media_ids', $data)) {
+            $galleryUrls = array_merge($request->hasFile('gallery') ? ($galleryUrls ?? []) : [], array_map(
+                fn ($id) => $this->imageMediaUrl((int) $id, $product->seller_id),
+                $data['gallery_media_ids'],
+            ));
         }
 
         $product->fill([
@@ -425,5 +450,16 @@ class ProductController extends Controller
             config('services.uploadcare.secret_key')
         );
         return new Api($configuration);
+    }
+
+    private function imageMediaUrl(int $assetId, ?int $sellerId): string
+    {
+        $asset = MediaAsset::findOrFail($assetId);
+        abort_unless($asset->mime_type && str_starts_with($asset->mime_type, 'image/'), 422, 'Selected media must be an image.');
+        $allowed = $sellerId === null
+            ? $asset->owner_type === 'admin'
+            : $asset->owner_type === 'seller' && $asset->owner_id === $sellerId;
+        abort_unless($allowed, 403, 'You cannot use this media asset.');
+        return $asset->url;
     }
 }
