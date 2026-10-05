@@ -12,6 +12,7 @@
     {"key":"seller_token","value":"","type":"string"},
     {"key":"admin_id","value":"1","type":"string"},
     {"key":"customer_id","value":"1","type":"string"},
+    {"key":"chat_id","value":"1","type":"string"},
     {"key":"seller_id","value":"1","type":"string"},
     {"key":"lot_id","value":"1","type":"string"},
     {"key":"category_id","value":"1","type":"string"},
@@ -67,6 +68,7 @@
         {"name":"Admin-store public products","request":{"method":"GET","url":"{{base_url}}/api/store/admin/products"}}
       ]
     },
+    {"name":"Store chats","item":[{"name":"Customer chats","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"}],"url":"{{base_url}}/api/customers/chats"}},{"name":"Start store chat","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"},{"key":"Content-Type","value":"application/json"}],"url":"{{base_url}}/api/customers/chats","body":{"mode":"raw","raw":"{\"seller_id\": \"{{seller_id}}\", \"body\": \"Is this in stock?\"}"}}},{"name":"Customer chat thread","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"}],"url":"{{base_url}}/api/customers/chats/{{chat_id}}"}},{"name":"Customer chat reply","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{customer_token}}"},{"key":"Content-Type","value":"application/json"}],"url":"{{base_url}}/api/customers/chats/{{chat_id}}/messages","body":{"mode":"raw","raw":"{\"body\": \"Thank you!\"}"}}},{"name":"Seller chats","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/chats"}},{"name":"Seller chat thread","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"}],"url":"{{base_url}}/api/seller/chats/{{chat_id}}"}},{"name":"Seller chat reply","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{seller_token}}"},{"key":"Content-Type","value":"application/json"}],"url":"{{base_url}}/api/seller/chats/{{chat_id}}/messages","body":{"mode":"raw","raw":"{\"body\": \"Yes, it is available.\"}"}}},{"name":"Admin chats","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/chats"}},{"name":"Admin chat thread","request":{"method":"GET","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"}],"url":"{{base_url}}/api/admin/chats/{{chat_id}}"}},{"name":"Admin chat reply","request":{"method":"POST","header":[{"key":"Authorization","value":"Bearer {{admin_token}}"},{"key":"Content-Type","value":"application/json"}],"url":"{{base_url}}/api/admin/chats/{{chat_id}}/messages","body":{"mode":"raw","raw":"{\"body\": \"We can help.\"}"}}}]},
     {
       "name": "Support tickets",
       "item": [

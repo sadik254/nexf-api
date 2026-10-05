@@ -32,6 +32,7 @@ use App\Http\Controllers\HomepageCategoryCardController;
 use App\Http\Controllers\HomepageOfferBlockController;
 use App\Http\Controllers\HomepageLayoutController;
 use App\Http\Controllers\SupportTicketController;
+use App\Http\Controllers\StoreChatController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -64,6 +65,10 @@ Route::prefix('customers')->group(function () {
         Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show']);
         Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);
         Route::post('/support-attachments', [SupportTicketController::class, 'upload']);
+        Route::get('/chats', [StoreChatController::class, 'index']);
+        Route::post('/chats', [StoreChatController::class, 'start']);
+        Route::get('/chats/{chat}', [StoreChatController::class, 'show']);
+        Route::post('/chats/{chat}/messages', [StoreChatController::class, 'reply']);
         Route::post('/me/ping', function () {
             return response()->json(['ok' => true]);
         });
@@ -157,6 +162,9 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);
     Route::post('/support-tickets/{ticket}/resolve', [SupportTicketController::class, 'resolve']);
     Route::post('/support-attachments', [SupportTicketController::class, 'upload']);
+    Route::get('/chats', [StoreChatController::class, 'index']);
+    Route::get('/chats/{chat}', [StoreChatController::class, 'show']);
+    Route::post('/chats/{chat}/messages', [StoreChatController::class, 'reply']);
     Route::get('/media', [MediaAssetController::class, 'index']);
     Route::post('/media', [MediaAssetController::class, 'store']);
     Route::post('/media/link', [MediaAssetController::class, 'link']);
@@ -239,6 +247,9 @@ Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(f
     Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);
     Route::post('/support-tickets/{ticket}/resolve', [SupportTicketController::class, 'resolve']);
     Route::post('/support-attachments', [SupportTicketController::class, 'upload']);
+    Route::get('/chats', [StoreChatController::class, 'index']);
+    Route::get('/chats/{chat}', [StoreChatController::class, 'show']);
+    Route::post('/chats/{chat}/messages', [StoreChatController::class, 'reply']);
     Route::get('/media', [MediaAssetController::class, 'index']);
     Route::post('/media', [MediaAssetController::class, 'store']);
     Route::post('/media/link', [MediaAssetController::class, 'link']);
