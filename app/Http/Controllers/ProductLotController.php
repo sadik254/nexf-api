@@ -54,7 +54,6 @@ class ProductLotController extends Controller
         $data = $request->validate([
             'lot_number' => ['required', 'string', 'max:255'],
             'buying_price' => ['required', 'numeric', 'min:0'],
-            'selling_price' => ['required', 'numeric', 'min:0'],
             'quantity' => ['required', 'integer', 'min:1'],
             'received_at' => ['nullable', 'date'],
             'expires_at' => ['nullable', 'date'],
@@ -66,7 +65,7 @@ class ProductLotController extends Controller
             'variation_id' => null,
             'lot_number' => $data['lot_number'],
             'buying_price' => $data['buying_price'],
-            'selling_price' => $data['selling_price'],
+            'selling_price' => $product->default_selling_price ?? 0,
             'quantity' => $data['quantity'],
             'quantity_remaining' => $data['quantity'],
             'received_at' => $data['received_at'] ?? null,
@@ -92,7 +91,6 @@ class ProductLotController extends Controller
         $data = $request->validate([
             'lot_number' => ['required', 'string', 'max:255'],
             'buying_price' => ['required', 'numeric', 'min:0'],
-            'selling_price' => ['required', 'numeric', 'min:0'],
             'quantity' => ['required', 'integer', 'min:1'],
             'received_at' => ['nullable', 'date'],
             'expires_at' => ['nullable', 'date'],
@@ -104,7 +102,7 @@ class ProductLotController extends Controller
             'variation_id' => $variation->id,
             'lot_number' => $data['lot_number'],
             'buying_price' => $data['buying_price'],
-            'selling_price' => $data['selling_price'],
+            'selling_price' => $variation->default_selling_price ?? $product->default_selling_price ?? 0,
             'quantity' => $data['quantity'],
             'quantity_remaining' => $data['quantity'],
             'received_at' => $data['received_at'] ?? null,

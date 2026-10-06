@@ -24,7 +24,7 @@ class TurnstileTest extends TestCase
             ->push(['success' => true])]);
 
         $category = ProductCategory::create(['name' => 'Category', 'slug' => 'category']);
-        $product = Product::create(['category_id' => $category->id, 'name' => 'Product', 'slug' => 'product', 'product_type' => 'simple', 'status' => 'active']);
+        $product = Product::create(['category_id' => $category->id, 'name' => 'Product', 'slug' => 'product', 'product_type' => 'simple', 'status' => 'active', 'default_selling_price' => 100]);
         ProductLot::create(['product_id' => $product->id, 'lot_number' => 'LOT-1', 'buying_price' => 50, 'selling_price' => 100, 'quantity' => 5, 'quantity_remaining' => 5]);
         $payment = PaymentMethod::create(['name' => 'COD', 'code' => 'cod', 'is_active' => true]);
         $shipping = ShippingMethod::create(['name' => 'Standard', 'code' => 'standard', 'charge' => 20, 'currency' => 'BDT', 'is_active' => true]);

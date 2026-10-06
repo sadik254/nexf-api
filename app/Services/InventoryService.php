@@ -14,12 +14,12 @@ class InventoryService
 {
     public function previewProduct(Product $product, int $quantity): array
     {
-        return $this->previewLots(productId: $product->id, variationId: null, quantityRequested: $quantity);
+        return $this->previewLots(productId: $product->id, variationId: null, quantityRequested: $quantity, sellingPrice: $this->sellingPrice($product->default_selling_price));
     }
 
     public function previewVariation(ProductVariation $variation, int $quantity): array
     {
-        return $this->previewLots(productId: null, variationId: $variation->id, quantityRequested: $quantity);
+        return $this->previewLots(productId: null, variationId: $variation->id, quantityRequested: $quantity, sellingPrice: $this->sellingPrice($variation->default_selling_price ?? $variation->product->default_selling_price));
     }
     public function restoreOrderItem(OrderItem $item, $actor, string $reason = 'order_cancellation'): void
     {
@@ -65,7 +65,8 @@ class InventoryService
             quantityRequested: $quantity,
             actor: $actor,
             reason: $reason,
-            meta: $meta
+            meta: $meta,
+            sellingPrice: $this->sellingPrice($product->default_selling_price)
         );
     }
 
@@ -77,13 +78,14 @@ class InventoryService
             quantityRequested: $quantity,
             actor: $actor,
             reason: $reason,
-            meta: $meta
+            meta: $meta,
+            sellingPrice: $this->sellingPrice($variation->default_selling_price ?? $variation->product->default_selling_price)
         );
     }
 
-    private function consumeLots(?int $productId, ?int $variationId, int $quantityRequested, $actor, string $reason, array $meta): array
+    private function consumeLots(?int $productId, ?int $variationId, int $quantityRequested, $actor, string $reason, array $meta, float $sellingPrice): array
     {
-        return DB::transaction(function () use ($productId, $variationId, $quantityRequested, $actor, $reason, $meta) {
+        return DB::transaction(function () use ($productId, $variationId, $quantityRequested, $actor, $reason, $meta, $sellingPrice) {
             $actorType = $actor ? $actor::class : 'unknown';
             $actorId = $actor?->id ?? 0;
 
@@ -128,7 +130,7 @@ class InventoryService
 
                 $movementMeta = array_merge($meta, [
                     'unit_buying_price' => (string) $lot->buying_price,
-                    'unit_selling_price' => (string) $lot->selling_price,
+                    'unit_selling_price' => number_format($sellingPrice, 2, '.', ''),
                 ]);
 
                 ProductLotMovement::create([
@@ -141,7 +143,7 @@ class InventoryService
                 ]);
 
                 $lineCost = round(((float) $lot->buying_price) * $take, 2);
-                $lineRevenue = round(((float) $lot->selling_price) * $take, 2);
+                $lineRevenue = round($sellingPrice * $take, 2);
                 $lineProfit = round($lineRevenue - $lineCost, 2);
 
                 $allocations[] = [
@@ -149,7 +151,7 @@ class InventoryService
                     'lot_number' => $lot->lot_number,
                     'quantity' => $take,
                     'unit_buying_price' => (string) $lot->buying_price,
-                    'unit_selling_price' => (string) $lot->selling_price,
+                    'unit_selling_price' => number_format($sellingPrice, 2, '.', ''),
                     'cost' => $lineCost,
                     'revenue' => $lineRevenue,
                     'profit' => $lineProfit,
@@ -172,7 +174,7 @@ class InventoryService
         });
     }
 
-    private function previewLots(?int $productId, ?int $variationId, int $quantityRequested): array
+    private function previewLots(?int $productId, ?int $variationId, int $quantityRequested, float $sellingPrice): array
     {
         $lots = ProductLot::query()
             ->when($productId !== null, fn ($q) => $q->where('product_id', $productId))
@@ -191,11 +193,17 @@ class InventoryService
         foreach ($lots as $lot) {
             $take = min($remaining, (int) $lot->quantity_remaining);
             $cost = round($cost + ((float) $lot->buying_price * $take), 2);
-            $revenue = round($revenue + ((float) $lot->selling_price * $take), 2);
+            $revenue = round($revenue + ($sellingPrice * $take), 2);
             $remaining -= $take;
             if ($remaining === 0) break;
         }
 
         return ['quantity' => $quantityRequested, 'available_quantity' => $available, 'cost' => $cost, 'subtotal' => $revenue];
+    }
+
+    private function sellingPrice($value): float
+    {
+        if ($value === null) throw ValidationException::withMessages(['price' => ['Set a selling price on the product or variation before checkout.']]);
+        return (float) $value;
     }
 }

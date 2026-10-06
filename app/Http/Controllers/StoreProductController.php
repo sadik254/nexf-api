@@ -160,8 +160,7 @@ class StoreProductController extends Controller
             ];
 
         $availableQuantity = (int) ($product->available_quantity ?? 0);
-        $currentPrice = $product->current_selling_price !== null ? (string) $product->current_selling_price : null;
-        $basePrice = $product->default_selling_price !== null ? (float) $product->default_selling_price : null;
+        $currentPrice = $product->default_selling_price !== null ? (string) $product->default_selling_price : null;
         $compareAt = $product->compare_at_price !== null ? (string) $product->compare_at_price : null;
         $approvedReviews = $product->reviews()->where('status', 'approved');
         $ratingCount = (int) (clone $approvedReviews)->count();
@@ -173,14 +172,12 @@ class StoreProductController extends Controller
         $priceTo = null;
 
         if ($product->product_type === 'variable') {
-            $variantRegularPrices = $product->variations->pluck('default_selling_price')->filter(fn ($value) => $value !== null && (float) $value > 0)->map(fn ($value) => (float) $value);
-            if ($variantRegularPrices->isNotEmpty()) $basePrice = (float) $variantRegularPrices->min();
-            $variations = $product->variations->map(function ($v) {
+            $variations = $product->variations->map(function ($v) use ($product) {
                 return [
                     'id' => $v->id,
                     'sku' => $v->sku,
                     'attributes' => $v->attributes,
-                    'current_selling_price' => $v->current_selling_price !== null ? (string) $v->current_selling_price : null,
+                    'current_selling_price' => $v->default_selling_price !== null ? (string) $v->default_selling_price : ($product->default_selling_price !== null ? (string) $product->default_selling_price : null),
                     'available_quantity' => (int) ($v->available_quantity ?? 0),
                     'in_stock' => ((int) ($v->available_quantity ?? 0)) > 0,
                 ];
@@ -200,12 +197,6 @@ class StoreProductController extends Controller
             $currentPrice = $priceFrom;
         }
 
-        // The default catalogue price is the regular price. A cheaper current
-        // inventory price becomes a sale without an extra editable discount field.
-        if ($currentPrice !== null && $basePrice !== null && $basePrice > (float) $currentPrice
-            && ($compareAt === null || $basePrice > (float) $compareAt)) {
-            $compareAt = number_format($basePrice, 2, '.', '');
-        }
         $discountAmount = $compareAt !== null && $currentPrice !== null && (float) $compareAt > (float) $currentPrice ? number_format((float) $compareAt - (float) $currentPrice, 2, '.', '') : null;
         $discount = $discountAmount === null ? null : ['amount' => $discountAmount, 'percentage' => (int) round(((float) $discountAmount / (float) $compareAt) * 100)];
 
@@ -264,8 +255,7 @@ class StoreProductController extends Controller
             'seller:id,store_name,store_slug,store_logo,store_image,city,country,created_at,positive_rating_percentage,on_time_shipping_percentage,chat_response_percentage',
             'sizeChart:id,name,url',
             'variations' => function ($q) {
-                $q->select(['id', 'product_id', 'sku', 'attributes'])
-                    ->selectSub($this->variationCurrentPriceSubquery(), 'current_selling_price')
+                $q->select(['id', 'product_id', 'sku', 'attributes', 'default_selling_price'])
                     ->selectSub($this->variationAvailableQtySubquery(), 'available_quantity');
             },
         ]);
@@ -317,21 +307,9 @@ class StoreProductController extends Controller
             'thumbnail',
             'gallery',
             'compare_at_price', 'option_groups', 'size_chart_id', 'videos', 'weight_kg',
+            'default_selling_price',
             'homepage_trending', 'homepage_new_arrival', 'homepage_featured', 'homepage_sort_order',
-        ])->selectSub($this->productCurrentPriceSubquery(), 'current_selling_price')
-            ->selectSub($this->productAvailableQtySubquery(), 'available_quantity');
-    }
-
-    private function productCurrentPriceSubquery(): QueryBuilder
-    {
-        return DB::table('product_lots')
-            ->select('selling_price')
-            ->whereColumn('product_lots.product_id', 'products.id')
-            ->where('quantity_remaining', '>', 0)
-            ->orderByRaw('received_at is null')
-            ->orderBy('received_at')
-            ->orderBy('id')
-            ->limit(1);
+        ])->selectSub($this->productAvailableQtySubquery(), 'available_quantity');
     }
 
     private function productAvailableQtySubquery(): QueryBuilder
@@ -339,18 +317,6 @@ class StoreProductController extends Controller
         return DB::table('product_lots')
             ->selectRaw('coalesce(sum(quantity_remaining), 0)')
             ->whereColumn('product_lots.product_id', 'products.id');
-    }
-
-    private function variationCurrentPriceSubquery(): QueryBuilder
-    {
-        return DB::table('product_lots')
-            ->select('selling_price')
-            ->whereColumn('product_lots.variation_id', 'product_variations.id')
-            ->where('quantity_remaining', '>', 0)
-            ->orderByRaw('received_at is null')
-            ->orderBy('received_at')
-            ->orderBy('id')
-            ->limit(1);
     }
 
     private function variationAvailableQtySubquery(): QueryBuilder

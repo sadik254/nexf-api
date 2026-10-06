@@ -248,6 +248,7 @@ class OrderLifecycleTest extends TestCase
             'slug' => 'second-product',
             'product_type' => 'simple',
             'status' => 'active',
+            'default_selling_price' => 60,
         ]);
         ProductLot::create([
             'product_id' => $secondProduct->id,
@@ -379,6 +380,7 @@ class OrderLifecycleTest extends TestCase
             'slug' => 'product',
             'product_type' => 'simple',
             'status' => 'active',
+            'default_selling_price' => 100,
             'thumbnail' => 'https://ucarecdn.com/product/-/preview/',
             'gallery' => ['https://ucarecdn.com/gallery/-/preview/'],
         ]);

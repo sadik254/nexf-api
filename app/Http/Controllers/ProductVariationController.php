@@ -25,7 +25,6 @@ class ProductVariationController extends Controller
         $data = $request->validate([
             'sku' => ['nullable', 'string', 'max:255'],
             'attributes' => ['required', 'array'],
-            'default_buying_price' => ['nullable', 'numeric', 'min:0'],
             'default_selling_price' => ['nullable', 'numeric', 'min:0'],
             'is_active' => ['nullable', 'boolean'],
         ]);
@@ -38,7 +37,6 @@ class ProductVariationController extends Controller
             'product_id' => $product->id,
             'sku' => $data['sku'] ?? null,
             'attributes' => $data['attributes'],
-            'default_buying_price' => $data['default_buying_price'] ?? null,
             'default_selling_price' => $data['default_selling_price'] ?? null,
             'is_active' => array_key_exists('is_active', $data) ? (bool) $data['is_active'] : true,
         ]);
@@ -59,7 +57,6 @@ class ProductVariationController extends Controller
         $data = $request->validate([
             'sku' => ['sometimes', 'string', 'max:255'],
             'attributes' => ['sometimes', 'array'],
-            'default_buying_price' => ['sometimes', 'numeric', 'min:0'],
             'default_selling_price' => ['sometimes', 'numeric', 'min:0'],
             'is_active' => ['sometimes', 'boolean'],
         ]);
@@ -76,7 +73,6 @@ class ProductVariationController extends Controller
         $variation->fill([
             'sku' => array_key_exists('sku', $data) ? $data['sku'] : $variation->sku,
             'attributes' => $data['attributes'] ?? $variation->attributes,
-            'default_buying_price' => $data['default_buying_price'] ?? $variation->default_buying_price,
             'default_selling_price' => $data['default_selling_price'] ?? $variation->default_selling_price,
             'is_active' => array_key_exists('is_active', $data) ? (bool) $data['is_active'] : $variation->is_active,
         ])->save();

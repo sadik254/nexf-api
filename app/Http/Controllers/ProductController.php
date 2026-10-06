@@ -108,24 +108,13 @@ class ProductController extends Controller
     private function productForEditor(Product $product): array
     {
         $product->load(['category', 'brand', 'tags', 'seller', 'variations']);
-        $prices = $product->product_type === 'variable'
-            ? $product->variations->map(fn ($variation) => ProductLot::query()
-                ->where('variation_id', $variation->id)->where('quantity_remaining', '>', 0)
-                ->orderByRaw('received_at is null')->orderBy('received_at')->orderBy('id')
-                ->value('selling_price'))->filter(fn ($price) => $price !== null)->map(fn ($price) => (float) $price)
-            : collect([ProductLot::query()->where('product_id', $product->id)->whereNull('variation_id')
-                ->where('quantity_remaining', '>', 0)->orderByRaw('received_at is null')
-                ->orderBy('received_at')->orderBy('id')->value('selling_price')])
-                ->filter(fn ($price) => $price !== null)->map(fn ($price) => (float) $price);
-        $current = $prices->isEmpty() ? null : $prices->min();
-        $regular = $product->product_type === 'variable'
-            ? $product->variations->pluck('default_selling_price')->filter(fn ($price) => $price !== null && (float) $price > 0)->map(fn ($price) => (float) $price)->min()
-            : ($product->default_selling_price === null ? null : (float) $product->default_selling_price);
-        $compareAt = $product->compare_at_price === null ? null : (float) $product->compare_at_price;
-        if ($current !== null && $regular !== null && $regular > $current && ($compareAt === null || $regular > $compareAt)) $compareAt = $regular;
+        $costLot = ProductLot::query()
+            ->when($product->product_type === 'variable',
+                fn ($query) => $query->whereIn('variation_id', $product->variations->pluck('id')),
+                fn ($query) => $query->where('product_id', $product->id)->whereNull('variation_id'))
+            ->where('quantity_remaining', '>', 0)->orderByRaw('received_at is null')->orderBy('received_at')->orderBy('id')->first();
         return array_merge($product->toArray(), [
-            'current_selling_price' => $current === null ? null : number_format($current, 2, '.', ''),
-            'compare_at_price' => $compareAt === null ? null : number_format($compareAt, 2, '.', ''),
+            'current_buying_price' => $costLot?->buying_price,
         ]);
     }
 
@@ -187,8 +176,8 @@ class ProductController extends Controller
             'gallery_media_ids.*' => ['integer', 'distinct', 'exists:media_assets,id'],
             'videos' => ['nullable', 'array', 'max:20'],
             'videos.*' => ['required', 'url', 'starts_with:https://'],
-            'default_buying_price' => ['nullable', 'numeric', 'min:0'],
             'default_selling_price' => ['nullable', 'numeric', 'min:0'],
+            'compare_at_price' => ['nullable', 'numeric', 'min:0'],
             'weight_kg' => ['nullable', 'numeric', 'min:0.1', 'max:999999'],
             'size_chart_id' => ['nullable', 'integer', 'exists:size_charts,id'],
             'homepage_trending' => ['nullable', 'boolean'],
@@ -252,8 +241,8 @@ class ProductController extends Controller
             'thumbnail' => $thumbnailUrl,
             'gallery' => $galleryUrls,
             'videos' => $data['videos'] ?? null,
-            'default_buying_price' => $data['default_buying_price'] ?? null,
             'default_selling_price' => $data['default_selling_price'] ?? null,
+            'compare_at_price' => $data['compare_at_price'] ?? null,
             'weight_kg' => $data['weight_kg'] ?? 0.5,
             'size_chart_id' => $data['size_chart_id'] ?? null,
             'homepage_trending' => (bool) ($data['homepage_trending'] ?? false),
@@ -305,8 +294,8 @@ class ProductController extends Controller
             'videos' => ['sometimes', 'array', 'max:20'],
             'videos.*' => ['required', 'url', 'starts_with:https://'],
             'clear_videos' => ['sometimes', 'boolean'],
-            'default_buying_price' => ['sometimes', 'numeric', 'min:0'],
             'default_selling_price' => ['sometimes', 'numeric', 'min:0'],
+            'compare_at_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'weight_kg' => ['sometimes', 'nullable', 'numeric', 'min:0.1', 'max:999999'],
             'size_chart_id' => ['sometimes', 'nullable', 'integer', 'exists:size_charts,id'],
             'homepage_trending' => ['sometimes', 'boolean'],
@@ -380,8 +369,8 @@ class ProductController extends Controller
             'thumbnail' => $thumbnailUrl,
             'gallery' => $galleryUrls,
             'videos' => array_key_exists('videos', $data) ? $data['videos'] : $product->videos,
-            'default_buying_price' => $data['default_buying_price'] ?? $product->default_buying_price,
             'default_selling_price' => $data['default_selling_price'] ?? $product->default_selling_price,
+            'compare_at_price' => array_key_exists('compare_at_price', $data) ? $data['compare_at_price'] : $product->compare_at_price,
             'weight_kg' => array_key_exists('weight_kg', $data) ? $data['weight_kg'] : $product->weight_kg,
             'size_chart_id' => array_key_exists('size_chart_id', $data) ? $data['size_chart_id'] : $product->size_chart_id,
             'homepage_trending' => $data['homepage_trending'] ?? $product->homepage_trending,
