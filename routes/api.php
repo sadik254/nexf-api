@@ -188,6 +188,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/brands', [CatalogTermController::class, 'storeBrand']);
     Route::post('/brands/{brand}', [CatalogTermController::class, 'updateBrand']);
     Route::post('/brands/{brand}/delete', [CatalogTermController::class, 'deleteBrand']);
+    Route::post('/product-tags', [CatalogTermController::class, 'storeProductTag']);
     Route::get('/tags', [CatalogTermController::class, 'tags']);
     Route::post('/tags', [CatalogTermController::class, 'storeTag']);
     Route::post('/tags/{tag}', [CatalogTermController::class, 'updateTag']);
@@ -252,6 +253,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 });
 
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
+    Route::post('/product-tags', [CatalogTermController::class, 'storeProductTag']);
     Route::get('/support-tickets', [SupportTicketController::class, 'index']);
     Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show']);
     Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);

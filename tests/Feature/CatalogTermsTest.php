@@ -25,7 +25,11 @@ class CatalogTermsTest extends TestCase
         $sellerToken = $seller->createToken('test', ['seller:basic'])->plainTextToken;
 
         $brandId = $this->withToken($superToken)->postJson('/api/admin/brands', ['name' => 'NEXF Original'])->assertCreated()->json('id');
-        $tagId = $this->withToken($superToken)->postJson('/api/admin/tags', ['name' => 'Featured'])->assertCreated()->json('id');
+        $tagId = $this->withToken($sellerToken)->postJson('/api/seller/product-tags', ['name' => ' Featured '])->assertCreated()->assertJsonPath('name', 'Featured')->json('id');
+        $this->withToken($adminToken)->postJson('/api/admin/product-tags', ['name' => 'featured'])->assertOk()->assertJsonPath('id', $tagId);
+        $this->withToken($sellerToken)->postJson('/api/seller/product-tags', ['name' => '   '])->assertUnprocessable();
+        $this->withToken($sellerToken)->postJson('/api/admin/product-tags', ['name' => 'No access'])->assertForbidden();
+        $this->withToken($adminToken)->postJson("/api/admin/tags/{$tagId}/delete")->assertForbidden();
         $this->withToken($adminToken)->postJson('/api/admin/brands', ['name' => 'Forbidden'])->assertForbidden();
         $this->getJson('/api/store/brands')->assertOk()->assertJsonPath('0.slug', 'nexf-original');
 
