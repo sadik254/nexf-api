@@ -161,9 +161,8 @@ class StoreProductController extends Controller
 
         $availableQuantity = (int) ($product->available_quantity ?? 0);
         $currentPrice = $product->current_selling_price !== null ? (string) $product->current_selling_price : null;
+        $basePrice = $product->default_selling_price !== null ? (float) $product->default_selling_price : null;
         $compareAt = $product->compare_at_price !== null ? (string) $product->compare_at_price : null;
-        $discountAmount = $compareAt !== null && $currentPrice !== null && (float) $compareAt > (float) $currentPrice ? number_format((float) $compareAt - (float) $currentPrice, 2, '.', '') : null;
-        $discount = $discountAmount === null ? null : ['amount' => $discountAmount, 'percentage' => (int) round(((float) $discountAmount / (float) $compareAt) * 100)];
         $approvedReviews = $product->reviews()->where('status', 'approved');
         $ratingCount = (int) (clone $approvedReviews)->count();
         $averageRating = $ratingCount ? round((float) (clone $approvedReviews)->avg('rating'), 2) : null;
@@ -174,6 +173,8 @@ class StoreProductController extends Controller
         $priceTo = null;
 
         if ($product->product_type === 'variable') {
+            $variantRegularPrices = $product->variations->pluck('default_selling_price')->filter(fn ($value) => $value !== null && (float) $value > 0)->map(fn ($value) => (float) $value);
+            if ($variantRegularPrices->isNotEmpty()) $basePrice = (float) $variantRegularPrices->min();
             $variations = $product->variations->map(function ($v) {
                 return [
                     'id' => $v->id,
@@ -199,18 +200,30 @@ class StoreProductController extends Controller
             $currentPrice = $priceFrom;
         }
 
+        // The default catalogue price is the regular price. A cheaper current
+        // inventory price becomes a sale without an extra editable discount field.
+        if ($currentPrice !== null && $basePrice !== null && $basePrice > (float) $currentPrice
+            && ($compareAt === null || $basePrice > (float) $compareAt)) {
+            $compareAt = number_format($basePrice, 2, '.', '');
+        }
+        $discountAmount = $compareAt !== null && $currentPrice !== null && (float) $compareAt > (float) $currentPrice ? number_format((float) $compareAt - (float) $currentPrice, 2, '.', '') : null;
+        $discount = $discountAmount === null ? null : ['amount' => $discountAmount, 'percentage' => (int) round(((float) $discountAmount / (float) $compareAt) * 100)];
+
         return [
             'id' => $product->id,
             'name' => $product->name,
             'slug' => $product->slug,
             'seo_title' => $product->seo_title,
             'seo_description' => $product->seo_description,
-            'description' => $product->description,
+            'description' => app(\App\Services\ProductHtmlSanitizer::class)->clean($product->description),
             'specifications' => $product->specifications ?? [],
+            'specification_tables' => $product->specification_tables ?? [],
             'product_type' => $product->product_type,
             'status' => $product->status,
             'thumbnail' => $product->thumbnail,
             'gallery' => $product->gallery,
+            'videos' => $product->videos ?? [],
+            'weight_kg' => $product->weight_kg,
             'image_variants' => $product->image_variants,
             'category' => $product->category ? [
                 'id' => $product->category->id,
@@ -298,11 +311,12 @@ class StoreProductController extends Controller
             'seo_description',
             'description',
             'specifications',
+            'specification_tables',
             'product_type',
             'status',
             'thumbnail',
             'gallery',
-            'compare_at_price', 'option_groups', 'size_chart_id',
+            'compare_at_price', 'option_groups', 'size_chart_id', 'videos', 'weight_kg',
             'homepage_trending', 'homepage_new_arrival', 'homepage_featured', 'homepage_sort_order',
         ])->selectSub($this->productCurrentPriceSubquery(), 'current_selling_price')
             ->selectSub($this->productAvailableQtySubquery(), 'available_quantity');

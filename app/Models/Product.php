@@ -25,13 +25,16 @@ class Product extends Model
         'seo_description',
         'description',
         'specifications',
+        'specification_tables',
         'product_type',
         'status',
         'thumbnail',
         'gallery',
+        'videos',
         'default_buying_price',
         'default_selling_price',
         'compare_at_price', 'option_groups', 'size_chart_id',
+        'weight_kg',
         'homepage_trending', 'homepage_new_arrival', 'homepage_featured', 'homepage_sort_order',
     ];
 
@@ -40,6 +43,9 @@ class Product extends Model
         return [
             'gallery' => 'array',
             'specifications' => 'array',
+            'specification_tables' => 'array',
+            'videos' => 'array',
+            'weight_kg' => 'decimal:2',
             'option_groups' => 'array',
             'compare_at_price' => 'decimal:2',
             'homepage_trending' => 'boolean',

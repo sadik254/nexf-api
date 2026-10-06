@@ -9,6 +9,7 @@ use App\Models\ProductLot;
 use App\Models\Seller;
 use App\Models\SizeChart;
 use App\Models\MediaAsset;
+use App\Services\ProductHtmlSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -113,10 +114,11 @@ class ProductController extends Controller
         $actor = $request->user();
         if (!$actor instanceof Admin || $actor->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
         if ((int) $product->seller_id !== (int) $seller->id) return response()->json(['message' => 'Product does not belong to seller.'], 422);
-        $data = $request->validate(['category_id' => ['sometimes', 'integer', 'exists:product_categories,id'], 'brand_id' => ['sometimes', 'nullable', 'integer', 'exists:brands,id'], 'tag_ids' => ['sometimes', 'array'], 'tag_ids.*' => ['integer', 'distinct', 'exists:tags,id'], 'clear_tags' => ['sometimes', 'boolean'], 'name' => ['sometimes', 'string', 'max:255'], 'slug' => ['sometimes', 'string', 'max:255', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/', Rule::unique('products', 'slug')->ignore($product->id)], 'seo_title' => ['sometimes', 'nullable', 'string', 'max:70'], 'seo_description' => ['sometimes', 'nullable', 'string', 'max:170'], 'description' => ['sometimes', 'nullable', 'string'], 'specifications' => ['sometimes', 'nullable', 'array'], 'clear_specifications' => ['sometimes', 'boolean'], 'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'], 'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'], 'status' => ['sometimes', 'in:draft,active,inactive'], 'homepage_trending' => ['sometimes', 'boolean'], 'homepage_new_arrival' => ['sometimes', 'boolean'], 'homepage_featured' => ['sometimes', 'boolean'], 'homepage_sort_order' => ['sometimes', 'integer', 'min:0']]);
+        $data = $request->validate(['category_id' => ['sometimes', 'integer', 'exists:product_categories,id'], 'brand_id' => ['sometimes', 'nullable', 'integer', 'exists:brands,id'], 'tag_ids' => ['sometimes', 'array'], 'tag_ids.*' => ['integer', 'distinct', 'exists:tags,id'], 'clear_tags' => ['sometimes', 'boolean'], 'name' => ['sometimes', 'string', 'max:255'], 'slug' => ['sometimes', 'string', 'max:255', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/', Rule::unique('products', 'slug')->ignore($product->id)], 'seo_title' => ['sometimes', 'nullable', 'string', 'max:70'], 'seo_description' => ['sometimes', 'nullable', 'string', 'max:170'], 'description' => ['sometimes', 'nullable', 'string'], 'specifications' => ['sometimes', 'nullable', 'array'], 'specification_tables' => ['sometimes', 'nullable', 'array'], 'specification_tables.*.title' => ['nullable', 'string', 'max:120'], 'specification_tables.*.rows' => ['required', 'array', 'max:100'], 'specification_tables.*.rows.*.label' => ['required', 'string', 'max:120'], 'specification_tables.*.rows.*.value' => ['required', 'string', 'max:500'], 'clear_specifications' => ['sometimes', 'boolean'], 'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'], 'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'], 'status' => ['sometimes', 'in:draft,active,inactive'], 'homepage_trending' => ['sometimes', 'boolean'], 'homepage_new_arrival' => ['sometimes', 'boolean'], 'homepage_featured' => ['sometimes', 'boolean'], 'homepage_sort_order' => ['sometimes', 'integer', 'min:0']]);
+        if (array_key_exists('description', $data)) $data['description'] = app(ProductHtmlSanitizer::class)->clean($data['description']);
         if (array_key_exists('tag_ids', $data) || !empty($data['clear_tags'])) $product->tags()->sync($data['tag_ids'] ?? []);
         unset($data['tag_ids'], $data['clear_tags']);
-        if (!empty($data['clear_specifications'])) $data['specifications'] = [];
+        if (!empty($data['clear_specifications'])) { $data['specifications'] = []; $data['specification_tables'] = []; }
         unset($data['clear_specifications']);
         $product->fill($data)->save();
         return response()->json(['message' => 'Seller product updated successfully.', 'product' => $product->fresh(['category', 'brand', 'tags', 'seller', 'variations'])]);
@@ -148,6 +150,11 @@ class ProductController extends Controller
             'seo_description' => ['nullable', 'string', 'max:170'],
             'description' => ['nullable', 'string'],
             'specifications' => ['nullable', 'array'],
+            'specification_tables' => ['nullable', 'array'],
+            'specification_tables.*.title' => ['nullable', 'string', 'max:120'],
+            'specification_tables.*.rows' => ['required', 'array', 'max:100'],
+            'specification_tables.*.rows.*.label' => ['required', 'string', 'max:120'],
+            'specification_tables.*.rows.*.value' => ['required', 'string', 'max:500'],
             'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'],
             'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'],
             'product_type' => ['required', 'in:simple,variable'],
@@ -158,14 +165,19 @@ class ProductController extends Controller
             'gallery.*' => ['file', 'image', 'max:5120'],
             'gallery_media_ids' => ['nullable', 'array', 'max:30'],
             'gallery_media_ids.*' => ['integer', 'distinct', 'exists:media_assets,id'],
+            'videos' => ['nullable', 'array', 'max:20'],
+            'videos.*' => ['required', 'url', 'starts_with:https://'],
             'default_buying_price' => ['nullable', 'numeric', 'min:0'],
             'default_selling_price' => ['nullable', 'numeric', 'min:0'],
+            'weight_kg' => ['nullable', 'numeric', 'min:0.1', 'max:999999'],
             'size_chart_id' => ['nullable', 'integer', 'exists:size_charts,id'],
             'homepage_trending' => ['nullable', 'boolean'],
             'homepage_new_arrival' => ['nullable', 'boolean'],
             'homepage_featured' => ['nullable', 'boolean'],
             'homepage_sort_order' => ['nullable', 'integer', 'min:0'],
         ]);
+
+        if (array_key_exists('description', $data)) $data['description'] = app(ProductHtmlSanitizer::class)->clean($data['description']);
 
         if ($actor instanceof Seller) {
             unset($data['homepage_trending'], $data['homepage_new_arrival'], $data['homepage_featured'], $data['homepage_sort_order']);
@@ -214,12 +226,15 @@ class ProductController extends Controller
             'seo_description' => $data['seo_description'] ?? null,
             'description' => $data['description'] ?? null,
             'specifications' => $data['specifications'] ?? null,
+            'specification_tables' => $data['specification_tables'] ?? null,
             'product_type' => $data['product_type'],
             'status' => $data['status'] ?? 'draft',
             'thumbnail' => $thumbnailUrl,
             'gallery' => $galleryUrls,
+            'videos' => $data['videos'] ?? null,
             'default_buying_price' => $data['default_buying_price'] ?? null,
             'default_selling_price' => $data['default_selling_price'] ?? null,
+            'weight_kg' => $data['weight_kg'] ?? 0.5,
             'size_chart_id' => $data['size_chart_id'] ?? null,
             'homepage_trending' => (bool) ($data['homepage_trending'] ?? false),
             'homepage_new_arrival' => (bool) ($data['homepage_new_arrival'] ?? false),
@@ -251,6 +266,11 @@ class ProductController extends Controller
             'seo_description' => ['sometimes', 'nullable', 'string', 'max:170'],
             'description' => ['sometimes', 'string'],
             'specifications' => ['sometimes', 'nullable', 'array'],
+            'specification_tables' => ['sometimes', 'nullable', 'array'],
+            'specification_tables.*.title' => ['nullable', 'string', 'max:120'],
+            'specification_tables.*.rows' => ['required', 'array', 'max:100'],
+            'specification_tables.*.rows.*.label' => ['required', 'string', 'max:120'],
+            'specification_tables.*.rows.*.value' => ['required', 'string', 'max:500'],
             'clear_specifications' => ['sometimes', 'boolean'],
             'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'],
             'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'],
@@ -262,8 +282,12 @@ class ProductController extends Controller
             'gallery.*' => ['file', 'image', 'max:5120'],
             'gallery_media_ids' => ['sometimes', 'array', 'max:30'],
             'gallery_media_ids.*' => ['integer', 'distinct', 'exists:media_assets,id'],
+            'videos' => ['sometimes', 'array', 'max:20'],
+            'videos.*' => ['required', 'url', 'starts_with:https://'],
+            'clear_videos' => ['sometimes', 'boolean'],
             'default_buying_price' => ['sometimes', 'numeric', 'min:0'],
             'default_selling_price' => ['sometimes', 'numeric', 'min:0'],
+            'weight_kg' => ['sometimes', 'nullable', 'numeric', 'min:0.1', 'max:999999'],
             'size_chart_id' => ['sometimes', 'nullable', 'integer', 'exists:size_charts,id'],
             'homepage_trending' => ['sometimes', 'boolean'],
             'homepage_new_arrival' => ['sometimes', 'boolean'],
@@ -271,14 +295,18 @@ class ProductController extends Controller
             'homepage_sort_order' => ['sometimes', 'integer', 'min:0'],
         ]);
 
+        if (array_key_exists('description', $data)) $data['description'] = app(ProductHtmlSanitizer::class)->clean($data['description']);
+
         if ($request->user() instanceof Seller) {
             unset($data['homepage_trending'], $data['homepage_new_arrival'], $data['homepage_featured'], $data['homepage_sort_order']);
         }
 
         $tagIds = array_key_exists('tag_ids', $data) || !empty($data['clear_tags']) ? ($data['tag_ids'] ?? []) : null;
         unset($data['tag_ids'], $data['clear_tags']);
-        if (!empty($data['clear_specifications'])) $data['specifications'] = [];
+        if (!empty($data['clear_specifications'])) { $data['specifications'] = []; $data['specification_tables'] = []; }
         unset($data['clear_specifications']);
+        if (!empty($data['clear_videos'])) $data['videos'] = [];
+        unset($data['clear_videos']);
 
         if (array_key_exists('slug', $data)) {
             $product->slug = $data['slug'];
@@ -326,12 +354,15 @@ class ProductController extends Controller
             'seo_description' => array_key_exists('seo_description', $data) ? $data['seo_description'] : $product->seo_description,
             'description' => $data['description'] ?? $product->description,
             'specifications' => array_key_exists('specifications', $data) ? $data['specifications'] : $product->specifications,
+            'specification_tables' => array_key_exists('specification_tables', $data) ? $data['specification_tables'] : $product->specification_tables,
             'product_type' => $data['product_type'] ?? $product->product_type,
             'status' => $data['status'] ?? $product->status,
             'thumbnail' => $thumbnailUrl,
             'gallery' => $galleryUrls,
+            'videos' => array_key_exists('videos', $data) ? $data['videos'] : $product->videos,
             'default_buying_price' => $data['default_buying_price'] ?? $product->default_buying_price,
             'default_selling_price' => $data['default_selling_price'] ?? $product->default_selling_price,
+            'weight_kg' => array_key_exists('weight_kg', $data) ? $data['weight_kg'] : $product->weight_kg,
             'size_chart_id' => array_key_exists('size_chart_id', $data) ? $data['size_chart_id'] : $product->size_chart_id,
             'homepage_trending' => $data['homepage_trending'] ?? $product->homepage_trending,
             'homepage_new_arrival' => $data['homepage_new_arrival'] ?? $product->homepage_new_arrival,
