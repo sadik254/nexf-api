@@ -8,7 +8,7 @@ use DOMNode;
 
 class ProductHtmlSanitizer
 {
-    private const TAGS = ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'sub', 'sup', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'code', 'hr', 'ul', 'ol', 'li', 'blockquote', 'a', 'img', 'video', 'iframe', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td'];
+    private const TAGS = ['span', 'p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'sub', 'sup', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'code', 'hr', 'ul', 'ol', 'li', 'blockquote', 'a', 'img', 'video', 'iframe', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td'];
 
     public function clean(?string $html): ?string
     {
@@ -30,6 +30,16 @@ class ProductHtmlSanitizer
     {
         if (!$node instanceof DOMElement) return;
         $tag = strtolower($node->tagName);
+        // contentEditable's colour command emits legacy font elements.
+        // Convert them to a span with a narrowly validated colour style.
+        if ($tag === 'font') {
+            $span = $node->ownerDocument->createElement('span');
+            if ($node->hasAttribute('color')) $span->setAttribute('style', 'color:'.$node->getAttribute('color'));
+            while ($node->firstChild) $span->appendChild($node->firstChild);
+            $node->parentNode?->replaceChild($span, $node);
+            $node = $span;
+            $tag = 'span';
+        }
         if (in_array($tag, ['script', 'style', 'object', 'embed', 'svg', 'math'], true)) {
             $node->parentNode?->removeChild($node);
             return;
@@ -43,6 +53,12 @@ class ProductHtmlSanitizer
         foreach (iterator_to_array($node->attributes) as $attribute) {
             $name = strtolower($attribute->name);
             $value = trim($attribute->value);
+            if ($name === 'style') {
+                $safe = $this->safeStyle($value);
+                if ($safe !== '') { $node->setAttribute('style', $safe); continue; }
+            }
+            if ($tag === 'a' && $name === 'target' && $value === '_blank') continue;
+            if ($tag === 'a' && $name === 'title') continue;
             if ($tag === 'a' && $name === 'href' && preg_match('#^https?://#i', $value)) continue;
             if (in_array($tag, ['img', 'video'], true) && $name === 'src' && preg_match('#^https://#i', $value)) continue;
             if ($tag === 'iframe' && $name === 'src' && $this->safeEmbedUrl($value)) continue;
@@ -57,6 +73,21 @@ class ProductHtmlSanitizer
             return;
         }
         if ($tag === 'a') $node->setAttribute('rel', 'nofollow noopener noreferrer');
+    }
+
+    private function safeStyle(string $style): string
+    {
+        $safe = [];
+        foreach (explode(';', $style) as $declaration) {
+            $parts = explode(':', $declaration, 2);
+            if (count($parts) !== 2) continue;
+            [$property, $value] = array_map('trim', $parts);
+            $property = strtolower($property);
+            if (in_array($property, ['color', 'background-color'], true) &&
+                preg_match('/^(#[a-f0-9]{3,8}|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)|[a-z]{1,20})$/i', $value)) $safe[] = $property.':'.$value;
+            if ($property === 'text-align' && in_array($value, ['left', 'right', 'center', 'justify'], true)) $safe[] = $property.':'.$value;
+        }
+        return implode(';', $safe);
     }
 
     private function safeEmbedUrl(string $url): bool

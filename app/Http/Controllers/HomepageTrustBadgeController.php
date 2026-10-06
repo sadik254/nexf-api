@@ -26,10 +26,10 @@ class HomepageTrustBadgeController extends Controller
     {
         $this->authorizeManager($request);
         $data = $request->validate([
-            'badges' => ['required', 'array', 'max:8'],
-            'badges.*.icon' => ['required', Rule::in(['BadgeCheck', 'Crown', 'Truck', 'RefreshCw', 'ShieldCheck'])],
+            'badges' => ['present', 'array', 'max:8'],
+            'badges.*.icon' => ['required', Rule::in(['BadgeCheck', 'Crown', 'Truck', 'RefreshCw', 'Undo2', 'ShieldCheck', 'Lock', 'CreditCard', 'Wallet', 'BadgePercent', 'Gift', 'Package', 'Clock', 'Zap', 'Headset', 'Award', 'Star', 'ThumbsUp', 'Heart', 'Smile', 'Leaf', 'MapPin', 'Store'])],
             'badges.*.label' => ['required', 'string', 'max:120'],
-            'badges.*.tone' => ['required', Rule::in(['blue', 'pink', 'violet', 'emerald', 'amber', 'sky'])],
+            'badges.*.tone' => ['required', Rule::in(['slate', 'gray', 'zinc', 'neutral', 'stone', 'red', 'orange', 'amber', 'yellow', 'lime', 'green', 'emerald', 'teal', 'cyan', 'sky', 'blue', 'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose'])],
             'badges.*.hidden' => ['sometimes', 'boolean'],
         ]);
         DB::transaction(function () use ($data) {

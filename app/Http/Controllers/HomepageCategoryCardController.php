@@ -37,7 +37,7 @@ class HomepageCategoryCardController extends Controller
             'cards.*.image' => ['required', 'string', 'max:1000', 'regex:/^(\/|https:\/\/)/'],
             'cards.*.mobile_image' => ['nullable', 'string', 'max:1000', 'regex:/^(\/|https:\/\/)/'],
             'cards.*.cta' => ['nullable', 'string', 'max:80'],
-            'cards.*.theme' => ['required', Rule::in(['blue', 'pink', 'violet', 'emerald', 'amber', 'sky'])],
+            'cards.*.theme' => ['required', Rule::in(['slate', 'gray', 'zinc', 'neutral', 'stone', 'red', 'orange', 'amber', 'yellow', 'lime', 'green', 'emerald', 'teal', 'cyan', 'sky', 'blue', 'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose'])],
             'cards.*.hidden' => ['required', 'boolean'],
         ]);
         $ids = array_values(array_filter(array_column($data['cards'], 'id')));

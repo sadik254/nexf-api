@@ -194,10 +194,12 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/tags/{tag}/delete', [CatalogTermController::class, 'deleteTag']);
     Route::get('/sellers/{seller}/delivery-rates', [SellerShippingRateController::class, 'adminIndex']);
     Route::post('/sellers/{seller}/delivery-rates', [SellerShippingRateController::class, 'adminUpdate']);
+    Route::get('/console-summary', [\App\Http\Controllers\ConsoleController::class, 'summary']);
     Route::get('/dashboard', [DashboardController::class, 'admin']);
     Route::get('/homepage/banners', [HomepageBannerController::class, 'indexAdmin']);
     Route::get('/homepage/notices', [HomepageNoticeController::class, 'index']);
     Route::post('/homepage/notices', [HomepageNoticeController::class, 'store']);
+    Route::post('/homepage/notices/reorder', [HomepageNoticeController::class, 'reorder']);
     Route::post('/homepage/notices/{notice}', [HomepageNoticeController::class, 'update']);
     Route::post('/homepage/notices/{notice}/delete', [HomepageNoticeController::class, 'destroy']);
     Route::get('/homepage/trust-badges', [HomepageTrustBadgeController::class, 'index']);
@@ -274,6 +276,7 @@ Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(f
     Route::post('/collections/{collection}/delete', [ProductCollectionController::class, 'destroy']);
     Route::get('/delivery-rates', [SellerShippingRateController::class, 'sellerIndex']);
     Route::post('/delivery-rates', [SellerShippingRateController::class, 'sellerUpdate']);
+    Route::get('/console-summary', [\App\Http\Controllers\ConsoleController::class, 'summary']);
     Route::get('/dashboard', [DashboardController::class, 'seller']);
     Route::get('/product-reviews', [ProductEngagementController::class, 'reviewsForSeller']);
     Route::post('/product-reviews/{review}/moderate', [ProductEngagementController::class, 'moderateReviewForSeller']);

@@ -22,7 +22,8 @@ class AdminController extends Controller
         $perPage = max(1, min($perPage, 100));
         $search = (string) $request->query('search', '');
 
-        $query = Admin::query()->latest();
+        $filters = $request->validate(['role' => ['nullable', 'in:super_admin,admin,moderator,editor']]);
+        $query = Admin::query()->when($filters['role'] ?? null, fn ($query, $role) => $query->where('role', $role))->latest();
 
         if ($search !== '') {
             $query->where(function ($q) use ($search) {
@@ -249,9 +250,10 @@ class AdminController extends Controller
         $data = $request->validate([
             'name' => ['sometimes', 'string', 'max:255'],
             'email' => ['sometimes', 'email', 'max:255'],
-            'phone' => ['sometimes', 'string', 'max:32'],
+            'phone' => ['sometimes', 'nullable', 'string', 'max:32'],
             'address' => ['sometimes', 'string'],
             'image' => ['sometimes', 'file', 'image', 'max:5120'],
+            'clear_image' => ['sometimes', 'boolean'],
         ]);
 
         if ($request->filled('email')) {
@@ -272,7 +274,7 @@ class AdminController extends Controller
             }
         }
 
-        $imageUrl = $admin->image;
+        $imageUrl = !empty($data['clear_image']) ? null : $admin->image;
         if ($request->hasFile('image')) {
             $configuration = Configuration::create(
                 config('services.uploadcare.public_key'),
@@ -290,7 +292,7 @@ class AdminController extends Controller
         $admin->fill([
             'name' => $data['name'] ?? $admin->name,
             'email' => $data['email'] ?? $admin->email,
-            'phone' => $data['phone'] ?? $admin->phone,
+            'phone' => array_key_exists('phone', $data) ? $data['phone'] : $admin->phone,
             'address' => $data['address'] ?? $admin->address,
             'image' => $imageUrl,
         ])->save();

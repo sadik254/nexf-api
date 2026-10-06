@@ -6,6 +6,8 @@ use App\Models\Admin;
 use App\Models\HomepageNotice;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class HomepageNoticeController extends Controller
 {
@@ -41,6 +43,20 @@ class HomepageNoticeController extends Controller
         $this->authorizeManager($request);
         $notice->delete();
         return response()->json(['message' => 'Notice deleted.']);
+    }
+
+    public function reorder(Request $request): JsonResponse
+    {
+        $this->authorizeManager($request);
+        $data = $request->validate(['ids' => ['present', 'array'], 'ids.*' => ['required', 'integer', 'distinct']]);
+        DB::transaction(function () use ($data) {
+            $existing = HomepageNotice::query()->orderBy('id')->lockForUpdate()->pluck('id')->all();
+            $submitted = $data['ids'];
+            sort($submitted);
+            if ($submitted !== $existing) throw ValidationException::withMessages(['ids' => 'Refresh the notice list before reordering.']);
+            foreach ($data['ids'] as $index => $id) HomepageNotice::whereKey($id)->update(['sort_order' => $index]);
+        });
+        return response()->json(['message' => 'Notices reordered.']);
     }
 
     private function authorizeManager(Request $request): void

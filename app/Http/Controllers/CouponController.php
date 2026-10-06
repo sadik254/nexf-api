@@ -21,7 +21,20 @@ class CouponController extends Controller
         $perPage = max(1, min($perPage, 100));
         $search = (string) $request->query('search', '');
 
+        $filters = $request->validate(['status' => ['nullable', 'in:active,scheduled,expired,inactive']]);
         $query = Coupon::query()->latest();
+        $now = now();
+        switch ($filters['status'] ?? null) {
+            case 'inactive': $query->where('is_active', false); break;
+            case 'expired': $query->where('is_active', true)->where('expires_at', '<', $now); break;
+            case 'scheduled':
+                $query->where('is_active', true)->where('starts_at', '>', $now)
+                    ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>=', $now)); break;
+            case 'active':
+                $query->where('is_active', true)
+                    ->where(fn ($q) => $q->whereNull('starts_at')->orWhere('starts_at', '<=', $now))
+                    ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>=', $now)); break;
+        }
 
         if ($search !== '') {
             $query->where(function ($q) use ($search) {

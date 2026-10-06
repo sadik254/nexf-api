@@ -31,7 +31,7 @@ class HomepageOfferBlockController extends Controller
             'href' => ['sometimes', 'required', 'string', 'max:500', 'regex:/^(\/|https:\/\/)/'],
             'image' => ['sometimes', 'required', 'string', 'max:1000', 'regex:/^(\/|https:\/\/)/'],
             'mobile_image' => ['sometimes', 'nullable', 'string', 'max:1000', 'regex:/^(\/|https:\/\/)/'],
-            'theme' => ['sometimes', Rule::in(['blue', 'pink', 'violet', 'emerald', 'amber', 'sky'])],
+            'theme' => ['sometimes', Rule::in(['slate', 'gray', 'zinc', 'neutral', 'stone', 'red', 'orange', 'amber', 'yellow', 'lime', 'green', 'emerald', 'teal', 'cyan', 'sky', 'blue', 'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose'])],
             'hidden' => ['sometimes', 'boolean'],
         ]);
         $block->update($data);

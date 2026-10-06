@@ -25,10 +25,18 @@ class SellerController extends Controller
         $search = (string) $request->query('search', '');
         $status = (string) $request->query('status', '');
 
+        $period = $request->validate(['from' => ['sometimes', 'date_format:Y-m-d'], 'to' => ['sometimes', 'date_format:Y-m-d', 'after_or_equal:from']]);
+        $salesScope = function ($items) use ($period) {
+            return $items->whereHas('order', function ($orders) use ($period) {
+                $orders->where('status', '!=', 'cancelled');
+                if (isset($period['from'])) $orders->where('created_at', '>=', $period['from'].' 00:00:00');
+                if (isset($period['to'])) $orders->where('created_at', '<=', $period['to'].' 23:59:59');
+            });
+        };
         $query = Seller::query()
             ->withCount('products')
-            ->withSum(['orderItems as units_sold' => fn ($items) => $items->whereHas('order', fn ($orders) => $orders->where('status', '!=', 'cancelled'))], 'quantity')
-            ->withSum(['orderItems as revenue' => fn ($items) => $items->whereHas('order', fn ($orders) => $orders->where('status', '!=', 'cancelled'))], 'line_subtotal')
+            ->withSum(['orderItems as units_sold' => $salesScope], 'quantity')
+            ->withSum(['orderItems as revenue' => $salesScope], 'line_subtotal')
             ->latest();
 
         if ($search !== '') {
@@ -44,7 +52,7 @@ class SellerController extends Controller
             $query->where('status', $status);
         }
 
-        return response()->json($query->paginate($perPage));
+        return response()->json(array_merge($query->paginate($perPage)->toArray(), ['sales_period' => $period ?: null]));
     }
 
     public function show(Seller $seller): JsonResponse
