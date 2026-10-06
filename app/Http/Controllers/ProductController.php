@@ -88,9 +88,7 @@ class ProductController extends Controller
     {
         $this->authorizeProductRead($product, $request->user());
 
-        return response()->json(
-            $product->load(['category', 'brand', 'tags', 'seller', 'variations'])
-        );
+        return response()->json($this->productForEditor($product));
     }
 
     public function showSellerProductForAdmin(Seller $seller, Product $product, Request $request): JsonResponse
@@ -104,9 +102,31 @@ class ProductController extends Controller
             return response()->json(['message' => 'Product does not belong to seller.'], 422);
         }
 
-        return response()->json(
-            $product->load(['category', 'brand', 'tags', 'seller', 'variations'])
-        );
+        return response()->json($this->productForEditor($product));
+    }
+
+    private function productForEditor(Product $product): array
+    {
+        $product->load(['category', 'brand', 'tags', 'seller', 'variations']);
+        $prices = $product->product_type === 'variable'
+            ? $product->variations->map(fn ($variation) => ProductLot::query()
+                ->where('variation_id', $variation->id)->where('quantity_remaining', '>', 0)
+                ->orderByRaw('received_at is null')->orderBy('received_at')->orderBy('id')
+                ->value('selling_price'))->filter(fn ($price) => $price !== null)->map(fn ($price) => (float) $price)
+            : collect([ProductLot::query()->where('product_id', $product->id)->whereNull('variation_id')
+                ->where('quantity_remaining', '>', 0)->orderByRaw('received_at is null')
+                ->orderBy('received_at')->orderBy('id')->value('selling_price')])
+                ->filter(fn ($price) => $price !== null)->map(fn ($price) => (float) $price);
+        $current = $prices->isEmpty() ? null : $prices->min();
+        $regular = $product->product_type === 'variable'
+            ? $product->variations->pluck('default_selling_price')->filter(fn ($price) => $price !== null && (float) $price > 0)->map(fn ($price) => (float) $price)->min()
+            : ($product->default_selling_price === null ? null : (float) $product->default_selling_price);
+        $compareAt = $product->compare_at_price === null ? null : (float) $product->compare_at_price;
+        if ($current !== null && $regular !== null && $regular > $current && ($compareAt === null || $regular > $compareAt)) $compareAt = $regular;
+        return array_merge($product->toArray(), [
+            'current_selling_price' => $current === null ? null : number_format($current, 2, '.', ''),
+            'compare_at_price' => $compareAt === null ? null : number_format($compareAt, 2, '.', ''),
+        ]);
     }
 
     public function updateSellerProductForSuperAdmin(Seller $seller, Product $product, Request $request): JsonResponse

@@ -3,6 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\Product;
+use App\Models\Admin;
+use App\Models\ProductCategory;
+use App\Models\ProductLot;
 use App\Services\ProductHtmlSanitizer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -35,5 +38,17 @@ class ProductEditorFieldsTest extends TestCase
         $this->assertStringNotContainsString('script', $html);
         $this->assertStringNotContainsString('onclick', $html);
         $this->assertStringNotContainsString('javascript:', $html);
+    }
+
+    public function test_editor_reports_compare_at_price_from_regular_and_inventory_prices(): void
+    {
+        $admin = Admin::create(['name' => 'Owner', 'email' => 'pricing-owner@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $token = $admin->createToken('test', ['admin:basic'])->plainTextToken;
+        $category = ProductCategory::create(['name' => 'Coats', 'slug' => 'pricing-coats']);
+        $product = Product::create(['category_id' => $category->id, 'name' => 'Pink coat', 'slug' => 'pricing-pink-coat', 'product_type' => 'simple', 'status' => 'active', 'default_selling_price' => 500]);
+        ProductLot::create(['product_id' => $product->id, 'lot_number' => 'SALE-1', 'buying_price' => 200, 'selling_price' => 360, 'quantity' => 5, 'quantity_remaining' => 5]);
+
+        $this->withToken($token)->getJson("/api/admin/products/{$product->id}")
+            ->assertOk()->assertJsonPath('current_selling_price', '360.00')->assertJsonPath('compare_at_price', '500.00');
     }
 }
