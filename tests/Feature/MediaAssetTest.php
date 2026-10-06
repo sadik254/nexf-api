@@ -49,5 +49,26 @@ class MediaAssetTest extends TestCase
         $this->withToken($token)->postJson('/api/seller/products', $base + ['thumbnail_media_id' => $theirs->id])->assertForbidden();
         $this->withToken($token)->postJson('/api/seller/products', $base + ['thumbnail_media_id' => $mine->id, 'gallery_media_ids' => [$mine->id]])
             ->assertCreated()->assertJsonPath('product.thumbnail', 'https://example.test/mine.jpg')->assertJsonPath('product.gallery.0', 'https://example.test/mine.jpg');
+
+        $secondImage = \App\Models\MediaAsset::create(['owner_type' => 'seller', 'owner_id' => $seller->id, 'source' => 'url', 'url' => 'https://example.test/second.jpg', 'file_name' => 'second.jpg', 'mime_type' => 'image/jpeg']);
+        $product = \App\Models\Product::where('seller_id', $seller->id)->firstOrFail();
+        $this->withToken($token)->postJson("/api/seller/products/{$product->id}", [
+            'thumbnail_media_id' => $secondImage->id,
+            'gallery_order' => [['url' => 'https://example.test/mine.jpg']],
+        ])->assertOk()->assertJsonPath('product.thumbnail', 'https://example.test/second.jpg')->assertJsonPath('product.gallery.0', 'https://example.test/mine.jpg');
+        $this->withToken($token)->postJson("/api/seller/products/{$product->id}", [
+            'gallery_order' => [['url' => 'https://example.test/unrelated.jpg']],
+        ])->assertUnprocessable();
+        $this->withToken($token)->postJson("/api/seller/products/{$product->id}", [
+            'gallery_order' => [['media_id' => $theirs->id]],
+        ])->assertForbidden();
+        $this->withToken($token)->postJson("/api/seller/products/{$product->id}", [
+            'clear_gallery' => true,
+            'default_selling_price' => 499,
+            'compare_at_price' => 699,
+            'weight_kg' => 0.8,
+        ])->assertOk()->assertJsonPath('product.gallery', [])
+            ->assertJsonPath('product.default_selling_price', 499)
+            ->assertJsonPath('product.compare_at_price', '699.00');
     }
 }

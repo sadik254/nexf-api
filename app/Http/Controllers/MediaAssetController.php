@@ -19,6 +19,7 @@ class MediaAssetController extends Controller
         $actor = $this->actor($request);
         $query = MediaAsset::query()->latest();
         if ($actor instanceof Seller) $query->where('owner_type', 'seller')->where('owner_id', $actor->id);
+        if ($actor instanceof Admin && $request->query('owner_type') === 'admin') $query->where('owner_type', 'admin');
         if ($request->filled('search')) {
             $term = substr((string) $request->query('search'), 0, 100);
             $query->where(fn ($q) => $q->where('file_name', 'like', "%{$term}%")->orWhere('alt_text', 'like', "%{$term}%"));

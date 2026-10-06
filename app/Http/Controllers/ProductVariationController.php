@@ -15,7 +15,7 @@ class ProductVariationController extends Controller
     {
         $this->authorizeProduct($product, $request->user());
 
-        return response()->json($product->variations()->latest()->get());
+        return response()->json($product->variations()->withSum('lots as available_quantity', 'quantity_remaining')->latest()->get());
     }
 
     public function store(Product $product, Request $request): JsonResponse
@@ -107,7 +107,7 @@ class ProductVariationController extends Controller
             abort(403, 'Forbidden.');
         }
 
-        if ($actor instanceof Admin && $product->seller_id !== null) {
+        if ($actor instanceof Admin && $product->seller_id !== null && $actor->role !== 'super_admin') {
             abort(403, 'Forbidden.');
         }
     }

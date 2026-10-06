@@ -6,6 +6,8 @@ use App\Models\Product;
 use App\Models\Admin;
 use App\Models\ProductCategory;
 use App\Models\ProductLot;
+use App\Models\Seller;
+use App\Models\MediaAsset;
 use App\Services\ProductHtmlSanitizer;
 use App\Services\InventoryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -39,6 +41,54 @@ class ProductEditorFieldsTest extends TestCase
         $this->assertStringNotContainsString('script', $html);
         $this->assertStringNotContainsString('onclick', $html);
         $this->assertStringNotContainsString('javascript:', $html);
+
+        $media = app(ProductHtmlSanitizer::class)->clean('<table><tr><th colspan="2" onclick="evil()">Size</th></tr></table><img src="https://example.com/coat.jpg" alt="Coat" onerror="evil()"><video src="https://example.com/fit.mp4" controls autoplay></video><iframe src="https://www.youtube-nocookie.com/embed/abc123XYZ" title="Video"></iframe><iframe src="https://example.com/evil"></iframe><img src="javascript:alert(1)">');
+        $this->assertStringContainsString('colspan="2"', $media);
+        $this->assertStringContainsString('src="https://example.com/coat.jpg"', $media);
+        $this->assertStringContainsString('src="https://example.com/fit.mp4"', $media);
+        $this->assertStringContainsString('src="https://www.youtube-nocookie.com/embed/abc123XYZ"', $media);
+        $this->assertStringNotContainsString('https://example.com/evil', $media);
+        $this->assertStringNotContainsString('onerror', $media);
+        $this->assertStringNotContainsString('autoplay', $media);
+        $this->assertStringNotContainsString('javascript:', $media);
+    }
+
+    public function test_super_admin_seller_product_editor_saves_media_videos_and_variations(): void
+    {
+        $seller = Seller::create(['seller_name' => 'Seller', 'email' => 'editor-seller@example.test', 'store_name' => 'Editor Store', 'store_slug' => 'editor-store', 'kyc_type' => 'nid', 'kyc_number' => '99', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
+        $admin = Admin::create(['name' => 'Super', 'email' => 'seller-editor-admin@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $category = ProductCategory::create(['name' => 'Coats', 'slug' => 'editor-coats']);
+        $product = Product::create(['seller_id' => $seller->id, 'category_id' => $category->id, 'name' => 'Coat', 'slug' => 'editor-coat', 'product_type' => 'variable', 'status' => 'draft']);
+        $asset = MediaAsset::create(['owner_type' => 'admin', 'owner_id' => $admin->id, 'source' => 'url', 'url' => 'https://example.test/coat.jpg', 'file_name' => 'coat.jpg', 'mime_type' => 'image/jpeg']);
+        $token = $admin->createToken('test', ['admin:basic'])->plainTextToken;
+
+        $assignedId = $this->withToken($token)->postJson('/api/admin/products', ['seller_id' => $seller->id, 'category_id' => $category->id, 'name' => 'Second coat', 'product_type' => 'simple'])
+            ->assertCreated()->assertJsonPath('product.seller_id', $seller->id)->json('product.id');
+        $this->assertNotNull($assignedId);
+        $basic = Admin::create(['name' => 'Basic', 'email' => 'basic-editor@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);
+        $this->withToken($basic->createToken('test', ['admin:basic'])->plainTextToken)->postJson('/api/admin/products', ['seller_id' => $seller->id, 'category_id' => $category->id, 'name' => 'Forbidden coat', 'product_type' => 'simple'])->assertForbidden();
+
+        $this->withToken($token)->postJson("/api/admin/sellers/{$seller->id}/products/{$product->id}", [
+            'thumbnail_media_id' => $asset->id,
+            'videos' => ['https://example.test/coat.mp4'],
+            'description' => '<p>Coat</p><img src="https://example.test/coat.jpg" alt="Coat">',
+            'compare_at_price' => 700,
+            'option_groups' => [['key' => 'Color', 'label' => 'Color', 'display_type' => 'swatch', 'values' => [['value' => 'Pink', 'label' => 'Pink', 'swatch' => '#f5a5c8']]], ['key' => 'Pattern', 'label' => 'Pattern', 'display_type' => 'image', 'values' => [['value' => 'Floral', 'label' => 'Floral', 'image_url' => 'https://example.test/floral.jpg']]]],
+        ])->assertOk()->assertJsonPath('product.thumbnail', $asset->url)
+            ->assertJsonPath('product.videos.0', 'https://example.test/coat.mp4')
+            ->assertJsonPath('product.option_groups.0.values.0.swatch', '#f5a5c8')
+            ->assertJsonPath('product.option_groups.1.values.0.image_url', 'https://example.test/floral.jpg')
+            ->assertJsonPath('product.compare_at_price', '700.00');
+        $this->assertStringContainsString('<img src="https://example.test/coat.jpg"', $product->fresh()->description);
+        $this->withToken($token)->postJson("/api/admin/products/{$product->id}/variations", ['attributes' => ['Color' => 'Pink', 'Size' => 'M'], 'default_selling_price' => 500])
+            ->assertCreated()->assertJsonPath('variation.attributes.Color', 'Pink');
+        $this->withToken($token)->postJson("/api/admin/sellers/{$seller->id}/products/{$product->id}", ['product_type' => 'simple'])
+            ->assertUnprocessable();
+        $this->withToken($token)->postJson("/api/admin/sellers/{$seller->id}/products/{$product->id}", ['clear_option_groups' => true])
+            ->assertOk()->assertJsonPath('product.option_groups', []);
+        $this->withToken($token)->postJson("/api/admin/sellers/{$seller->id}/products/{$product->id}", [
+            'option_groups' => [['key' => 'Size', 'label' => 'Size', 'display_type' => 'button', 'values' => [['value' => 'M', 'label' => 'M'], ['value' => 'M', 'label' => 'M']]]],
+        ])->assertUnprocessable();
     }
 
     public function test_editor_reports_independent_product_prices_and_inventory_cost(): void

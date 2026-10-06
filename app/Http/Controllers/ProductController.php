@@ -14,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Uploadcare\Api;
 use Uploadcare\Configuration;
 
@@ -123,14 +124,7 @@ class ProductController extends Controller
         $actor = $request->user();
         if (!$actor instanceof Admin || $actor->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
         if ((int) $product->seller_id !== (int) $seller->id) return response()->json(['message' => 'Product does not belong to seller.'], 422);
-        $data = $request->validate(['category_id' => ['sometimes', 'integer', 'exists:product_categories,id'], 'brand_id' => ['sometimes', 'nullable', 'integer', 'exists:brands,id'], 'tag_ids' => ['sometimes', 'array'], 'tag_ids.*' => ['integer', 'distinct', 'exists:tags,id'], 'clear_tags' => ['sometimes', 'boolean'], 'name' => ['sometimes', 'string', 'max:255'], 'slug' => ['sometimes', 'string', 'max:255', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/', Rule::unique('products', 'slug')->ignore($product->id)], 'seo_title' => ['sometimes', 'nullable', 'string', 'max:70'], 'seo_description' => ['sometimes', 'nullable', 'string', 'max:170'], 'description' => ['sometimes', 'nullable', 'string'], 'specifications' => ['sometimes', 'nullable', 'array'], 'specification_tables' => ['sometimes', 'nullable', 'array'], 'specification_tables.*.title' => ['nullable', 'string', 'max:120'], 'specification_tables.*.rows' => ['required', 'array', 'max:100'], 'specification_tables.*.rows.*.label' => ['required', 'string', 'max:120'], 'specification_tables.*.rows.*.value' => ['required', 'string', 'max:500'], 'clear_specifications' => ['sometimes', 'boolean'], 'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'], 'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'], 'status' => ['sometimes', 'in:draft,active,inactive'], 'homepage_trending' => ['sometimes', 'boolean'], 'homepage_new_arrival' => ['sometimes', 'boolean'], 'homepage_featured' => ['sometimes', 'boolean'], 'homepage_sort_order' => ['sometimes', 'integer', 'min:0']]);
-        if (array_key_exists('description', $data)) $data['description'] = app(ProductHtmlSanitizer::class)->clean($data['description']);
-        if (array_key_exists('tag_ids', $data) || !empty($data['clear_tags'])) $product->tags()->sync($data['tag_ids'] ?? []);
-        unset($data['tag_ids'], $data['clear_tags']);
-        if (!empty($data['clear_specifications'])) { $data['specifications'] = []; $data['specification_tables'] = []; }
-        unset($data['clear_specifications']);
-        $product->fill($data)->save();
-        return response()->json(['message' => 'Seller product updated successfully.', 'product' => $product->fresh(['category', 'brand', 'tags', 'seller', 'variations'])]);
+        return $this->update($request, $product, true);
     }
 
     public function destroySellerProductForSuperAdmin(Seller $seller, Product $product, Request $request): JsonResponse
@@ -148,6 +142,7 @@ class ProductController extends Controller
         $actor = $request->user();
 
         $data = $request->validate([
+            'seller_id' => ['nullable', 'integer', 'exists:sellers,id'],
             'category_id' => ['required', 'integer', 'exists:product_categories,id'],
             'brand_id' => ['nullable', 'integer', 'exists:brands,id'],
             'tag_ids' => ['nullable', 'array'],
@@ -167,6 +162,15 @@ class ProductController extends Controller
             'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'],
             'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'],
             'product_type' => ['required', 'in:simple,variable'],
+            'option_groups' => ['nullable', 'array', 'max:6'],
+            'option_groups.*.key' => ['required', 'string', 'max:60'],
+            'option_groups.*.label' => ['required', 'string', 'max:60'],
+            'option_groups.*.display_type' => ['required', 'in:swatch,button,image'],
+            'option_groups.*.values' => ['required', 'array', 'min:1', 'max:50'],
+            'option_groups.*.values.*.value' => ['required', 'string', 'max:100'],
+            'option_groups.*.values.*.label' => ['required', 'string', 'max:100'],
+            'option_groups.*.values.*.swatch' => ['nullable', 'regex:/^#[0-9a-fA-F]{6}$/'],
+            'option_groups.*.values.*.image_url' => ['nullable', 'url', 'starts_with:https://'],
             'status' => ['nullable', 'in:draft,active,inactive'],
             'thumbnail' => ['nullable', 'file', 'image', 'max:5120'],
             'thumbnail_media_id' => ['nullable', 'integer', 'exists:media_assets,id'],
@@ -174,6 +178,8 @@ class ProductController extends Controller
             'gallery.*' => ['file', 'image', 'max:5120'],
             'gallery_media_ids' => ['nullable', 'array', 'max:30'],
             'gallery_media_ids.*' => ['integer', 'distinct', 'exists:media_assets,id'],
+            'gallery_order' => ['sometimes', 'array', 'max:30'],
+            'gallery_order.*.media_id' => ['nullable', 'integer', 'exists:media_assets,id'],
             'videos' => ['nullable', 'array', 'max:20'],
             'videos.*' => ['required', 'url', 'starts_with:https://'],
             'default_selling_price' => ['nullable', 'numeric', 'min:0'],
@@ -186,11 +192,13 @@ class ProductController extends Controller
             'homepage_sort_order' => ['nullable', 'integer', 'min:0'],
         ]);
 
+        if (array_key_exists('option_groups', $data)) $this->validateOptionGroups($data['option_groups'] ?? []);
         if (array_key_exists('description', $data)) $data['description'] = app(ProductHtmlSanitizer::class)->clean($data['description']);
 
         if ($actor instanceof Seller) {
             unset($data['homepage_trending'], $data['homepage_new_arrival'], $data['homepage_featured'], $data['homepage_sort_order']);
         }
+        if ($actor instanceof Admin && $actor->role !== 'super_admin' && !empty($data['seller_id'])) abort(403, 'Only super admins can assign seller ownership.');
 
         $slug = $data['slug'] ?? $this->uniqueSlug($data['name']);
 
@@ -221,11 +229,12 @@ class ProductController extends Controller
                 $data['gallery_media_ids'],
             ));
         }
+        if (array_key_exists('gallery_order', $data)) $galleryUrls = $this->galleryOrderUrls($data['gallery_order'], null, $actor instanceof Seller ? $actor->id : null);
 
         $this->authorizeSizeChart($data['size_chart_id'] ?? null, $actor);
 
         $product = Product::create([
-            'seller_id' => $actor instanceof Seller ? $actor->id : null,
+            'seller_id' => $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null),
             'created_by_admin_id' => $actor instanceof Admin ? $actor->id : null,
             'category_id' => $data['category_id'],
             'brand_id' => $data['brand_id'] ?? null,
@@ -237,6 +246,7 @@ class ProductController extends Controller
             'specifications' => $data['specifications'] ?? null,
             'specification_tables' => $data['specification_tables'] ?? null,
             'product_type' => $data['product_type'],
+            'option_groups' => $data['option_groups'] ?? null,
             'status' => $data['status'] ?? 'draft',
             'thumbnail' => $thumbnailUrl,
             'gallery' => $galleryUrls,
@@ -259,9 +269,9 @@ class ProductController extends Controller
         ], 201);
     }
 
-    public function update(Request $request, Product $product): JsonResponse
+    public function update(Request $request, Product $product, bool $authorizedSellerProduct = false): JsonResponse
     {
-        $this->authorizeProductWrite($product, $request->user());
+        if (!$authorizedSellerProduct) $this->authorizeProductWrite($product, $request->user());
 
         $data = $request->validate([
             'category_id' => ['sometimes', 'integer', 'exists:product_categories,id'],
@@ -284,6 +294,16 @@ class ProductController extends Controller
             'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'],
             'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'],
             'product_type' => ['sometimes', 'in:simple,variable'],
+            'option_groups' => ['sometimes', 'nullable', 'array', 'max:6'],
+            'clear_option_groups' => ['sometimes', 'boolean'],
+            'option_groups.*.key' => ['required', 'string', 'max:60'],
+            'option_groups.*.label' => ['required', 'string', 'max:60'],
+            'option_groups.*.display_type' => ['required', 'in:swatch,button,image'],
+            'option_groups.*.values' => ['required', 'array', 'min:1', 'max:50'],
+            'option_groups.*.values.*.value' => ['required', 'string', 'max:100'],
+            'option_groups.*.values.*.label' => ['required', 'string', 'max:100'],
+            'option_groups.*.values.*.swatch' => ['nullable', 'regex:/^#[0-9a-fA-F]{6}$/'],
+            'option_groups.*.values.*.image_url' => ['nullable', 'url', 'starts_with:https://'],
             'status' => ['sometimes', 'in:draft,active,inactive'],
             'thumbnail' => ['sometimes', 'file', 'image', 'max:5120'],
             'thumbnail_media_id' => ['sometimes', 'nullable', 'integer', 'exists:media_assets,id'],
@@ -291,6 +311,12 @@ class ProductController extends Controller
             'gallery.*' => ['file', 'image', 'max:5120'],
             'gallery_media_ids' => ['sometimes', 'array', 'max:30'],
             'gallery_media_ids.*' => ['integer', 'distinct', 'exists:media_assets,id'],
+            'gallery_order' => ['sometimes', 'array', 'max:30'],
+            'gallery_order.*.url' => ['nullable', 'url', 'starts_with:https://'],
+            'gallery_order.*.media_id' => ['nullable', 'integer', 'exists:media_assets,id'],
+            'clear_gallery' => ['sometimes', 'boolean'],
+            'thumbnail_url' => ['sometimes', 'url', 'starts_with:https://'],
+            'clear_thumbnail' => ['sometimes', 'boolean'],
             'videos' => ['sometimes', 'array', 'max:20'],
             'videos.*' => ['required', 'url', 'starts_with:https://'],
             'clear_videos' => ['sometimes', 'boolean'],
@@ -304,7 +330,11 @@ class ProductController extends Controller
             'homepage_sort_order' => ['sometimes', 'integer', 'min:0'],
         ]);
 
+        if (array_key_exists('option_groups', $data)) $this->validateOptionGroups($data['option_groups'] ?? []);
         if (array_key_exists('description', $data)) $data['description'] = app(ProductHtmlSanitizer::class)->clean($data['description']);
+        if (($data['product_type'] ?? null) === 'simple' && $product->product_type === 'variable' && $product->variations()->where('is_active', true)->exists()) {
+            throw ValidationException::withMessages(['product_type' => ['Deactivate active variations before removing all product options.']]);
+        }
 
         if ($request->user() instanceof Seller) {
             unset($data['homepage_trending'], $data['homepage_new_arrival'], $data['homepage_featured'], $data['homepage_sort_order']);
@@ -314,6 +344,8 @@ class ProductController extends Controller
         unset($data['tag_ids'], $data['clear_tags']);
         if (!empty($data['clear_specifications'])) { $data['specifications'] = []; $data['specification_tables'] = []; }
         unset($data['clear_specifications']);
+        if (!empty($data['clear_option_groups'])) $data['option_groups'] = [];
+        unset($data['clear_option_groups']);
         if (!empty($data['clear_videos'])) $data['videos'] = [];
         unset($data['clear_videos']);
 
@@ -337,8 +369,13 @@ class ProductController extends Controller
             $thumbnailUrl = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
         }
         if (!empty($data['thumbnail_media_id'])) {
-            $thumbnailUrl = $this->imageMediaUrl((int) $data['thumbnail_media_id'], $product->seller_id);
+            $thumbnailUrl = $this->imageMediaUrl((int) $data['thumbnail_media_id'], $product->seller_id, $request->user() instanceof Admin);
         }
+        if (!empty($data['thumbnail_url'])) {
+            if (!in_array($data['thumbnail_url'], array_filter([$product->thumbnail, ...($product->gallery ?? [])]), true)) throw ValidationException::withMessages(['thumbnail_url' => ['Image must already belong to this product.']]);
+            $thumbnailUrl = $data['thumbnail_url'];
+        }
+        if (!empty($data['clear_thumbnail'])) $thumbnailUrl = null;
 
         $galleryUrls = $product->gallery;
         if ($request->hasFile('gallery')) {
@@ -350,10 +387,12 @@ class ProductController extends Controller
         }
         if (array_key_exists('gallery_media_ids', $data)) {
             $galleryUrls = array_merge($request->hasFile('gallery') ? ($galleryUrls ?? []) : [], array_map(
-                fn ($id) => $this->imageMediaUrl((int) $id, $product->seller_id),
+                fn ($id) => $this->imageMediaUrl((int) $id, $product->seller_id, $request->user() instanceof Admin),
                 $data['gallery_media_ids'],
             ));
         }
+        if (array_key_exists('gallery_order', $data)) $galleryUrls = $this->galleryOrderUrls($data['gallery_order'], $product, $product->seller_id, $request->user() instanceof Admin);
+        if (!empty($data['clear_gallery'])) $galleryUrls = [];
 
         $product->fill([
             'category_id' => $data['category_id'] ?? $product->category_id,
@@ -365,6 +404,7 @@ class ProductController extends Controller
             'specifications' => array_key_exists('specifications', $data) ? $data['specifications'] : $product->specifications,
             'specification_tables' => array_key_exists('specification_tables', $data) ? $data['specification_tables'] : $product->specification_tables,
             'product_type' => $data['product_type'] ?? $product->product_type,
+            'option_groups' => array_key_exists('option_groups', $data) ? $data['option_groups'] : $product->option_groups,
             'status' => $data['status'] ?? $product->status,
             'thumbnail' => $thumbnailUrl,
             'gallery' => $galleryUrls,
@@ -539,14 +579,47 @@ class ProductController extends Controller
         return new Api($configuration);
     }
 
-    private function imageMediaUrl(int $assetId, ?int $sellerId): string
+    private function imageMediaUrl(int $assetId, ?int $sellerId, bool $adminActor = false): string
     {
         $asset = MediaAsset::findOrFail($assetId);
         abort_unless($asset->mime_type && str_starts_with($asset->mime_type, 'image/'), 422, 'Selected media must be an image.');
-        $allowed = $sellerId === null
+        $allowed = $adminActor || $sellerId === null
             ? $asset->owner_type === 'admin'
             : $asset->owner_type === 'seller' && $asset->owner_id === $sellerId;
         abort_unless($allowed, 403, 'You cannot use this media asset.');
         return $asset->url;
+    }
+
+    private function galleryOrderUrls(array $entries, ?Product $product, ?int $sellerId, bool $adminActor = false): array
+    {
+        $existing = $product ? array_filter([$product->thumbnail, ...($product->gallery ?? [])]) : [];
+        $urls = [];
+        foreach ($entries as $entry) {
+            if (isset($entry['media_id'])) {
+                $url = $this->imageMediaUrl((int) $entry['media_id'], $sellerId, $adminActor);
+            } elseif (isset($entry['url']) && in_array($entry['url'], $existing, true)) {
+                $url = $entry['url'];
+            } else {
+                throw ValidationException::withMessages(['gallery_order' => ['Select an image from this product or the media library.']]);
+            }
+            if (!in_array($url, $urls, true)) $urls[] = $url;
+        }
+        return $urls;
+    }
+
+    private function validateOptionGroups(array $groups): void
+    {
+        $keys = [];
+        foreach ($groups as $group) {
+            $key = mb_strtolower(trim($group['key']));
+            if (in_array($key, $keys, true)) throw ValidationException::withMessages(['option_groups' => ['Option names must be unique.']]);
+            $keys[] = $key;
+            $values = [];
+            foreach ($group['values'] as $value) {
+                $name = mb_strtolower(trim($value['value']));
+                if (in_array($name, $values, true)) throw ValidationException::withMessages(['option_groups' => ['Values within an option must be unique.']]);
+                $values[] = $name;
+            }
+        }
     }
 }
