@@ -6,6 +6,7 @@ use App\Models\Admin;
 use App\Models\HomepageBanner;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Uploadcare\Api;
 use Uploadcare\Configuration;
 
@@ -34,6 +35,7 @@ class HomepageBannerController extends Controller
     {
         $this->authorizeAdmin($request);
         $data = $this->validated($request, false);
+        $this->assertHeroRemainsVisible($homepageBanner, $data, false);
         if ($request->hasFile('image')) $data['image'] = $this->upload($request->file('image'));
         $homepageBanner->fill($data)->save();
         return response()->json(['message' => 'Homepage banner updated.', 'banner' => $homepageBanner]);
@@ -42,6 +44,7 @@ class HomepageBannerController extends Controller
     public function destroy(Request $request, HomepageBanner $homepageBanner): JsonResponse
     {
         $this->authorizeAdmin($request);
+        $this->assertHeroRemainsVisible($homepageBanner, [], true);
         $homepageBanner->delete();
         return response()->json(['message' => 'Homepage banner deleted.']);
     }
@@ -63,6 +66,14 @@ class HomepageBannerController extends Controller
     private function authorizeAdmin(Request $request): void
     {
         abort_unless($request->user() instanceof Admin && $request->user()->role === 'super_admin', 403, 'Forbidden.');
+    }
+
+    /** The storefront slider must always retain an active slide. */
+    private function assertHeroRemainsVisible(HomepageBanner $banner, array $data, bool $deleting): void
+    {
+        if ($banner->placement !== 'hero' || !$banner->is_active || (!$deleting && ($data['is_active'] ?? true))) return;
+        $otherActive = HomepageBanner::query()->where('placement', 'hero')->where('is_active', true)->whereKeyNot($banner->id)->exists();
+        if (!$otherActive) throw ValidationException::withMessages(['is_active' => ['The hero slider needs at least one visible banner.']]);
     }
 
     private function upload($file): string
