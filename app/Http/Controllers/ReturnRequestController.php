@@ -8,6 +8,7 @@ use App\Models\OrderItem;
 use App\Models\ReturnRequest;
 use App\Models\Seller;
 use App\Models\SupportTicket;
+use App\Models\CustomerWalletTransaction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -87,7 +88,15 @@ class ReturnRequestController extends Controller
         if (in_array($next, ['approved', 'rejected'], true)) $updates['reviewed_at'] = now();
         if ($next === 'received') $updates['received_at'] = now();
         if (in_array($next, ['refunded', 'exchanged'], true)) { $updates['completed_at'] = now(); $updates['outcome_reference'] = $data['outcome_reference']; $updates['refund_amount'] = $data['refund_amount'] ?? null; }
-        $returnRequest->update($updates);
+        DB::transaction(function () use ($returnRequest, $updates, $next) {
+            $returnRequest->update($updates);
+            if ($next === 'refunded') {
+                CustomerWalletTransaction::firstOrCreate(
+                    ['return_request_id' => $returnRequest->id],
+                    ['customer_id' => $returnRequest->customer_id, 'type' => 'credit', 'amount' => $updates['refund_amount'], 'description' => "Refund for return #{$returnRequest->id}"],
+                );
+            }
+        });
         return $this->show($request, $returnRequest);
     }
 

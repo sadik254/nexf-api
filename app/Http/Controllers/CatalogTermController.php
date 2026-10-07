@@ -27,16 +27,26 @@ class CatalogTermController extends Controller
     public function storeBrand(Request $request): JsonResponse { return $this->store(Brand::class, $request); }
     public function storeTag(Request $request): JsonResponse { return $this->store(Tag::class, $request); }
 
-    /** Product editors may add keywords without receiving tag edit/delete access. */
+    /** Create-only access for product editors, without term edit/delete permissions. */
     public function storeProductTag(Request $request): JsonResponse
+    {
+        return $this->storeProductTerm(Tag::class, $request);
+    }
+
+    public function storeProductBrand(Request $request): JsonResponse
+    {
+        return $this->storeProductTerm(Brand::class, $request);
+    }
+
+    private function storeProductTerm(string $model, Request $request): JsonResponse
     {
         abort_unless($request->user() instanceof Admin || $request->user() instanceof Seller, 403);
         $request->merge(['name' => trim((string) $request->input('name'))]);
         $name = $request->validate(['name' => ['required', 'string', 'max:255']])['name'];
-        $existing = Tag::whereRaw('LOWER(name) = ?', [mb_strtolower($name)])->first();
+        $existing = $model::whereRaw('LOWER(name) = ?', [mb_strtolower($name)])->first();
         if ($existing) return response()->json($existing->loadCount('products'));
-        $tag = Tag::create(['name' => $name, 'slug' => $this->uniqueSlug(Tag::class, $name)]);
-        return response()->json($tag->loadCount('products'), 201);
+        $term = $model::create(['name' => $name, 'slug' => $this->uniqueSlug($model, $name)]);
+        return response()->json($term->loadCount('products'), 201);
     }
 
     private function store(string $model, Request $request): JsonResponse

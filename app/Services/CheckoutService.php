@@ -30,7 +30,7 @@ class CheckoutService
         $items = [];
         $subtotal = 0.0;
         foreach ($data['items'] as $itemData) {
-            $product = Product::query()->with('seller')->where('status', 'active')->find($itemData['product_id']);
+            $product = Product::query()->with('seller')->whereIn('status', ['active', 'unlisted'])->find($itemData['product_id']);
             if (!$product || ($product->seller_id && (!$product->seller || $product->seller->status !== 'approved' || !$product->seller->is_active))) {
                 throw ValidationException::withMessages(['items' => ['One or more products are unavailable.']]);
             }

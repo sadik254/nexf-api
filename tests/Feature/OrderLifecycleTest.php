@@ -62,6 +62,15 @@ class OrderLifecycleTest extends TestCase
             ->assertJsonPath('discount_amount', 50);
     }
 
+    public function test_unlisted_product_can_be_purchased_but_inactive_product_cannot(): void
+    {
+        [$customer, $product] = $this->checkoutFixtures(2);
+        $product->update(['status' => 'unlisted']);
+        $this->placeOrder($customer, $product, 1)->assertCreated();
+        $product->update(['status' => 'inactive']);
+        $this->placeOrder($customer, $product, 1)->assertUnprocessable()->assertJsonValidationErrors('items');
+    }
+
     public function test_checkout_snapshots_images_and_prevents_overselling(): void
     {
         [$customer, $product] = $this->checkoutFixtures(2);

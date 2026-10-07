@@ -155,12 +155,15 @@ class ProductController extends Controller
             'description' => ['nullable', 'string'],
             'specifications' => ['nullable', 'array'],
             'specification_tables' => ['nullable', 'array'],
+            'specifications.*' => ['array'],
+            'specification_tables.*' => ['array'],
+            'specification_tables.*.rows.*' => ['array'],
             'specification_tables.*.title' => ['nullable', 'string', 'max:120'],
             'specification_tables.*.rows' => ['required', 'array', 'max:100'],
-            'specification_tables.*.rows.*.label' => ['required', 'string', 'max:120'],
-            'specification_tables.*.rows.*.value' => ['required', 'string', 'max:500'],
-            'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'],
-            'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'],
+            'specification_tables.*.rows.*.label' => ['nullable', 'string', 'max:120'],
+            'specification_tables.*.rows.*.value' => ['nullable', 'string', 'max:500'],
+            'specifications.*.label' => ['nullable', 'string', 'max:120'],
+            'specifications.*.value' => ['nullable', 'string', 'max:500'],
             'product_type' => ['required', 'in:simple,variable'],
             'option_groups' => ['nullable', 'array', 'max:6'],
             'option_groups.*.key' => ['required', 'string', 'max:60'],
@@ -171,7 +174,7 @@ class ProductController extends Controller
             'option_groups.*.values.*.label' => ['required', 'string', 'max:100'],
             'option_groups.*.values.*.swatch' => ['nullable', 'regex:/^#[0-9a-fA-F]{6}$/'],
             'option_groups.*.values.*.image_url' => ['nullable', 'url', 'starts_with:https://'],
-            'status' => ['nullable', 'in:draft,active,inactive'],
+            'status' => ['nullable', 'in:draft,active,unlisted,inactive'],
             'thumbnail' => ['nullable', 'file', 'image', 'max:5120'],
             'thumbnail_media_id' => ['nullable', 'integer', 'exists:media_assets,id'],
             'gallery' => ['nullable', 'array'],
@@ -192,6 +195,7 @@ class ProductController extends Controller
             'homepage_sort_order' => ['nullable', 'integer', 'min:0'],
         ]);
 
+        $data = $this->normalizeSpecifications($data);
         if (array_key_exists('option_groups', $data)) $this->validateOptionGroups($data['option_groups'] ?? []);
         if (array_key_exists('description', $data)) $data['description'] = app(ProductHtmlSanitizer::class)->clean($data['description']);
 
@@ -231,7 +235,7 @@ class ProductController extends Controller
         }
         if (array_key_exists('gallery_order', $data)) $galleryUrls = $this->galleryOrderUrls($data['gallery_order'], null, $actor instanceof Seller ? $actor->id : null);
 
-        $this->authorizeSizeChart($data['size_chart_id'] ?? null, $actor);
+        $this->authorizeSizeChart($data['size_chart_id'] ?? null, $actor, $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null));
 
         $product = Product::create([
             'seller_id' => $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null),
@@ -286,13 +290,16 @@ class ProductController extends Controller
             'description' => ['sometimes', 'string'],
             'specifications' => ['sometimes', 'nullable', 'array'],
             'specification_tables' => ['sometimes', 'nullable', 'array'],
+            'specifications.*' => ['array'],
+            'specification_tables.*' => ['array'],
+            'specification_tables.*.rows.*' => ['array'],
             'specification_tables.*.title' => ['nullable', 'string', 'max:120'],
             'specification_tables.*.rows' => ['required', 'array', 'max:100'],
-            'specification_tables.*.rows.*.label' => ['required', 'string', 'max:120'],
-            'specification_tables.*.rows.*.value' => ['required', 'string', 'max:500'],
+            'specification_tables.*.rows.*.label' => ['nullable', 'string', 'max:120'],
+            'specification_tables.*.rows.*.value' => ['nullable', 'string', 'max:500'],
             'clear_specifications' => ['sometimes', 'boolean'],
-            'specifications.*.label' => ['required_with:specifications', 'string', 'max:120'],
-            'specifications.*.value' => ['required_with:specifications', 'string', 'max:500'],
+            'specifications.*.label' => ['nullable', 'string', 'max:120'],
+            'specifications.*.value' => ['nullable', 'string', 'max:500'],
             'product_type' => ['sometimes', 'in:simple,variable'],
             'option_groups' => ['sometimes', 'nullable', 'array', 'max:6'],
             'clear_option_groups' => ['sometimes', 'boolean'],
@@ -304,7 +311,7 @@ class ProductController extends Controller
             'option_groups.*.values.*.label' => ['required', 'string', 'max:100'],
             'option_groups.*.values.*.swatch' => ['nullable', 'regex:/^#[0-9a-fA-F]{6}$/'],
             'option_groups.*.values.*.image_url' => ['nullable', 'url', 'starts_with:https://'],
-            'status' => ['sometimes', 'in:draft,active,inactive'],
+            'status' => ['sometimes', 'in:draft,active,unlisted,inactive'],
             'thumbnail' => ['sometimes', 'file', 'image', 'max:5120'],
             'thumbnail_media_id' => ['sometimes', 'nullable', 'integer', 'exists:media_assets,id'],
             'gallery' => ['sometimes', 'array'],
@@ -330,6 +337,7 @@ class ProductController extends Controller
             'homepage_sort_order' => ['sometimes', 'integer', 'min:0'],
         ]);
 
+        $data = $this->normalizeSpecifications($data);
         if (array_key_exists('option_groups', $data)) $this->validateOptionGroups($data['option_groups'] ?? []);
         if (array_key_exists('description', $data)) $data['description'] = app(ProductHtmlSanitizer::class)->clean($data['description']);
         if (($data['product_type'] ?? null) === 'simple' && $product->product_type === 'variable' && $product->variations()->where('is_active', true)->exists()) {
@@ -356,7 +364,7 @@ class ProductController extends Controller
         }
 
         if (array_key_exists('size_chart_id', $data)) {
-            $this->authorizeSizeChart($data['size_chart_id'], $request->user());
+            $this->authorizeSizeChart($data['size_chart_id'], $request->user(), $product->seller_id);
         }
 
         $uploadcare = $this->uploadcare();
@@ -443,15 +451,32 @@ class ProductController extends Controller
     }
 
     /** Admin-store products may use global charts; sellers may use global or their own. */
-    private function authorizeSizeChart(?int $sizeChartId, $actor): void
+    private function authorizeSizeChart(?int $sizeChartId, $actor, ?int $sellerId = null): void
     {
         if ($sizeChartId === null) return;
 
         $chart = SizeChart::findOrFail($sizeChartId);
-        if ($actor instanceof Admin && $chart->seller_id === null) return;
+        if ($actor instanceof Admin && ($chart->seller_id === null || ($actor->role === 'super_admin' && $sellerId !== null && (int) $chart->seller_id === $sellerId))) return;
         if ($actor instanceof Seller && ($chart->seller_id === null || (int) $chart->seller_id === (int) $actor->id)) return;
 
         abort(403, 'You cannot use this size chart.');
+    }
+
+    /** Preserve one-sided spec rows and skip fully empty rows, as the editor does. */
+    private function normalizeSpecifications(array $data): array
+    {
+        $rows = fn (array $rows) => array_values(array_filter(array_map(
+            fn (array $row) => ['label' => trim($row['label'] ?? ''), 'value' => trim($row['value'] ?? '')],
+            $rows
+        ), fn (array $row) => $row['label'] !== '' || $row['value'] !== ''));
+        if (array_key_exists('specifications', $data)) $data['specifications'] = $rows($data['specifications'] ?? []);
+        if (array_key_exists('specification_tables', $data)) {
+            $data['specification_tables'] = array_values(array_filter(array_map(
+                fn (array $table) => ['title' => $table['title'] ?? null, 'rows' => $rows($table['rows'])],
+                $data['specification_tables'] ?? []
+            ), fn (array $table) => count($table['rows']) > 0));
+        }
+        return $data;
     }
 
     private function authorizeProductRead(Product $product, $actor): void
@@ -459,7 +484,11 @@ class ProductController extends Controller
         if ($actor instanceof Seller && $product->seller_id !== $actor->id) {
             abort(403, 'Forbidden.');
         }
-        // Admin can read all products via explicit endpoints.
+        // Seller products are exposed to administrators only through the
+        // seller-scoped endpoints, which apply the selected-store boundary.
+        if ($actor instanceof Admin && $product->seller_id !== null) {
+            abort(403, 'Forbidden.');
+        }
     }
 
     private function authorizeProductWrite(Product $product, $actor): void
@@ -477,7 +506,7 @@ class ProductController extends Controller
     private function paginateProductList($query, Request $request, int $perPage): array
     {
         $request->validate([
-            'status' => ['sometimes', 'in:draft,active,inactive'],
+            'status' => ['sometimes', 'in:draft,active,unlisted,inactive'],
             'scope' => ['sometimes', 'in:all'],
             'seller_id' => ['sometimes', 'regex:/^(house|[1-9][0-9]*)$/'],
             'stock' => ['sometimes', 'in:ok,low,out'],

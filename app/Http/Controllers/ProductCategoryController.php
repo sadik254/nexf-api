@@ -39,6 +39,25 @@ class ProductCategoryController extends Controller
         return response()->json($categories);
     }
 
+    /** Inline creation may reuse a category, but never change an existing one. */
+    public function storeProductCategory(Request $request): JsonResponse
+    {
+        $request->merge(['name' => trim((string) $request->input('name'))]);
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'parent_id' => ['nullable', 'integer', 'exists:product_categories,id'],
+        ]);
+        $parentId = $data['parent_id'] ?? null;
+        $this->validateParent($parentId);
+        $existing = ProductCategory::where('parent_id', $parentId)->whereRaw('LOWER(name) = ?', [mb_strtolower($data['name'])])->first();
+        if ($existing) return response()->json($existing->load('children')->loadCount('products'));
+        $category = ProductCategory::create([
+            'name' => $data['name'], 'slug' => $this->uniqueSlug($data['name']),
+            'parent_id' => $parentId, 'is_active' => true,
+        ]);
+        return response()->json($category->load('children')->loadCount('products'), 201);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([

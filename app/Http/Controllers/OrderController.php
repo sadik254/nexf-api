@@ -444,6 +444,7 @@ class OrderController extends Controller
             $order = Order::create([
                 'order_number' => $this->generateOrderNumber(),
                 'customer_id' => $customer->id,
+                'reseller_id' => $customer->reseller_id,
                 'payment_method_id' => $paymentMethod->id,
                 'shipping_method_id' => $shippingMethod->id,
                 'status' => 'pending',
@@ -470,7 +471,7 @@ class OrderController extends Controller
             foreach ($data['items'] as $itemData) {
                 $product = Product::query()
                     ->with('seller')
-                    ->where('status', 'active')
+                    ->whereIn('status', ['active', 'unlisted'])
                     ->find($itemData['product_id']);
 
                 if (!$product) {

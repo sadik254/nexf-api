@@ -46,7 +46,7 @@ class StoreProductController extends Controller
 
     public function show(string $product): JsonResponse
     {
-        $product = $this->baseStoreQuery()
+        $product = $this->baseStoreQuery(true)
             ->where('slug', $product)
             ->firstOrFail();
 
@@ -55,7 +55,7 @@ class StoreProductController extends Controller
 
     public function reviews(string $product, Request $request): JsonResponse
     {
-        $product = Product::where('slug', $product)->where('status', 'active')->firstOrFail();
+        $product = Product::where('slug', $product)->whereIn('status', ['active', 'unlisted'])->firstOrFail();
         $perPage = max(1, min((int) $request->query('per_page', 10), 50));
         return response()->json($product->reviews()->where('status', 'approved')->with('customer:id,name')->latest()->paginate($perPage)->through(fn ($review) => ['id'=>$review->id,'rating'=>$review->rating,'comment'=>$review->comment,'customer_name'=>$review->customer?->name,'created_at'=>$review->created_at?->toDateString()]));
     }
@@ -102,10 +102,10 @@ class StoreProductController extends Controller
         return $this->paginateProducts($query, $request);
     }
 
-    private function baseStoreQuery(): Builder
+    private function baseStoreQuery(bool $directLink = false): Builder
     {
         $query = Product::query()
-            ->where('status', 'active')
+            ->whereIn('status', $directLink ? ['active', 'unlisted'] : ['active'])
             ->where(function (Builder $q) {
                 $q->whereNull('seller_id')
                     ->orWhereHas('seller', function (Builder $sq) {
@@ -228,7 +228,7 @@ class StoreProductController extends Controller
             'discount' => $discount,
             'rating_summary' => ['average' => $averageRating, 'review_count' => $ratingCount, 'sold_count' => $soldCount],
             'option_groups' => $this->optionGroups($product),
-            'size_chart' => $product->sizeChart ? ['id'=>$product->sizeChart->id,'name'=>$product->sizeChart->name,'url'=>$product->sizeChart->url] : null,
+            'size_chart' => $product->sizeChart ? $product->sizeChart->only(['id', 'name', 'url', 'unit', 'audience', 'category_slug', 'subcategory_slug', 'columns', 'rows', 'note']) : null,
             'current_selling_price' => $currentPrice,
             'price_from' => $priceFrom,
             'price_to' => $priceTo,
@@ -253,7 +253,7 @@ class StoreProductController extends Controller
             'brand:id,name,slug',
             'tags:id,name,slug',
             'seller:id,store_name,store_slug,store_logo,store_image,city,country,created_at,positive_rating_percentage,on_time_shipping_percentage,chat_response_percentage',
-            'sizeChart:id,name,url',
+            'sizeChart',
             'variations' => function ($q) {
                 $q->select(['id', 'product_id', 'sku', 'attributes', 'default_selling_price'])
                     ->selectSub($this->variationAvailableQtySubquery(), 'available_quantity');

@@ -11,6 +11,7 @@ class Order extends Model
     protected $fillable = [
         'order_number',
         'customer_id',
+        'reseller_id',
         'payment_method_id',
         'shipping_method_id',
         'coupon_id',
@@ -50,6 +51,7 @@ class Order extends Model
     {
         return $this->belongsTo(Customer::class);
     }
+    public function reseller(): BelongsTo { return $this->belongsTo(Reseller::class); }
 
     public function items(): HasMany
     {

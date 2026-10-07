@@ -34,6 +34,8 @@ use App\Http\Controllers\HomepageLayoutController;
 use App\Http\Controllers\SupportTicketController;
 use App\Http\Controllers\StoreChatController;
 use App\Http\Controllers\ReturnRequestController;
+use App\Http\Controllers\ResellerController;
+use App\Http\Controllers\WithdrawalController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -74,6 +76,8 @@ Route::prefix('customers')->group(function () {
         Route::get('/return-requests', [ReturnRequestController::class, 'index']);
         Route::post('/return-requests', [ReturnRequestController::class, 'store']);
         Route::get('/return-requests/{returnRequest}', [ReturnRequestController::class, 'show']);
+        Route::get('/withdrawals', [WithdrawalController::class, 'customerIndex']);
+        Route::post('/withdrawals', [WithdrawalController::class, 'customerStore']);
         Route::post('/me/ping', function () {
             return response()->json(['ok' => true]);
         });
@@ -165,6 +169,13 @@ Route::prefix('admin')->group(function () {
 });
 
 Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(function () {
+    Route::get('/resellers', [ResellerController::class, 'index']);
+    Route::post('/resellers', [ResellerController::class, 'store']);
+    Route::post('/resellers/{reseller}', [ResellerController::class, 'update']);
+    Route::post('/resellers/{reseller}/delete', [ResellerController::class, 'destroy']);
+    Route::get('/commissions', [ResellerController::class, 'commission']);
+    Route::get('/withdrawals', [WithdrawalController::class, 'index']);
+    Route::post('/withdrawals/{withdrawal}', [WithdrawalController::class, 'update']);
     Route::get('/support-tickets', [SupportTicketController::class, 'index']);
     Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show']);
     Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);
@@ -189,6 +200,8 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/brands/{brand}', [CatalogTermController::class, 'updateBrand']);
     Route::post('/brands/{brand}/delete', [CatalogTermController::class, 'deleteBrand']);
     Route::post('/product-tags', [CatalogTermController::class, 'storeProductTag']);
+    Route::post('/product-brands', [CatalogTermController::class, 'storeProductBrand']);
+    Route::post('/product-category-options', [ProductCategoryController::class, 'storeProductCategory']);
     Route::get('/tags', [CatalogTermController::class, 'tags']);
     Route::post('/tags', [CatalogTermController::class, 'storeTag']);
     Route::post('/tags/{tag}', [CatalogTermController::class, 'updateTag']);
@@ -254,6 +267,8 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
     Route::post('/product-tags', [CatalogTermController::class, 'storeProductTag']);
+    Route::post('/product-brands', [CatalogTermController::class, 'storeProductBrand']);
+    Route::post('/product-category-options', [ProductCategoryController::class, 'storeProductCategory']);
     Route::get('/support-tickets', [SupportTicketController::class, 'index']);
     Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show']);
     Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);

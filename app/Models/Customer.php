@@ -5,6 +5,7 @@ namespace App\Models;
 use Database\Factories\CustomerFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -25,6 +26,7 @@ class Customer extends Authenticatable
         'phone',
         'password',
         'profile_picture',
+        'reseller_id',
     ];
 
     /**
@@ -59,4 +61,5 @@ class Customer extends Authenticatable
     {
         return $this->hasMany(Order::class);
     }
+    public function reseller(): BelongsTo { return $this->belongsTo(Reseller::class); }
 }

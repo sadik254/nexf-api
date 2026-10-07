@@ -92,7 +92,7 @@ class ProductEngagementController extends Controller
 
     public function questions(Product $product, Request $request): JsonResponse
     {
-        abort_unless($product->status === 'active', 404);
+        abort_unless(in_array($product->status, ['active', 'unlisted'], true), 404);
         $perPage = max(1, min((int) $request->query('per_page', 10), 50));
         $questions = $product->questions()->with('customer:id,name')->latest()->paginate($perPage);
         $questions->getCollection()->transform(fn (ProductQuestion $question) => $this->questionPayload($question));
@@ -101,7 +101,7 @@ class ProductEngagementController extends Controller
 
     public function ask(Product $product, Request $request): JsonResponse
     {
-        abort_unless($product->status === 'active', 404);
+        abort_unless(in_array($product->status, ['active', 'unlisted'], true), 404);
         $customer = $request->user();
         abort_unless($customer instanceof Customer, 403);
         $data = $request->validate(['question' => ['required', 'string', 'min:5', 'max:1000']]);
@@ -125,7 +125,7 @@ class ProductEngagementController extends Controller
 
     public function review(Product $product, Request $request): JsonResponse
     {
-        abort_unless($product->status === 'active', 404);
+        abort_unless(in_array($product->status, ['active', 'unlisted'], true), 404);
         $customer = $request->user();
         abort_unless($customer instanceof Customer, 403);
         $data = $request->validate(['order_item_id' => ['sometimes', 'integer', 'exists:order_items,id'], 'rating' => ['required', 'integer', 'between:1,5'], 'comment' => ['nullable', 'string', 'max:3000']]);
