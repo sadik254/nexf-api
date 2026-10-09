@@ -183,6 +183,22 @@ class OrderController extends Controller
         ]);
     }
 
+    public function destroyAdmin(Request $request, Order $order): JsonResponse
+    {
+        if (!$request->user() instanceof Admin) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        if (in_array($order->status, ['pending', 'confirmed'], true)) {
+            $order = $this->cancelOrder($order, $request->user());
+            $this->notifications->cancelled($order);
+        }
+
+        $order->delete();
+
+        return response()->json(['message' => 'Order removed from the admin console.']);
+    }
+
     public function fulfillSellerItem(Request $request, Order $order, OrderItem $item): JsonResponse
     {
         /** @var Seller $seller */

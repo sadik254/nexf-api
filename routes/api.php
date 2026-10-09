@@ -149,6 +149,7 @@ Route::prefix('admin')->group(function () {
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}/items/{item}/fulfillment', [OrderController::class, 'fulfillAdminItem']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}/items/{item}/reconcile-return', [OrderController::class, 'reconcileReturn']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}/cancel', [OrderController::class, 'cancel']);
+    Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}/delete', [OrderController::class, 'destroyAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->get('/sellers/{seller}/orders', [OrderController::class, 'indexSellerOrdersForSuperAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->get('/sellers/{seller}/orders/{order}', [OrderController::class, 'showSellerOrderForSuperAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/sellers/{seller}/orders/{order}/cancel', [OrderController::class, 'cancelSellerOrderForSuperAdmin']);

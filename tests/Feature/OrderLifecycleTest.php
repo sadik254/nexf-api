@@ -371,6 +371,36 @@ class OrderLifecycleTest extends TestCase
         ]);
     }
 
+    public function test_admin_delete_archives_a_pending_order_and_restores_inventory(): void
+    {
+        [$customer, $product] = $this->checkoutFixtures(1);
+        $order = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
+        $admin = Admin::create([
+            'name' => 'Order Admin',
+            'email' => 'delete-order-admin@example.test',
+            'password' => 'password123',
+            'role' => 'super_admin',
+        ]);
+        $token = $admin->createToken('test', ['admin:orders'])->plainTextToken;
+
+        $this->withToken($token)
+            ->postJson("/api/admin/orders/{$order['id']}/delete")
+            ->assertOk();
+
+        $this->assertSoftDeleted('orders', ['id' => $order['id']]);
+        $this->assertDatabaseHas('order_items', [
+            'order_id' => $order['id'],
+            'fulfillment_status' => 'cancelled',
+        ]);
+        $this->assertDatabaseHas('product_lots', [
+            'product_id' => $product->id,
+            'quantity_remaining' => 1,
+        ]);
+        $this->withToken($token)
+            ->getJson("/api/admin/orders/{$order['id']}")
+            ->assertNotFound();
+    }
+
     public function test_steadfast_cancellation_waits_for_reconciliation_and_duplicate_events_are_safe(): void
     {
         config(['services.steadfast.webhook_token' => 'webhook-test-token']);
