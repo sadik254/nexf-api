@@ -7,6 +7,7 @@ use App\Models\Coupon;
 use App\Models\Customer;
 use App\Models\PaymentMethod;
 use App\Models\Product;
+use App\Models\ProductCollection;
 use App\Models\ProductCategory;
 use App\Models\ProductLot;
 use App\Models\Seller;
@@ -137,6 +138,17 @@ class OrderLifecycleTest extends TestCase
         $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
         $this->withToken($token)->postJson('/api/customers/orders/preview', ['items' => [['product_id' => $product->id, 'quantity' => 2]], 'payment_method_id' => PaymentMethod::firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'BUYGET', 'shipping_phone' => '01700000000'])
             ->assertOk()->assertJsonPath('subtotal', 200)->assertJsonPath('discount_total', 100)->assertJsonPath('total', 120);
+    }
+
+    public function test_product_discount_can_target_a_collection(): void
+    {
+        [$customer, $product] = $this->checkoutFixtures(1);
+        $collection = ProductCollection::create(['name' => 'Winter savings']);
+        $collection->products()->attach($product->id, ['sort_order' => 0]);
+        Coupon::create(['code' => 'COLLECTION10', 'discount_kind' => 'products', 'discount_type' => 'fixed', 'discount_value' => 10, 'eligible_collection_ids' => [$collection->id], 'is_active' => true]);
+        $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+        $this->withToken($token)->postJson('/api/customers/orders/preview', ['items' => [['product_id' => $product->id, 'quantity' => 1]], 'payment_method_id' => PaymentMethod::firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'COLLECTION10', 'shipping_phone' => '01700000000'])
+            ->assertOk()->assertJsonPath('discount_total', 10)->assertJsonPath('total', 110);
     }
 
     public function test_seller_can_only_view_and_transition_own_order_items(): void
