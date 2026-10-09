@@ -102,6 +102,9 @@ class Coupon extends Model
 
     public function discountForSubtotal(float $subtotal): float
     {
+        if ($this->discount_kind === 'shipping') {
+            return round($subtotal, 2);
+        }
         if ($this->minimum_order_amount !== null && $subtotal < (float) $this->minimum_order_amount) {
             return 0.0;
         }

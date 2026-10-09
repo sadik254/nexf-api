@@ -121,6 +121,15 @@ class OrderLifecycleTest extends TestCase
         $this->assertDatabaseHas('product_lot_movements', ['reason' => 'order_cancellation', 'quantity_change' => 1]);
     }
 
+    public function test_free_shipping_discount_removes_the_live_shipping_quote(): void
+    {
+        [$customer, $product] = $this->checkoutFixtures(1);
+        Coupon::create(['code' => 'FREESHIP', 'discount_kind' => 'shipping', 'discount_type' => 'percentage', 'discount_value' => 0, 'is_active' => true]);
+        $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+        $this->withToken($token)->postJson('/api/customers/orders/preview', ['items' => [['product_id' => $product->id, 'quantity' => 1]], 'payment_method_id' => PaymentMethod::firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'FREESHIP', 'shipping_phone' => '01700000000'])
+            ->assertOk()->assertJsonPath('shipping_charge', 20)->assertJsonPath('discount_total', 20)->assertJsonPath('total', 100);
+    }
+
     public function test_seller_can_only_view_and_transition_own_order_items(): void
     {
         config(['services.steadfast.api_key' => 'test-key', 'services.steadfast.secret_key' => 'test-secret', 'services.steadfast.base_url' => 'https://steadfast.test/api/v1']);

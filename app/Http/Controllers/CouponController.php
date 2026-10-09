@@ -228,7 +228,7 @@ class CouponController extends Controller
             'description' => ['nullable', 'string'],
             'discount_type' => [$required, Rule::in(['fixed', 'percentage'])],
             'applies_to' => ['sometimes', Rule::in(['order','product','shipping'])],
-            'discount_value' => [$required, 'numeric', 'min:0.01'],
+            'discount_value' => [$required, 'numeric', 'min:0'],
             'minimum_order_amount' => ['nullable', 'numeric', 'min:0'],
             'minimum_quantity' => ['nullable', 'integer', 'min:1'],
             'eligible_product_ids' => ['nullable', 'array'], 'eligible_product_ids.*' => ['integer', 'exists:products,id'],
