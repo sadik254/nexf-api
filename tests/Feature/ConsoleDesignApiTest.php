@@ -44,7 +44,7 @@ class ConsoleDesignApiTest extends TestCase
         $this->withToken($token)->getJson('/api/seller/console-summary')->assertOk()->assertJsonPath('support', 1)->assertJsonPath('chats', 1)->assertJsonPath('inventory', 2);
         StoreChat::where('seller_id', $sellers[0]->id)->update(['store_read_at' => now()->addMinute()]);
         $this->withToken($token)->getJson('/api/seller/console-summary')->assertOk()->assertJsonPath('chats', 0);
-        $token = $admin->createToken('test', ['admin:basic'])->plainTextToken;
+        $token = $admin->createToken('test', ['admin:basic', 'admin:coupons'])->plainTextToken;
         $this->withToken($token)->getJson('/api/admin/console-summary')->assertOk()->assertJsonPath('support', 2)->assertJsonPath('returns', 0)->assertJsonPath('chats', 0)->assertJsonPath('inventory', 3);
         $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
         $this->withToken($token)->getJson('/api/admin/console-summary')->assertForbidden();
@@ -95,6 +95,15 @@ class ConsoleDesignApiTest extends TestCase
         foreach (['active', 'scheduled', 'expired', 'inactive'] as $status) {
             $this->withToken($token)->getJson("/api/admin/coupons?status={$status}&per_page=1")->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.code', strtoupper($status));
         }
+    }
+
+    public function test_automatic_discount_receives_a_unique_internal_code(): void
+    {
+        $admin = Admin::create(['name' => 'Discount admin', 'email' => 'auto-discount@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $token = $admin->createToken('test', ['admin:basic', 'admin:coupons'])->plainTextToken;
+        $response = $this->withToken($token)->postJson('/api/admin/coupons', ['code' => 'AUTO', 'is_automatic' => true, 'name' => 'Automatic order saving', 'discount_type' => 'percentage', 'discount_value' => 10, 'discount_kind' => 'order']);
+        $response->assertCreated()->assertJsonPath('coupon.is_automatic', true);
+        $this->assertStringStartsWith('AUTO-', $response->json('coupon.code'));
     }
 
     public function test_profile_picture_and_phone_can_be_cleared(): void
