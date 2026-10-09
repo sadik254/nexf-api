@@ -31,7 +31,7 @@ class CheckoutService
         $items = [];
         $subtotal = 0.0;
         foreach ($data['items'] as $itemData) {
-            $product = Product::query()->with('seller')->whereIn('status', ['active', 'unlisted'])->find($itemData['product_id']);
+            $product = Product::query()->with(['seller', 'collections:id'])->whereIn('status', ['active', 'unlisted'])->find($itemData['product_id']);
             if (!$product || ($product->seller_id && (!$product->seller || $product->seller->status !== 'approved' || !$product->seller->is_active))) {
                 throw ValidationException::withMessages(['items' => ['One or more products are unavailable.']]);
             }
@@ -51,7 +51,7 @@ class CheckoutService
             'subtotal' => $item['quote']['subtotal'],
         ], $items), $shippingMethod);
         $coupon = $this->resolveCoupon($data['coupon_code'] ?? null, $subtotal, $customer, $items);
-        $discount = $coupon ? ($coupon->applies_to === 'shipping' ? min((float) $shipping['total'], $coupon->discountForSubtotal((float) $shipping['total'])) : $coupon->discountForSubtotal($subtotal)) : 0.0;
+        $discount = $coupon ? $this->discountForCart($coupon, $items, $subtotal, (float) $shipping['total']) : 0.0;
         $total = round($subtotal + $shipping['total'] - $discount, 2);
         $this->fraudGuard->assertAllowed($customer, $data + ['payment_method_code' => $paymentMethod->code], $total);
 
@@ -79,11 +79,37 @@ class CheckoutService
     {
         $quantity = array_sum(array_map(fn ($item) => $item['quantity'], $items));
         if ($coupon->minimum_quantity !== null && $quantity < $coupon->minimum_quantity) return false;
-        if ($coupon->applies_to !== 'product') return true;
         $products = array_map(fn ($item) => $item['product'], $items);
         if ($coupon->seller_id && !collect($products)->contains(fn ($product) => (int) $product->seller_id === (int) $coupon->seller_id)) return false;
-        if ($coupon->eligible_product_ids && !collect($products)->contains(fn ($product) => in_array($product->id, $coupon->eligible_product_ids, true))) return false;
-        if ($coupon->eligible_category_ids && !collect($products)->contains(fn ($product) => in_array($product->category_id, $coupon->eligible_category_ids, true))) return false;
+        if ($coupon->discount_kind === 'bxgy') {
+            $buyItems = $this->selectedItems($items, $coupon->buy_product_ids, $coupon->buy_category_ids, $coupon->buy_collection_ids);
+            $getItems = $this->selectedItems($items, $coupon->eligible_product_ids, $coupon->eligible_category_ids, $coupon->eligible_collection_ids);
+            return array_sum(array_column($buyItems, 'quantity')) >= ($coupon->buy_quantity ?? 1) && count($getItems) > 0;
+        }
+        if (in_array($coupon->discount_kind, ['products', 'order'], true) || $coupon->applies_to === 'product') return count($this->selectedItems($items, $coupon->eligible_product_ids, $coupon->eligible_category_ids, $coupon->eligible_collection_ids)) > 0;
         return true;
+    }
+
+    private function discountForCart(Coupon $coupon, array $items, float $subtotal, float $shipping): float
+    {
+        if ($coupon->discount_kind === 'shipping' || $coupon->applies_to === 'shipping') return min($shipping, $coupon->discountForSubtotal($shipping));
+        if ($coupon->discount_kind === 'bxgy') {
+            $selected = $this->selectedItems($items, $coupon->eligible_product_ids, $coupon->eligible_category_ids, $coupon->eligible_collection_ids);
+            $quantity = min(array_sum(array_column($selected, 'quantity')), $coupon->get_quantity ?? PHP_INT_MAX);
+            $available = collect($selected)->sortBy(fn ($item) => $item['quote']['subtotal'] / $item['quantity'])->reduce(function (float $sum, $item) use (&$quantity) { $used=min($quantity,$item['quantity']); $quantity-=$used; return $sum + (($item['quote']['subtotal'] / $item['quantity']) * $used); }, 0.0);
+            if ($coupon->reward_type === 'free') return round($available, 2);
+            return min($available, $coupon->discountForSubtotal($available));
+        }
+        $base = $coupon->discount_kind === 'products' || $coupon->applies_to === 'product' ? array_sum(array_map(fn ($item) => $item['quote']['subtotal'], $this->selectedItems($items, $coupon->eligible_product_ids, $coupon->eligible_category_ids, $coupon->eligible_collection_ids))) : $subtotal;
+        return $coupon->discountForSubtotal((float) $base);
+    }
+
+    private function selectedItems(array $items, ?array $productIds, ?array $categoryIds, ?array $collectionIds): array
+    {
+        if (!$productIds && !$categoryIds && !$collectionIds) return $items;
+        return array_values(array_filter($items, function ($item) use ($productIds, $categoryIds, $collectionIds) {
+            $product = $item['product'];
+            return ($productIds && in_array($product->id, $productIds, true)) || ($categoryIds && in_array($product->category_id, $categoryIds, true)) || ($collectionIds && $product->collections->contains(fn ($collection) => in_array($collection->id, $collectionIds, true)));
+        }));
     }
 }
