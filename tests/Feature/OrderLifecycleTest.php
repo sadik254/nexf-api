@@ -8,6 +8,8 @@ use App\Models\Customer;
 use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductCollection;
+use App\Models\FraudGuardBlock;
+use App\Models\FraudGuardSetting;
 use App\Models\ProductCategory;
 use App\Models\ProductLot;
 use App\Models\Seller;
@@ -149,6 +151,16 @@ class OrderLifecycleTest extends TestCase
         $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
         $this->withToken($token)->postJson('/api/customers/orders/preview', ['items' => [['product_id' => $product->id, 'quantity' => 1]], 'payment_method_id' => PaymentMethod::firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'COLLECTION10', 'shipping_phone' => '01700000000'])
             ->assertOk()->assertJsonPath('discount_total', 10)->assertJsonPath('total', 110);
+    }
+
+    public function test_device_block_stops_checkout_preview(): void
+    {
+        [$customer, $product] = $this->checkoutFixtures(1);
+        FraudGuardSetting::create(['enabled' => true, 'ip_block' => false, 'device_block' => true, 'phone_blacklist' => false, 'fake_number_detection' => false]);
+        FraudGuardBlock::create(['kind' => 'device', 'value' => '0123456789abcdef']);
+        $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+        $this->withToken($token)->postJson('/api/customers/orders/preview', ['items' => [['product_id' => $product->id, 'quantity' => 1]], 'payment_method_id' => PaymentMethod::firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'shipping_phone' => '01700000000', 'device_id' => '0123456789abcdef'])
+            ->assertUnprocessable()->assertJsonValidationErrors('checkout');
     }
 
     public function test_seller_can_only_view_and_transition_own_order_items(): void
