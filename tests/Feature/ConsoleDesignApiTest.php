@@ -138,4 +138,12 @@ class ConsoleDesignApiTest extends TestCase
         $offer = \App\Models\HomepageOfferBlock::where('row_type', 'wide')->firstOrFail();
         $this->withToken($token)->postJson("/api/admin/homepage/offer-blocks/{$offer->id}", ['theme' => 'stone'])->assertOk()->assertJsonPath('theme', 'stone');
     }
+
+    public function test_new_offer_set_starts_with_all_editable_slots(): void
+    {
+        $admin = Admin::create(['name' => 'Offers', 'email' => 'offer-set@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $token = $admin->createToken('test', ['admin:basic'])->plainTextToken;
+        $this->withToken($token)->postJson('/api/admin/homepage/offer-sets', ['row_type' => 'four', 'name' => 'Winter campaign'])
+            ->assertCreated()->assertJsonCount(4, 'blocks')->assertJsonPath('blocks.0.hidden', true);
+    }
 }

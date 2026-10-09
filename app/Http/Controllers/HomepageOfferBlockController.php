@@ -47,6 +47,12 @@ class HomepageOfferBlockController extends Controller
         $set=HomepageOfferSet::create(['row_type'=>$data['row_type'],'name'=>$data['name']]);
         $source=!empty($data['copy_from_id'])?HomepageOfferSet::with('blocks')->findOrFail($data['copy_from_id']):null;
         foreach (($source?->blocks ?? []) as $block) $set->blocks()->create($block->only(['row_type','slot','title','body','cta','href','image','mobile_image','theme','hidden']));
+        if (!$source) {
+            $assets = ['four' => [1, 2, 3, 4], 'wide' => [5], 'two' => [6, 7]][$set->row_type];
+            foreach ($assets as $slot => $asset) {
+                $set->blocks()->create(['row_type' => $set->row_type, 'slot' => $slot, 'title' => 'New offer', 'body' => null, 'cta' => 'Shop now', 'href' => '/shop', 'image' => '/assets/offer/'.$asset.'.png', 'mobile_image' => '/assets/offer/'.$asset.'m.png', 'theme' => 'blue', 'hidden' => true]);
+            }
+        }
         return response()->json($set->load('blocks'),201);
     }
     public function updateSet(Request $request, HomepageOfferSet $offerSet): JsonResponse { $this->authorizeManager($request); $offerSet->update($request->validate(['name'=>['required','string','max:120']])); return response()->json($offerSet->load('blocks')); }
