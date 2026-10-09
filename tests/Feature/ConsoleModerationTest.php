@@ -28,5 +28,8 @@ class ConsoleModerationTest extends TestCase
         $ruleId = $this->withToken($token)->postJson('/api/admin/fraud-guard/rules', ['name' => 'High value review', 'rule_type' => 'order_value', 'configuration' => ['threshold' => 5000], 'is_active' => true])->assertCreated()->json('id');
         $this->withToken($token)->postJson("/api/admin/fraud-guard/rules/{$ruleId}", ['is_active' => false])->assertOk()->assertJsonPath('is_active', false);
         $this->withToken($token)->postJson("/api/admin/fraud-guard/rules/{$ruleId}/delete")->assertOk();
+        $this->withToken($token)->getJson('/api/admin/fraud-guard')->assertOk()->assertJsonPath('settings.enabled', true);
+        $this->withToken($token)->postJson('/api/admin/fraud-guard/settings', ['enabled' => true, 'ip_block' => true, 'device_block' => true, 'phone_blacklist' => true, 'fake_number_detection' => true])->assertOk();
+        $this->withToken($token)->postJson('/api/admin/fraud-guard/blocks', ['kind' => 'phone', 'value' => '+880 1712 345678', 'reason' => 'Chargeback'])->assertOk()->assertJsonPath('blocks.0.value', '01712345678');
     }
 }
