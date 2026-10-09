@@ -169,11 +169,18 @@ class OrderController extends Controller
         if (!$request->user() instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
-
+        $data = $request->validate([
+            'paid_amount' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'internal_note' => ['sometimes', 'nullable', 'string', 'max:5000'],
+            'is_guest' => ['sometimes', 'boolean'],
+            'manual_ship' => ['sometimes', 'boolean'],
+            'exchange_for' => ['sometimes', 'nullable', 'string', 'max:80'],
+        ]);
+        $order->update($data);
         return response()->json([
-            'message' => 'Order status is derived from item fulfilment. Update an admin-owned item through the fulfilment endpoint.',
-            'order' => $order->load(['customer', 'items', 'paymentMethod', 'shippingMethod', 'coupon']),
-        ], 422);
+            'message' => 'Order details updated successfully. Fulfilment status is derived from item fulfilment.',
+            'order' => $order->fresh()->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']),
+        ]);
     }
 
     public function fulfillSellerItem(Request $request, Order $order, OrderItem $item): JsonResponse
