@@ -64,7 +64,9 @@ class CouponController extends Controller
         }
 
         $data = $this->validateCoupon($request);
-        $code = !empty($data['is_automatic']) && empty($data['code']) ? 'AUTO-'.Str::upper(Str::random(10)) : $this->normalizeCode($data['code'] ?? '');
+        // The editor intentionally sends AUTO as its placeholder for an
+        // automatic rule; turn it into a unique internal redemption code.
+        $code = !empty($data['is_automatic']) && (empty($data['code']) || Str::upper((string) $data['code']) === 'AUTO') ? 'AUTO-'.Str::upper(Str::random(10)) : $this->normalizeCode($data['code'] ?? '');
 
         if (!$this->dateWindowIsValid($data['starts_at'] ?? null, $data['expires_at'] ?? null)) {
             return response()->json(['message' => 'Coupon expiry must be after start date.'], 422);
