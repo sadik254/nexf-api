@@ -64,7 +64,7 @@ class CouponController extends Controller
         }
 
         $data = $this->validateCoupon($request);
-        $code = $this->normalizeCode($data['code']);
+        $code = !empty($data['is_automatic']) && empty($data['code']) ? 'AUTO-'.Str::upper(Str::random(10)) : $this->normalizeCode($data['code'] ?? '');
 
         if (!$this->dateWindowIsValid($data['starts_at'] ?? null, $data['expires_at'] ?? null)) {
             return response()->json(['message' => 'Coupon expiry must be after start date.'], 422);
@@ -80,12 +80,18 @@ class CouponController extends Controller
 
         $coupon = Coupon::create([
             'created_by_admin_id' => $actor->id,
+            'seller_id' => $data['seller_id'] ?? null,
             'code' => $code,
+            'is_automatic' => (bool) ($data['is_automatic'] ?? false),
             'name' => $data['name'] ?? null,
             'description' => $data['description'] ?? null,
             'discount_type' => $data['discount_type'],
+            'applies_to' => $data['applies_to'] ?? 'order',
             'discount_value' => $data['discount_value'],
             'minimum_order_amount' => $data['minimum_order_amount'] ?? null,
+            'minimum_quantity' => $data['minimum_quantity'] ?? null,
+            'eligible_product_ids' => $data['eligible_product_ids'] ?? null,
+            'eligible_category_ids' => $data['eligible_category_ids'] ?? null,
             'maximum_discount_amount' => $data['maximum_discount_amount'] ?? null,
             'usage_limit' => $data['usage_limit'] ?? null,
             'used_count' => 0,
@@ -134,11 +140,17 @@ class CouponController extends Controller
 
         $coupon->fill([
             'code' => $code,
+            'seller_id' => array_key_exists('seller_id', $data) ? $data['seller_id'] : $coupon->seller_id,
+            'is_automatic' => array_key_exists('is_automatic', $data) ? (bool) $data['is_automatic'] : $coupon->is_automatic,
             'name' => array_key_exists('name', $data) ? $data['name'] : $coupon->name,
             'description' => array_key_exists('description', $data) ? $data['description'] : $coupon->description,
             'discount_type' => $data['discount_type'] ?? $coupon->discount_type,
+            'applies_to' => $data['applies_to'] ?? $coupon->applies_to,
             'discount_value' => $data['discount_value'] ?? $coupon->discount_value,
             'minimum_order_amount' => array_key_exists('minimum_order_amount', $data) ? $data['minimum_order_amount'] : $coupon->minimum_order_amount,
+            'minimum_quantity' => array_key_exists('minimum_quantity', $data) ? $data['minimum_quantity'] : $coupon->minimum_quantity,
+            'eligible_product_ids' => array_key_exists('eligible_product_ids', $data) ? $data['eligible_product_ids'] : $coupon->eligible_product_ids,
+            'eligible_category_ids' => array_key_exists('eligible_category_ids', $data) ? $data['eligible_category_ids'] : $coupon->eligible_category_ids,
             'maximum_discount_amount' => array_key_exists('maximum_discount_amount', $data) ? $data['maximum_discount_amount'] : $coupon->maximum_discount_amount,
             'usage_limit' => array_key_exists('usage_limit', $data) ? $data['usage_limit'] : $coupon->usage_limit,
             'per_customer_limit' => array_key_exists('per_customer_limit', $data) ? $data['per_customer_limit'] : $coupon->per_customer_limit,
@@ -202,12 +214,18 @@ class CouponController extends Controller
         $required = $creating ? 'required' : 'sometimes';
 
         return $request->validate([
-            'code' => [$required, 'string', 'max:64'],
+            'code' => [$creating ? 'required_without:is_automatic' : 'sometimes', 'nullable', 'string', 'max:64'],
+            'seller_id' => ['nullable', 'integer', 'exists:sellers,id'],
+            'is_automatic' => ['sometimes', 'boolean'],
             'name' => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'discount_type' => [$required, Rule::in(['fixed', 'percentage'])],
+            'applies_to' => ['sometimes', Rule::in(['order','product','shipping'])],
             'discount_value' => [$required, 'numeric', 'min:0.01'],
             'minimum_order_amount' => ['nullable', 'numeric', 'min:0'],
+            'minimum_quantity' => ['nullable', 'integer', 'min:1'],
+            'eligible_product_ids' => ['nullable', 'array'], 'eligible_product_ids.*' => ['integer', 'exists:products,id'],
+            'eligible_category_ids' => ['nullable', 'array'], 'eligible_category_ids.*' => ['integer', 'exists:product_categories,id'],
             'maximum_discount_amount' => ['nullable', 'numeric', 'min:0'],
             'usage_limit' => ['nullable', 'integer', 'min:1'],
             'per_customer_limit' => ['nullable', 'integer', 'min:1'],

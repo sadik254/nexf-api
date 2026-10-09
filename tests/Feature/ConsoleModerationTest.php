@@ -1,0 +1,32 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\Admin;
+use App\Models\Customer;
+use App\Models\Product;
+use App\Models\ProductCategory;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class ConsoleModerationTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_super_admin_manages_reports_and_fraud_rules(): void
+    {
+        $customer = Customer::create(['name' => 'Reporter', 'email' => 'reporter@example.test', 'password' => 'password123']);
+        $category = ProductCategory::create(['name' => 'Clothes', 'slug' => 'clothes']);
+        $product = Product::create(['category_id' => $category->id, 'name' => 'Reported item', 'slug' => 'reported-item', 'product_type' => 'simple', 'status' => 'active']);
+        $customerToken = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+        $reportId = $this->withToken($customerToken)->postJson('/api/customers/reports', ['target_type' => 'product', 'target_id' => $product->id, 'product_id' => $product->id, 'reason' => 'Counterfeit', 'note' => 'Please investigate'])->assertCreated()->json('id');
+        $admin = Admin::create(['name' => 'Super', 'email' => 'moderator@example.test', 'password' => 'password123', 'role' => 'super_admin']);
+        $token = $admin->createToken('test', ['admin:basic'])->plainTextToken;
+        $this->withToken($token)->getJson('/api/admin/reports?status=open')->assertOk()->assertJsonPath('data.0.id', $reportId);
+        $this->withToken($token)->postJson("/api/admin/reports/{$reportId}/resolve", ['status' => 'actioned', 'resolution' => 'Listing removed.'])->assertOk()->assertJsonPath('status', 'actioned');
+        $this->assertDatabaseHas('products', ['id' => $product->id, 'status' => 'unlisted']);
+        $ruleId = $this->withToken($token)->postJson('/api/admin/fraud-guard/rules', ['name' => 'High value review', 'rule_type' => 'order_value', 'configuration' => ['threshold' => 5000], 'is_active' => true])->assertCreated()->json('id');
+        $this->withToken($token)->postJson("/api/admin/fraud-guard/rules/{$ruleId}", ['is_active' => false])->assertOk()->assertJsonPath('is_active', false);
+        $this->withToken($token)->postJson("/api/admin/fraud-guard/rules/{$ruleId}/delete")->assertOk();
+    }
+}

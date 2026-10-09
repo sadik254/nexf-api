@@ -29,6 +29,7 @@ class Order extends Model
         'total',
         'shipping_name',
         'shipping_phone',
+        'ip_address',
         'shipping_address',
         'notes',
         'placed_at',

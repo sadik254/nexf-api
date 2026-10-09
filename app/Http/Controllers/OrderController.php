@@ -55,7 +55,7 @@ class OrderController extends Controller
         /** @var Customer $customer */
         $customer = $request->user();
         $data = $request->validate($this->checkoutRules());
-        $preview = $this->checkout->preview($customer, $data);
+        $preview = $this->checkout->preview($customer, $data + ['ip_address' => $request->ip()]);
 
         return response()->json([
             'items' => collect($preview['items'])->map(fn ($item) => [
@@ -424,9 +424,10 @@ class OrderController extends Controller
         $this->turnstile->assertHuman($request);
 
         // Uses the same validation, availability, and pricing rules as checkout preview.
-        $this->checkout->preview($customer, $data);
+        $data['ip_address'] = $request->ip();
+        $preview = $this->checkout->preview($customer, $data);
 
-        $order = DB::transaction(function () use ($customer, $data) {
+        $order = DB::transaction(function () use ($customer, $data, $preview) {
             $paymentMethod = PaymentMethod::query()->active()->find($data['payment_method_id']);
             if (!$paymentMethod) {
                 throw ValidationException::withMessages([
@@ -460,6 +461,7 @@ class OrderController extends Controller
                 'total' => 0,
                 'shipping_name' => $data['shipping_name'],
                 'shipping_phone' => $data['shipping_phone'],
+                'ip_address' => $data['ip_address'],
                 'shipping_address' => $data['shipping_address'],
                 'notes' => $data['notes'] ?? null,
                 'placed_at' => now(),
@@ -551,9 +553,15 @@ class OrderController extends Controller
                 $shippingLines[] = ['product' => $product, 'subtotal' => $lineSubtotal];
             }
 
-            $coupon = $this->resolveCoupon($data['coupon_code'] ?? null, $subtotal, $customer);
-            $discountTotal = $coupon ? $coupon->discountForSubtotal($subtotal) : 0.0;
             $shipping = $this->storeShipping->quote($shippingLines, $shippingMethod);
+            $coupon = $preview['coupon'] ? Coupon::query()->lockForUpdate()->find($preview['coupon']->id) : null;
+            if ($coupon && ($reason = $coupon->unusableReason())) {
+                throw ValidationException::withMessages(['coupon_code' => [$reason]]);
+            }
+            if ($coupon && $coupon->per_customer_limit !== null && CouponRedemption::query()->where('coupon_id', $coupon->id)->where('customer_id', $customer->id)->count() >= $coupon->per_customer_limit) {
+                throw ValidationException::withMessages(['coupon_code' => ['Coupon usage limit reached for this customer.']]);
+            }
+            $discountTotal = $coupon ? (float) $preview['discount_total'] : 0.0;
             $total = round($subtotal + $shipping['total'] - $discountTotal, 2);
 
             $order->storeGroups()->createMany($shipping['groups']);

@@ -17,6 +17,7 @@ class CheckoutService
     public function __construct(
         private InventoryService $inventory,
         private StoreShippingService $storeShipping,
+        private FraudGuardService $fraudGuard,
     ) {}
 
     public function preview(Customer $customer, array $data): array
@@ -45,29 +46,44 @@ class CheckoutService
             $items[] = ['product' => $product, 'variation' => $variation, 'quantity' => $quantity, 'quote' => $quote];
         }
 
-        $coupon = $this->resolveCoupon($data['coupon_code'] ?? null, $subtotal, $customer);
-        $discount = $coupon ? $coupon->discountForSubtotal($subtotal) : 0.0;
         $shipping = $this->storeShipping->quote(array_map(fn ($item) => [
             'product' => $item['product'],
             'subtotal' => $item['quote']['subtotal'],
         ], $items), $shippingMethod);
+        $coupon = $this->resolveCoupon($data['coupon_code'] ?? null, $subtotal, $customer, $items);
+        $discount = $coupon ? ($coupon->applies_to === 'shipping' ? min((float) $shipping['total'], $coupon->discountForSubtotal((float) $shipping['total'])) : $coupon->discountForSubtotal($subtotal)) : 0.0;
+        $total = round($subtotal + $shipping['total'] - $discount, 2);
+        $this->fraudGuard->assertAllowed($customer, $data + ['payment_method_code' => $paymentMethod->code], $total);
 
         return compact('paymentMethod', 'shippingMethod', 'items', 'coupon', 'subtotal') + [
             'discount_total' => $discount,
             'shipping_groups' => $shipping['groups'],
             'shipping_charge' => $shipping['total'],
-            'total' => round($subtotal + $shipping['total'] - $discount, 2),
+            'total' => $total,
         ];
     }
 
-    private function resolveCoupon(?string $couponCode, float $subtotal, Customer $customer): ?Coupon
+    private function resolveCoupon(?string $couponCode, float $subtotal, Customer $customer, array $items): ?Coupon
     {
-        if (!$couponCode) return null;
-        $coupon = Coupon::where('code', preg_replace('/[^A-Z0-9_-]/', '', Str::upper($couponCode)))->first();
+        $coupon = $couponCode ? Coupon::where('code', preg_replace('/[^A-Z0-9_-]/', '', Str::upper($couponCode)))->first() : Coupon::query()->where('is_automatic', true)->get()->first(fn (Coupon $candidate) => !$candidate->unusableReason() && $this->couponMatches($candidate, $items));
+        if (!$coupon && !$couponCode) return null;
         if (!$coupon) throw ValidationException::withMessages(['coupon_code' => ['Coupon code was not found.']]);
         if ($reason = $coupon->unusableReason()) throw ValidationException::withMessages(['coupon_code' => [$reason]]);
         if ($coupon->minimum_order_amount !== null && $subtotal < (float) $coupon->minimum_order_amount) throw ValidationException::withMessages(['coupon_code' => ['Minimum order amount not reached for this coupon.']]);
         if ($coupon->per_customer_limit !== null && CouponRedemption::where('coupon_id', $coupon->id)->where('customer_id', $customer->id)->count() >= $coupon->per_customer_limit) throw ValidationException::withMessages(['coupon_code' => ['Coupon usage limit reached for this customer.']]);
+        if (!$this->couponMatches($coupon, $items)) throw ValidationException::withMessages(['coupon_code' => ['This discount does not apply to the items in your cart.']]);
         return $coupon;
+    }
+
+    private function couponMatches(Coupon $coupon, array $items): bool
+    {
+        $quantity = array_sum(array_map(fn ($item) => $item['quantity'], $items));
+        if ($coupon->minimum_quantity !== null && $quantity < $coupon->minimum_quantity) return false;
+        if ($coupon->applies_to !== 'product') return true;
+        $products = array_map(fn ($item) => $item['product'], $items);
+        if ($coupon->seller_id && !collect($products)->contains(fn ($product) => (int) $product->seller_id === (int) $coupon->seller_id)) return false;
+        if ($coupon->eligible_product_ids && !collect($products)->contains(fn ($product) => in_array($product->id, $coupon->eligible_product_ids, true))) return false;
+        if ($coupon->eligible_category_ids && !collect($products)->contains(fn ($product) => in_array($product->category_id, $coupon->eligible_category_ids, true))) return false;
+        return true;
     }
 }

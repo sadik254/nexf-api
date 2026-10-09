@@ -36,6 +36,8 @@ use App\Http\Controllers\StoreChatController;
 use App\Http\Controllers\ReturnRequestController;
 use App\Http\Controllers\ResellerController;
 use App\Http\Controllers\WithdrawalController;
+use App\Http\Controllers\ContentReportController;
+use App\Http\Controllers\FraudGuardController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -58,6 +60,7 @@ Route::prefix('customers')->group(function () {
         Route::post('/orders', [OrderController::class, 'store']);
         Route::get('/orders/{order}', [OrderController::class, 'showCustomer']);
         Route::post('/orders/{order}/cancel', [OrderController::class, 'cancelCustomer']);
+        Route::post('/reports', [ContentReportController::class, 'store']);
         Route::post('/products/{product:slug}/reviews', [ProductEngagementController::class, 'review']);
         Route::post('/products/{product:slug}/questions', [ProductEngagementController::class, 'ask']);
         Route::get('/reviews', [ProductEngagementController::class, 'reviewsForCustomer']);
@@ -169,6 +172,12 @@ Route::prefix('admin')->group(function () {
 });
 
 Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(function () {
+    Route::get('/reports', [ContentReportController::class, 'index']);
+    Route::post('/reports/{contentReport}/resolve', [ContentReportController::class, 'resolve']);
+    Route::get('/fraud-guard/rules', [FraudGuardController::class, 'index']);
+    Route::post('/fraud-guard/rules', [FraudGuardController::class, 'store']);
+    Route::post('/fraud-guard/rules/{fraudGuardRule}', [FraudGuardController::class, 'update']);
+    Route::post('/fraud-guard/rules/{fraudGuardRule}/delete', [FraudGuardController::class, 'destroy']);
     Route::get('/resellers', [ResellerController::class, 'index']);
     Route::post('/resellers', [ResellerController::class, 'store']);
     Route::post('/resellers/{reseller}', [ResellerController::class, 'update']);
@@ -221,6 +230,10 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::get('/homepage/category-cards', [HomepageCategoryCardController::class, 'index']);
     Route::post('/homepage/category-cards', [HomepageCategoryCardController::class, 'replace']);
     Route::get('/homepage/offer-blocks', [HomepageOfferBlockController::class, 'index']);
+    Route::get('/homepage/offer-sets', [HomepageOfferBlockController::class, 'sets']);
+    Route::post('/homepage/offer-sets', [HomepageOfferBlockController::class, 'storeSet']);
+    Route::post('/homepage/offer-sets/{offerSet}', [HomepageOfferBlockController::class, 'updateSet']);
+    Route::post('/homepage/offer-sets/{offerSet}/delete', [HomepageOfferBlockController::class, 'destroySet']);
     Route::post('/homepage/offer-blocks/{block}', [HomepageOfferBlockController::class, 'update']);
     Route::get('/homepage/layout', [HomepageLayoutController::class, 'show']);
     Route::post('/homepage/layout', [HomepageLayoutController::class, 'update']);

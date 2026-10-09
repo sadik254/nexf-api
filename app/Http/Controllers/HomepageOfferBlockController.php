@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Admin;
 use App\Models\HomepageOfferBlock;
+use App\Models\HomepageOfferSet;
+use App\Models\SiteSetting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -36,6 +38,27 @@ class HomepageOfferBlockController extends Controller
         ]);
         $block->update($data);
         return response()->json($block->fresh());
+    }
+
+    public function sets(Request $request): JsonResponse { $this->authorizeManager($request); return response()->json(HomepageOfferSet::with(['blocks' => fn ($q) => $q->orderBy('slot')])->orderBy('row_type')->latest()->get()); }
+    public function storeSet(Request $request): JsonResponse
+    {
+        $this->authorizeManager($request); $data=$request->validate(['row_type'=>['required',Rule::in(['four','wide','two'])],'name'=>['required','string','max:120'],'copy_from_id'=>['nullable','integer','exists:homepage_offer_sets,id']]);
+        $set=HomepageOfferSet::create(['row_type'=>$data['row_type'],'name'=>$data['name']]);
+        $source=!empty($data['copy_from_id'])?HomepageOfferSet::with('blocks')->findOrFail($data['copy_from_id']):null;
+        foreach (($source?->blocks ?? []) as $block) $set->blocks()->create($block->only(['row_type','slot','title','body','cta','href','image','mobile_image','theme','hidden']));
+        return response()->json($set->load('blocks'),201);
+    }
+    public function updateSet(Request $request, HomepageOfferSet $offerSet): JsonResponse { $this->authorizeManager($request); $offerSet->update($request->validate(['name'=>['required','string','max:120']])); return response()->json($offerSet->load('blocks')); }
+    public function destroySet(Request $request, HomepageOfferSet $offerSet): JsonResponse
+    {
+        $this->authorizeManager($request);
+        $layout = SiteSetting::find('home_layout')?->payload ?? [];
+        if (collect($layout)->contains(fn ($section) => (int) ($section['offer_set_id'] ?? 0) === $offerSet->id)) {
+            return response()->json(['message' => 'This offer set is used by the homepage layout. Choose another set there before deleting it.'], 422);
+        }
+        $offerSet->delete();
+        return response()->json(['message'=>'Offer set deleted.']);
     }
 
     private function authorizeManager(Request $request): void
