@@ -50,6 +50,27 @@ class OrderController extends Controller
         return response()->json($order->load(['items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']));
     }
 
+    public function previewAdmin(Request $request): JsonResponse
+    {
+        if (!$request->user() instanceof Admin) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        $data = $request->validate([
+            'customer_id' => ['nullable', 'integer', 'exists:customers,id'],
+            'shipping_name' => ['required', 'string', 'max:255'],
+            'shipping_phone' => ['required', 'string', 'max:32'],
+            'shipping_address' => ['required', 'string'],
+        ] + $this->checkoutRules());
+
+        $customer = !empty($data['customer_id'])
+            ? Customer::findOrFail($data['customer_id'])
+            : Customer::query()->where('phone', $data['shipping_phone'])->first();
+        $preview = $this->checkout->preview($customer, $data + ['ip_address' => $request->ip()]);
+
+        return $this->checkoutPreviewResponse($preview);
+    }
+
     public function preview(Request $request): JsonResponse
     {
         /** @var Customer $customer */
@@ -57,6 +78,11 @@ class OrderController extends Controller
         $data = $request->validate($this->checkoutRules());
         $preview = $this->checkout->preview($customer, $data + ['ip_address' => $request->ip()]);
 
+        return $this->checkoutPreviewResponse($preview);
+    }
+
+    private function checkoutPreviewResponse(array $preview): JsonResponse
+    {
         return response()->json([
             'items' => collect($preview['items'])->map(fn ($item) => [
                 'product_id' => $item['product']->id, 'variation_id' => $item['variation']?->id,

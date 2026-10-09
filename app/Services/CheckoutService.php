@@ -20,7 +20,7 @@ class CheckoutService
         private FraudGuardService $fraudGuard,
     ) {}
 
-    public function preview(Customer $customer, array $data): array
+    public function preview(?Customer $customer, array $data): array
     {
         $paymentMethod = PaymentMethod::query()->active()->find($data['payment_method_id']);
         $shippingMethod = ShippingMethod::query()->active()->find($data['shipping_method_id']);
@@ -63,14 +63,14 @@ class CheckoutService
         ];
     }
 
-    private function resolveCoupon(?string $couponCode, float $subtotal, Customer $customer, array $items): ?Coupon
+    private function resolveCoupon(?string $couponCode, float $subtotal, ?Customer $customer, array $items): ?Coupon
     {
         $coupon = $couponCode ? Coupon::where('code', preg_replace('/[^A-Z0-9_-]/', '', Str::upper($couponCode)))->first() : Coupon::query()->where('is_automatic', true)->get()->first(fn (Coupon $candidate) => !$candidate->unusableReason() && $this->couponMatches($candidate, $items));
         if (!$coupon && !$couponCode) return null;
         if (!$coupon) throw ValidationException::withMessages(['coupon_code' => ['Coupon code was not found.']]);
         if ($reason = $coupon->unusableReason()) throw ValidationException::withMessages(['coupon_code' => [$reason]]);
         if ($coupon->minimum_order_amount !== null && $subtotal < (float) $coupon->minimum_order_amount) throw ValidationException::withMessages(['coupon_code' => ['Minimum order amount not reached for this coupon.']]);
-        if ($coupon->per_customer_limit !== null && CouponRedemption::where('coupon_id', $coupon->id)->where('customer_id', $customer->id)->count() >= $coupon->per_customer_limit) throw ValidationException::withMessages(['coupon_code' => ['Coupon usage limit reached for this customer.']]);
+        if ($customer && $coupon->per_customer_limit !== null && CouponRedemption::where('coupon_id', $coupon->id)->where('customer_id', $customer->id)->count() >= $coupon->per_customer_limit) throw ValidationException::withMessages(['coupon_code' => ['Coupon usage limit reached for this customer.']]);
         if (!$this->couponMatches($coupon, $items)) throw ValidationException::withMessages(['coupon_code' => ['This discount does not apply to the items in your cart.']]);
         return $coupon;
     }

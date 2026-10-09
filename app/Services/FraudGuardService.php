@@ -11,7 +11,7 @@ use Illuminate\Validation\ValidationException;
 
 class FraudGuardService
 {
-    public function assertAllowed(Customer $customer, array $checkout, float $total): void
+    public function assertAllowed(?Customer $customer, array $checkout, float $total): void
     {
         // Do not turn on a new checkout restriction merely by deploying its
         // table. The console creates the explicit settings record on first
