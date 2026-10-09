@@ -401,6 +401,28 @@ class OrderLifecycleTest extends TestCase
             ->assertNotFound();
     }
 
+    public function test_admin_can_persist_the_reference_packed_stage_after_confirmation(): void
+    {
+        [$customer, $product] = $this->checkoutFixtures(1);
+        $order = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
+        $admin = Admin::create([
+            'name' => 'Packing Admin',
+            'email' => 'packing-admin@example.test',
+            'password' => 'password123',
+            'role' => 'super_admin',
+        ]);
+        $token = $admin->createToken('test', ['admin:orders'])->plainTextToken;
+
+        $this->withToken($token)
+            ->postJson("/api/admin/orders/{$order['id']}/items/{$order['items'][0]['id']}/fulfillment", ['status' => 'confirmed'])
+            ->assertOk();
+        $this->withToken($token)
+            ->postJson("/api/admin/orders/{$order['id']}", ['packed' => true])
+            ->assertOk()
+            ->assertJsonPath('order.status', 'confirmed')
+            ->assertJsonPath('order.packed_at', fn ($value) => is_string($value) && $value !== '');
+    }
+
     public function test_steadfast_cancellation_waits_for_reconciliation_and_duplicate_events_are_safe(): void
     {
         config(['services.steadfast.webhook_token' => 'webhook-test-token']);

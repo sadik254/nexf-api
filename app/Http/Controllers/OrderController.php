@@ -175,7 +175,15 @@ class OrderController extends Controller
             'is_guest' => ['sometimes', 'boolean'],
             'manual_ship' => ['sometimes', 'boolean'],
             'exchange_for' => ['sometimes', 'nullable', 'string', 'max:80'],
+            'packed' => ['sometimes', 'boolean'],
         ]);
+        if (array_key_exists('packed', $data)) {
+            if ($data['packed'] && $order->status !== 'confirmed') {
+                throw ValidationException::withMessages(['packed' => ['An order must be confirmed before it can be packed.']]);
+            }
+            $data['packed_at'] = $data['packed'] ? now() : null;
+            unset($data['packed']);
+        }
         $order->update($data);
         return response()->json([
             'message' => 'Order details updated successfully. Fulfilment status is derived from item fulfilment.',

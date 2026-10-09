@@ -40,6 +40,7 @@ class Order extends Model
         'manual_ship',
         'exchange_for',
         'placed_at',
+        'packed_at',
         'cancelled_at',
     ];
 
@@ -54,6 +55,7 @@ class Order extends Model
             'is_guest' => 'boolean',
             'manual_ship' => 'boolean',
             'placed_at' => 'datetime',
+            'packed_at' => 'datetime',
             'cancelled_at' => 'datetime',
         ];
     }
