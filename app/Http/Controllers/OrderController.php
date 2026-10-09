@@ -609,6 +609,7 @@ class OrderController extends Controller
             'payment_method_id' => ['required', 'integer', 'exists:payment_methods,id'],
             'shipping_method_id' => ['required', 'integer', 'exists:shipping_methods,id'],
             'coupon_code' => ['nullable', 'string', 'max:64'],
+            'device_id' => ['nullable', 'string', 'regex:/^[a-f0-9]{16,64}$/i'],
         ];
     }
 
