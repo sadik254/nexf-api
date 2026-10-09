@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\Customer;
 use App\Models\FraudGuardRule;
+use App\Models\FraudGuardBlock;
+use App\Models\FraudGuardSetting;
 use App\Models\Order;
 use Illuminate\Validation\ValidationException;
 
@@ -11,6 +13,17 @@ class FraudGuardService
 {
     public function assertAllowed(Customer $customer, array $checkout, float $total): void
     {
+        // Do not turn on a new checkout restriction merely by deploying its
+        // table. The console creates the explicit settings record on first
+        // save, after an administrator has reviewed the defaults.
+        $settings = FraudGuardSetting::first();
+        if ($settings?->enabled) {
+            $phone = preg_replace('/\D/', '', (string) ($checkout['shipping_phone'] ?? ''));
+            if (str_starts_with($phone, '880')) $phone = substr($phone, 2);
+            if ($settings->fake_number_detection && (!preg_match('/^01[3-9]\d{8}$/', $phone) || preg_match('/^01\d(\d)\1{7}$/', $phone))) throw ValidationException::withMessages(['shipping_phone' => ['Enter a valid Bangladeshi mobile number.']]);
+            $blocked = FraudGuardBlock::query();
+            if (($settings->phone_blacklist && (clone $blocked)->where('kind', 'phone')->where('value', $phone)->exists()) || ($settings->ip_block && !empty($checkout['ip_address']) && (clone $blocked)->where('kind', 'ip')->where('value', strtolower($checkout['ip_address']))->exists()) || ($settings->device_block && !empty($checkout['device_id']) && (clone $blocked)->where('kind', 'device')->where('value', strtolower($checkout['device_id']))->exists())) throw ValidationException::withMessages(['checkout' => ["We couldn't place this order. Please contact support if you think this is a mistake."]]);
+        }
         foreach (FraudGuardRule::query()->where('is_active', true)->get() as $rule) {
             $config = $rule->configuration ?? [];
             if ($rule->rule_type === 'order_value' && isset($config['threshold']) && $total > (float) $config['threshold']) {
