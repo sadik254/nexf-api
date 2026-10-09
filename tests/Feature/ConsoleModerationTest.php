@@ -6,6 +6,7 @@ use App\Models\Admin;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Models\Review;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -25,6 +26,10 @@ class ConsoleModerationTest extends TestCase
         $this->withToken($token)->getJson('/api/admin/reports?status=open')->assertOk()->assertJsonPath('data.0.id', $reportId);
         $this->withToken($token)->postJson("/api/admin/reports/{$reportId}/resolve", ['status' => 'actioned', 'resolution' => 'Listing removed.'])->assertOk()->assertJsonPath('status', 'actioned');
         $this->assertDatabaseHas('products', ['id' => $product->id, 'status' => 'unlisted']);
+        $review = Review::create(['product_id' => $product->id, 'customer_id' => $customer->id, 'rating' => 5, 'comment' => 'Fine', 'seller_response' => 'Thanks']);
+        $sellerResponseReport = $this->withToken($customerToken)->postJson('/api/customers/reports', ['target_type' => 'seller_response', 'target_id' => $review->id, 'product_id' => $product->id, 'reason' => 'Abusive'])->assertCreated()->json('id');
+        $this->withToken($token)->postJson("/api/admin/reports/{$sellerResponseReport}/resolve", ['status' => 'actioned'])->assertOk();
+        $this->assertDatabaseHas('reviews', ['id' => $review->id, 'seller_response' => null]);
         $ruleId = $this->withToken($token)->postJson('/api/admin/fraud-guard/rules', ['name' => 'High value review', 'rule_type' => 'order_value', 'configuration' => ['threshold' => 5000], 'is_active' => true])->assertCreated()->json('id');
         $this->withToken($token)->postJson("/api/admin/fraud-guard/rules/{$ruleId}", ['is_active' => false])->assertOk()->assertJsonPath('is_active', false);
         $this->withToken($token)->postJson("/api/admin/fraud-guard/rules/{$ruleId}/delete")->assertOk();
