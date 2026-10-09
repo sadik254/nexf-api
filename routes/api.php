@@ -175,6 +175,10 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::get('/reports', [ContentReportController::class, 'index']);
     Route::post('/reports/{contentReport}/resolve', [ContentReportController::class, 'resolve']);
     Route::get('/fraud-guard/rules', [FraudGuardController::class, 'index']);
+    Route::get('/fraud-guard', [FraudGuardController::class, 'state']);
+    Route::post('/fraud-guard/settings', [FraudGuardController::class, 'saveSettings']);
+    Route::post('/fraud-guard/blocks', [FraudGuardController::class, 'addBlock']);
+    Route::post('/fraud-guard/blocks/{fraudGuardBlock}/delete', [FraudGuardController::class, 'removeBlock']);
     Route::post('/fraud-guard/rules', [FraudGuardController::class, 'store']);
     Route::post('/fraud-guard/rules/{fraudGuardRule}', [FraudGuardController::class, 'update']);
     Route::post('/fraud-guard/rules/{fraudGuardRule}/delete', [FraudGuardController::class, 'destroy']);
