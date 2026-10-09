@@ -130,6 +130,15 @@ class OrderLifecycleTest extends TestCase
             ->assertOk()->assertJsonPath('shipping_charge', 20)->assertJsonPath('discount_total', 20)->assertJsonPath('total', 100);
     }
 
+    public function test_buy_x_get_y_discount_only_rewards_the_configured_quantity(): void
+    {
+        [$customer, $product] = $this->checkoutFixtures(2);
+        Coupon::create(['code' => 'BUYGET', 'discount_kind' => 'bxgy', 'discount_type' => 'percentage', 'discount_value' => 100, 'buy_product_ids' => [$product->id], 'eligible_product_ids' => [$product->id], 'buy_quantity' => 1, 'get_quantity' => 1, 'reward_type' => 'free', 'is_active' => true]);
+        $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+        $this->withToken($token)->postJson('/api/customers/orders/preview', ['items' => [['product_id' => $product->id, 'quantity' => 2]], 'payment_method_id' => PaymentMethod::firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'BUYGET', 'shipping_phone' => '01700000000'])
+            ->assertOk()->assertJsonPath('subtotal', 200)->assertJsonPath('discount_total', 100)->assertJsonPath('total', 120);
+    }
+
     public function test_seller_can_only_view_and_transition_own_order_items(): void
     {
         config(['services.steadfast.api_key' => 'test-key', 'services.steadfast.secret_key' => 'test-secret', 'services.steadfast.base_url' => 'https://steadfast.test/api/v1']);
