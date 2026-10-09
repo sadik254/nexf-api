@@ -53,8 +53,10 @@ class HomepageOfferBlockController extends Controller
     public function destroySet(Request $request, HomepageOfferSet $offerSet): JsonResponse
     {
         $this->authorizeManager($request);
-        $layout = SiteSetting::find('home_layout')?->payload ?? [];
-        if (collect($layout)->contains(fn ($section) => (int) ($section['offer_set_id'] ?? 0) === $offerSet->id)) {
+        $layout = SiteSetting::find('home_layout')?->payload ?? config('site-content.home_layout');
+        $firstForType = HomepageOfferSet::query()->where('row_type', $offerSet->row_type)->orderBy('id')->value('id');
+        $typeForRow = ['four' => 'offerFour', 'wide' => 'offerWide', 'two' => 'offerTwo'][$offerSet->row_type];
+        if (collect($layout)->contains(fn ($section) => (int) ($section['offer_set_id'] ?? 0) === $offerSet->id || (($section['type'] ?? null) === $typeForRow && empty($section['offer_set_id']) && (int) $firstForType === $offerSet->id))) {
             return response()->json(['message' => 'This offer set is used by the homepage layout. Choose another set there before deleting it.'], 422);
         }
         $offerSet->delete();
