@@ -24,7 +24,7 @@ class ConsoleModerationTest extends TestCase
         $duplicateReportId = $this->withToken($customerToken)->postJson('/api/customers/reports', ['target_type' => 'product', 'target_id' => $product->id, 'product_id' => $product->id, 'reason' => 'Misleading', 'note' => 'Second flag'])->assertCreated()->json('id');
         $admin = Admin::create(['name' => 'Super', 'email' => 'moderator@example.test', 'password' => 'password123', 'role' => 'super_admin']);
         $token = $admin->createToken('test', ['admin:basic'])->plainTextToken;
-        $this->withToken($token)->getJson('/api/admin/reports?status=open')->assertOk()->assertJsonPath('data.0.id', $reportId);
+        $this->withToken($token)->getJson('/api/admin/reports?status=open')->assertOk()->assertJsonPath('data.0.id', $reportId)->assertJsonPath('data.0.target_summary.label', 'Reported item')->assertJsonPath('data.0.target_summary.href', '/products/reported-item');
         $this->withToken($token)->postJson("/api/admin/reports/{$reportId}/resolve", ['status' => 'actioned', 'resolution' => 'Listing removed.'])->assertOk()->assertJsonPath('status', 'actioned');
         $this->assertDatabaseHas('products', ['id' => $product->id, 'status' => 'unlisted']);
         $this->assertDatabaseHas('content_reports', ['id' => $duplicateReportId, 'status' => 'actioned']);
