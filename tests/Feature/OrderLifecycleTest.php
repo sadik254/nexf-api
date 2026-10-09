@@ -423,6 +423,22 @@ class OrderLifecycleTest extends TestCase
             ->assertJsonPath('order.packed_at', fn ($value) => is_string($value) && $value !== '');
     }
 
+    public function test_admin_can_create_a_guest_order_through_the_checkout_contract(): void
+    {
+        [$customer, $product] = $this->checkoutFixtures(1);
+        $admin = Admin::create(['name' => 'Create Admin', 'email' => 'create-admin@example.test', 'password' => 'password123', 'role' => 'super_admin']);
+        $token = $admin->createToken('test', ['admin:orders'])->plainTextToken;
+        $this->withToken($token)->postJson('/api/admin/orders', [
+            'guest' => true,
+            'items' => [['product_id' => $product->id, 'quantity' => 1]],
+            'payment_method_id' => PaymentMethod::firstOrFail()->id,
+            'shipping_method_id' => ShippingMethod::firstOrFail()->id,
+            'shipping_name' => 'Walk-in Customer',
+            'shipping_phone' => '01711111111',
+            'shipping_address' => 'Dhaka',
+        ])->assertCreated()->assertJsonPath('order.is_guest', true);
+    }
+
     public function test_steadfast_cancellation_waits_for_reconciliation_and_duplicate_events_are_safe(): void
     {
         config(['services.steadfast.webhook_token' => 'webhook-test-token']);

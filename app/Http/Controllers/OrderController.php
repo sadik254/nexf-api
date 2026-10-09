@@ -630,6 +630,38 @@ class OrderController extends Controller
         ], 201);
     }
 
+    /** Create an order from the admin console using the same authoritative checkout path. */
+    public function storeAdmin(Request $request): JsonResponse
+    {
+        if (!$request->user() instanceof Admin) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+        $data = $request->validate([
+            'customer_id' => ['nullable', 'integer', 'exists:customers,id'],
+            'guest' => ['sometimes', 'boolean'],
+            'shipping_name' => ['required', 'string', 'max:255'],
+            'shipping_phone' => ['required', 'string', 'max:32'],
+            'shipping_address' => ['required', 'string'],
+            'notes' => ['nullable', 'string'],
+        ] + $this->checkoutRules());
+
+        $customer = !empty($data['customer_id'])
+            ? Customer::findOrFail($data['customer_id'])
+            : Customer::firstOrCreate(
+                ['phone' => $data['shipping_phone']],
+                ['name' => $data['shipping_name'], 'email' => 'guest-' . preg_replace('/\D+/', '', $data['shipping_phone']) . '@guest.nexf.local', 'password' => Str::random(48)],
+            );
+        $request->setUserResolver(fn () => $customer);
+        $response = $this->store($request);
+        if ($response->getStatusCode() >= 200 && $response->getStatusCode() < 300) {
+            $payload = $response->getData(true);
+            $payload['order']['is_guest'] = empty($data['customer_id']) || ($data['guest'] ?? false);
+            Order::whereKey($payload['order']['id'])->update(['is_guest' => $payload['order']['is_guest']]);
+            $response->setData($payload);
+        }
+        return $response;
+    }
+
     private function checkoutRules(): array
     {
         return [
