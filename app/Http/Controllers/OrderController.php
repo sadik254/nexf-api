@@ -176,6 +176,10 @@ class OrderController extends Controller
             'manual_ship' => ['sometimes', 'boolean'],
             'exchange_for' => ['sometimes', 'nullable', 'string', 'max:80'],
             'packed' => ['sometimes', 'boolean'],
+            'shipping_name' => ['sometimes', 'string', 'max:255'],
+            'shipping_phone' => ['sometimes', 'string', 'max:32'],
+            'shipping_address' => ['sometimes', 'string'],
+            'notes' => ['sometimes', 'nullable', 'string'],
         ]);
         if (array_key_exists('packed', $data)) {
             if ($data['packed'] && $order->status !== 'confirmed') {
