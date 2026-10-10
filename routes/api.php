@@ -50,6 +50,11 @@ Route::prefix('resellers')->group(function () {
         Route::get('/me', [ResellerController::class, 'me']);
         Route::post('/me/password', [ResellerController::class, 'updatePassword']);
         Route::post('/logout', [ResellerController::class, 'logout']);
+        Route::get('/support-tickets', [SupportTicketController::class, 'index']);
+        Route::post('/support-tickets', [SupportTicketController::class, 'store']);
+        Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show']);
+        Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);
+        Route::post('/support-attachments', [SupportTicketController::class, 'upload']);
     });
 });
 

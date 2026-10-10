@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Admin;
 use App\Models\Customer;
 use App\Models\Seller;
+use App\Models\Reseller;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -39,5 +40,20 @@ class SupportTicketTest extends TestCase
         $this->withToken($customerToken)->postJson('/api/customers/support-tickets', [
             'category' => 'Delivery', 'subject' => 'Unsafe', 'body' => 'Test', 'attachments' => ['javascript:alert(1)'],
         ])->assertUnprocessable();
+    }
+
+    public function test_reseller_support_tickets_are_persisted_and_scoped_to_the_owner(): void
+    {
+        $reseller = Reseller::create(['name' => 'Partner', 'email' => 'partner-ticket@example.test', 'password' => 'password123']);
+        $other = Reseller::create(['name' => 'Other', 'email' => 'other-ticket@example.test', 'password' => 'password123']);
+        $token = $reseller->createToken('test', ['reseller:basic'])->plainTextToken;
+        $ticketId = $this->withToken($token)->postJson('/api/resellers/support-tickets', [
+            'category' => 'Account', 'subject' => 'Commission question', 'body' => 'Please explain this month’s target.',
+        ])->assertCreated()->assertJsonPath('reseller_id', $reseller->id)->assertJsonPath('messages.0.author_type', 'reseller')->json('id');
+        $this->withToken($token)->getJson('/api/resellers/support-tickets')->assertOk()->assertJsonPath('total', 1);
+        $this->withToken($other->createToken('test', ['reseller:basic'])->plainTextToken)
+            ->getJson("/api/resellers/support-tickets/{$ticketId}")->assertNotFound();
+        $this->withToken($token)->postJson("/api/resellers/support-tickets/{$ticketId}/messages", ['body' => 'Following up.'])
+            ->assertOk()->assertJsonCount(2, 'messages')->assertJsonPath('messages.1.author_type', 'reseller');
     }
 }

@@ -6,6 +6,7 @@ use App\Models\Admin;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Seller;
+use App\Models\Reseller;
 use App\Models\SupportTicket;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -28,10 +29,11 @@ class SupportTicketController extends Controller
     public function index(Request $request): JsonResponse
     {
         $actor = $this->actor($request);
-        $query = SupportTicket::query()->with(['customer:id,name,email', 'seller:id,store_name,store_slug', 'order:id,order_number'])
+        $query = SupportTicket::query()->with(['customer:id,name,email', 'seller:id,store_name,store_slug', 'reseller:id,name,email', 'order:id,order_number'])
             ->withCount('messages')->latest('updated_at');
         if ($actor instanceof Customer) $query->where('customer_id', $actor->id);
         if ($actor instanceof Seller) $query->where('seller_id', $actor->id);
+        if ($actor instanceof Reseller) $query->where('reseller_id', $actor->id);
         if ($request->filled('status')) $query->where('status', $request->validate(['status' => ['required', Rule::in(['open', 'resolved'])]])['status']);
         if ($request->filled('search')) {
             $search = substr((string) $request->query('search'), 0, 100);
@@ -43,13 +45,13 @@ class SupportTicketController extends Controller
     public function show(Request $request, SupportTicket $ticket): JsonResponse
     {
         $this->authorizeTicket($this->actor($request), $ticket);
-        return response()->json($ticket->load(['customer:id,name,email', 'seller:id,store_name,store_slug', 'order:id,order_number', 'messages']));
+        return response()->json($ticket->load(['customer:id,name,email', 'seller:id,store_name,store_slug', 'reseller:id,name,email', 'order:id,order_number', 'messages']));
     }
 
     public function store(Request $request): JsonResponse
     {
         $customer = $this->actor($request);
-        abort_unless($customer instanceof Customer, 403);
+        abort_unless($customer instanceof Customer || $customer instanceof Reseller, 403);
         $data = $request->validate([
             'order_id' => ['nullable', 'integer', 'exists:orders,id'],
             'seller_id' => ['nullable', 'integer', 'exists:sellers,id'],
@@ -61,7 +63,8 @@ class SupportTicketController extends Controller
         ]);
         $orderId = $data['order_id'] ?? null;
         $sellerId = $data['seller_id'] ?? null;
-        if ($orderId) {
+        if ($customer instanceof Reseller && ($orderId || $sellerId)) abort(422, 'Reseller support requests cannot be linked to customer orders or stores.');
+        if ($customer instanceof Customer && $orderId) {
             $order = Order::where('customer_id', $customer->id)->findOrFail($orderId);
             if ($sellerId && !$order->items()->where('seller_id', $sellerId)->exists()) {
                 throw ValidationException::withMessages(['seller_id' => 'This store has no items in the selected order.']);
@@ -69,13 +72,15 @@ class SupportTicketController extends Controller
         }
         $ticket = DB::transaction(function () use ($customer, $data, $orderId, $sellerId) {
             $ticket = SupportTicket::create([
-                'customer_id' => $customer->id, 'order_id' => $orderId, 'seller_id' => $sellerId,
+                'customer_id' => $customer instanceof Customer ? $customer->id : null,
+                'reseller_id' => $customer instanceof Reseller ? $customer->id : null,
+                'order_id' => $orderId, 'seller_id' => $sellerId,
                 'category' => trim($data['category']), 'subject' => trim($data['subject']),
             ]);
-            $ticket->messages()->create(['author_type' => 'customer', 'author_id' => $customer->id, 'body' => trim($data['body']), 'attachments' => $data['attachments'] ?? []]);
+            $ticket->messages()->create(['author_type' => $customer instanceof Customer ? 'customer' : 'reseller', 'author_id' => $customer->id, 'body' => trim($data['body']), 'attachments' => $data['attachments'] ?? []]);
             return $ticket;
         });
-        return response()->json($ticket->load(['customer:id,name,email', 'seller:id,store_name,store_slug', 'order:id,order_number', 'messages']), 201);
+        return response()->json($ticket->load(['customer:id,name,email', 'seller:id,store_name,store_slug', 'reseller:id,name,email', 'order:id,order_number', 'messages']), 201);
     }
 
     public function reply(Request $request, SupportTicket $ticket): JsonResponse
@@ -89,7 +94,7 @@ class SupportTicketController extends Controller
         ]);
         DB::transaction(function () use ($ticket, $actor, $data) {
             $ticket->messages()->create([
-                'author_type' => $actor instanceof Customer ? 'customer' : ($actor instanceof Seller ? 'seller' : 'admin'),
+                'author_type' => $actor instanceof Customer ? 'customer' : ($actor instanceof Seller ? 'seller' : ($actor instanceof Reseller ? 'reseller' : 'admin')),
                 'author_id' => $actor->id, 'body' => trim($data['body']), 'attachments' => $data['attachments'] ?? [],
             ]);
             $ticket->update(['status' => 'open', 'resolved_at' => null]);
@@ -106,16 +111,17 @@ class SupportTicketController extends Controller
         return $this->show($request, $ticket);
     }
 
-    private function actor(Request $request): Customer|Seller|Admin
+    private function actor(Request $request): Customer|Seller|Reseller|Admin
     {
         $actor = $request->user();
-        abort_unless($actor instanceof Customer || $actor instanceof Seller || $actor instanceof Admin, 403);
+        abort_unless($actor instanceof Customer || $actor instanceof Seller || $actor instanceof Reseller || $actor instanceof Admin, 403);
         return $actor;
     }
 
-    private function authorizeTicket(Customer|Seller|Admin $actor, SupportTicket $ticket): void
+    private function authorizeTicket(Customer|Seller|Reseller|Admin $actor, SupportTicket $ticket): void
     {
         if ($actor instanceof Customer) abort_unless($ticket->customer_id === $actor->id, 404);
         if ($actor instanceof Seller) abort_unless($ticket->seller_id === $actor->id, 404);
+        if ($actor instanceof Reseller) abort_unless($ticket->reseller_id === $actor->id, 404);
     }
 }
