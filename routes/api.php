@@ -38,6 +38,7 @@ use App\Http\Controllers\ResellerController;
 use App\Http\Controllers\WithdrawalController;
 use App\Http\Controllers\ContentReportController;
 use App\Http\Controllers\FraudGuardController;
+use App\Http\Controllers\SellerPromotionController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -104,6 +105,7 @@ Route::get('/homepage/notices', [HomepageNoticeController::class, 'publicIndex']
 Route::get('/homepage/trust-badges', [HomepageTrustBadgeController::class, 'publicIndex']);
 Route::get('/homepage/category-cards', [HomepageCategoryCardController::class, 'publicIndex']);
 Route::get('/homepage/offer-blocks', [HomepageOfferBlockController::class, 'publicIndex']);
+Route::get('/store/promotions', [SellerPromotionController::class, 'publicIndex']);
 Route::get('/homepage/layout', [HomepageLayoutController::class, 'show']);
 Route::get('/site-info', [SiteInfoController::class, 'show']);
 Route::get('/store/brands', [CatalogTermController::class, 'brands']);
@@ -176,6 +178,10 @@ Route::prefix('admin')->group(function () {
 });
 
 Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(function () {
+    Route::get('/seller-promotions', [SellerPromotionController::class, 'adminIndex']);
+    Route::post('/seller-promotions', [SellerPromotionController::class, 'adminStore']);
+    Route::post('/seller-promotions/{promotion}', [SellerPromotionController::class, 'adminUpdate']);
+    Route::post('/seller-promotions/{promotion}/delete', [SellerPromotionController::class, 'adminDestroy']);
     Route::get('/reports', [ContentReportController::class, 'index']);
     Route::post('/reports/{contentReport}/resolve', [ContentReportController::class, 'resolve']);
     Route::get('/fraud-guard/rules', [FraudGuardController::class, 'index']);
@@ -288,6 +294,10 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 });
 
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
+    Route::get('/promotions', [SellerPromotionController::class, 'sellerIndex']);
+    Route::post('/promotions', [SellerPromotionController::class, 'sellerStore']);
+    Route::post('/promotions/{promotion}', [SellerPromotionController::class, 'sellerUpdate']);
+    Route::post('/promotions/{promotion}/delete', [SellerPromotionController::class, 'sellerDestroy']);
     Route::post('/product-tags', [CatalogTermController::class, 'storeProductTag']);
     Route::post('/product-brands', [CatalogTermController::class, 'storeProductBrand']);
     Route::post('/product-category-options', [ProductCategoryController::class, 'storeProductCategory']);

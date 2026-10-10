@@ -70,4 +70,9 @@ class Seller extends Authenticatable
     {
         return $this->hasMany(Product::class);
     }
+
+    public function promotions(): HasMany
+    {
+        return $this->hasMany(SellerPromotion::class);
+    }
 }
