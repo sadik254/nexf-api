@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Product;
 use App\Models\ShippingMethod;
 use App\Models\SellerShippingRate;
+use Illuminate\Validation\ValidationException;
 
 class StoreShippingService
 {
@@ -15,12 +16,12 @@ class StoreShippingService
      * @param array<int, array{product: Product, subtotal: float|int|string}> $lines
      * @return array{groups: array<int, array<string, mixed>>, total: float}
      */
-    public function quote(array $lines, ShippingMethod $shippingMethod): array
+    public function quote(array $lines, ShippingMethod $shippingMethod, array $selectedMethods = []): array
     {
         $groups = [];
         $sellerIds = collect($lines)->pluck('product.seller_id')->filter()->unique()->values();
-        $sellerRates = SellerShippingRate::query()->where('shipping_method_id', $shippingMethod->id)
-            ->whereIn('seller_id', $sellerIds)->pluck('charge', 'seller_id');
+        $sellerRates = SellerShippingRate::query()->whereIn('seller_id', $sellerIds)->get()->groupBy('seller_id');
+        $methods = ShippingMethod::query()->active()->orderBy('sort_order')->orderBy('id')->get()->keyBy('id');
 
         foreach ($lines as $line) {
             $product = $line['product'];
@@ -28,17 +29,32 @@ class StoreShippingService
             $key = $sellerId === null ? 'platform' : "seller:{$sellerId}";
 
             if (!isset($groups[$key])) {
+                $selectionKey = $sellerId === null ? 'house' : (string) $sellerId;
+                $selectedId = (int) ($selectedMethods[$selectionKey] ?? $shippingMethod->id);
+                $selectedMethod = $methods->get($selectedId);
+                if (!$selectedMethod) {
+                    throw ValidationException::withMessages(['store_shipping_methods' => ["Selected delivery option for {$selectionKey} is unavailable."]]);
+                }
+                $rateMap = $sellerRates->get((string) $sellerId, collect())->keyBy('shipping_method_id');
+                $options = $methods->map(fn (ShippingMethod $method) => [
+                    'shipping_method_id' => $method->id,
+                    'code' => $method->code,
+                    'name' => $method->name,
+                    'charge' => (float) ($rateMap->get($method->id)?->charge ?? $method->charge),
+                    'currency' => $method->currency,
+                ])->values()->all();
                 $groups[$key] = [
                     'seller_id' => $sellerId,
+                    'shipping_method_id' => $selectedMethod->id,
                     'store_name' => $sellerId === null
                         ? 'NEXF Lifestyle'
                         : ($product->seller?->store_name ?? 'Seller Store'),
                     'subtotal' => 0.0,
-                    'shipping_method_code' => $shippingMethod->code,
-                    'shipping_method_name' => $shippingMethod->name,
-                    'shipping_charge' => $sellerId !== null && $sellerRates->has($sellerId)
-                        ? (float) $sellerRates[$sellerId] : (float) $shippingMethod->charge,
-                    'shipping_currency' => $shippingMethod->currency,
+                    'shipping_method_code' => $selectedMethod->code,
+                    'shipping_method_name' => $selectedMethod->name,
+                    'shipping_charge' => (float) ($rateMap->get($selectedMethod->id)?->charge ?? $selectedMethod->charge),
+                    'shipping_currency' => $selectedMethod->currency,
+                    'shipping_options' => $options,
                 ];
             }
 

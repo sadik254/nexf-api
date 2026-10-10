@@ -16,6 +16,6 @@ class OrderNotificationService
         foreach ($order->items->pluck('seller')->filter()->unique('id') as $seller) $this->sendTo($seller->email, $order, $subject, $message);
         foreach (Admin::query()->where('is_active', true)->pluck('email') as $email) $this->sendTo($email, $order, $subject, $message);
     }
-    private function send(Order $order, string $subject, string $message): void { $this->sendTo($order->customer->email, $order, $subject, $message); }
+    private function send(Order $order, string $subject, string $message): void { $email = $order->shipping_email ?: $order->customer?->email; if ($email) $this->sendTo($email, $order, $subject, $message); }
     private function sendTo(string $email, Order $order, string $subject, string $message): void { try { Mail::to($email)->send(new OrderNotificationMail($order, $subject, $message)); } catch (\Throwable $e) { Log::warning('Order notification failed', ['order_id' => $order->id, 'email' => $email, 'error' => $e->getMessage()]); } }
 }

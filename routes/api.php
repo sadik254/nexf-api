@@ -145,6 +145,7 @@ Route::prefix('admin')->group(function () {
     Route::middleware('sanctum.type:admin,admin:orders')->get('/return-requests', [ReturnRequestController::class, 'index']);
     Route::middleware('sanctum.type:admin,admin:orders')->get('/return-requests/{returnRequest}', [ReturnRequestController::class, 'show']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/return-requests/{returnRequest}', [ReturnRequestController::class, 'update']);
+    Route::middleware('sanctum.type:admin,admin:orders')->post('/return-requests/{returnRequest}/restock', [ReturnRequestController::class, 'restock']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/bulk-ship', [OrderController::class, 'bulkShipAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->get('/orders/{order}', [OrderController::class, 'showAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}', [OrderController::class, 'updateStatus']);
@@ -274,6 +275,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/products/{product}/delete', [ProductController::class, 'destroy']);
 
     Route::get('/products/{product}/variations', [ProductVariationController::class, 'index']);
+    Route::post('/products/{product}/variations/matrix', [ProductVariationController::class, 'syncMatrix']);
     Route::post('/products/{product}/variations', [ProductVariationController::class, 'store']);
     Route::post('/products/{product}/variations/{variation}', [ProductVariationController::class, 'update']);
     Route::post('/products/{product}/variations/{variation}/delete', [ProductVariationController::class, 'destroy']);
@@ -300,6 +302,7 @@ Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(f
     Route::get('/return-requests', [ReturnRequestController::class, 'index']);
     Route::get('/return-requests/{returnRequest}', [ReturnRequestController::class, 'show']);
     Route::post('/return-requests/{returnRequest}', [ReturnRequestController::class, 'update']);
+    Route::post('/return-requests/{returnRequest}/restock', [ReturnRequestController::class, 'restock']);
     Route::get('/media', [MediaAssetController::class, 'index']);
     Route::post('/media', [MediaAssetController::class, 'store']);
     Route::post('/media/link', [MediaAssetController::class, 'link']);
@@ -337,6 +340,7 @@ Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(f
     Route::post('/products/{product}/delete', [ProductController::class, 'destroy']);
 
     Route::get('/products/{product}/variations', [ProductVariationController::class, 'index']);
+    Route::post('/products/{product}/variations/matrix', [ProductVariationController::class, 'syncMatrix']);
     Route::post('/products/{product}/variations', [ProductVariationController::class, 'store']);
     Route::post('/products/{product}/variations/{variation}', [ProductVariationController::class, 'update']);
     Route::post('/products/{product}/variations/{variation}/delete', [ProductVariationController::class, 'destroy']);

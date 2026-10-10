@@ -9,6 +9,7 @@ use App\Models\ReturnRequest;
 use App\Models\Seller;
 use App\Models\SupportTicket;
 use App\Models\CustomerWalletTransaction;
+use App\Services\InventoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -17,6 +18,8 @@ use Illuminate\Validation\ValidationException;
 
 class ReturnRequestController extends Controller
 {
+    public function __construct(private InventoryService $inventory) {}
+
     public function index(Request $request): JsonResponse
     {
         $actor = $this->actor($request);
@@ -31,7 +34,15 @@ class ReturnRequestController extends Controller
     public function show(Request $request, ReturnRequest $returnRequest): JsonResponse
     {
         $this->authorizeRequest($this->actor($request), $returnRequest);
-        return response()->json($returnRequest->load(['item', 'order:id,order_number', 'customer:id,name,email', 'seller:id,store_name', 'ticket:id,subject']));
+        return response()->json($returnRequest->load([
+            'item',
+            'order:id,order_number,customer_id,payment_method_id,payment_method_name,payment_status,total,shipping_name,shipping_phone,shipping_email,shipping_address,status,created_at',
+            'order.paymentMethod:id,name,code',
+            'exchangeOrder:id,order_number,status,total,exchange_for',
+            'customer:id,name,email,phone',
+            'seller:id,store_name',
+            'ticket:id,subject',
+        ]));
     }
 
     public function store(Request $request): JsonResponse
@@ -69,22 +80,49 @@ class ReturnRequestController extends Controller
         $this->authorizeRequest($actor, $returnRequest);
         abort_if($actor instanceof Customer, 403);
         $data = $request->validate([
-            'status' => ['required', Rule::in(['approved', 'rejected', 'in_transit', 'received', 'refunded', 'exchanged'])],
+            'status' => ['sometimes', Rule::in(['approved', 'rejected', 'in_transit', 'received', 'refunded', 'exchanged', 'cancelled'])],
             'decision_note' => ['nullable', 'string', 'max:3000'],
             'return_tracking' => ['nullable', 'string', 'max:255'],
             'outcome_reference' => ['nullable', 'string', 'max:255'],
             'refund_amount' => ['nullable', 'numeric', 'min:0'],
+            'exchange_order_id' => ['sometimes', 'nullable', 'integer', 'exists:orders,id'],
         ]);
-        $allowed = ['requested' => ['approved', 'rejected'], 'approved' => ['in_transit', 'received'], 'in_transit' => ['received'], 'received' => [$returnRequest->type === 'refund' ? 'refunded' : 'exchanged']];
+        if (!isset($data['status'])) {
+            if (!array_key_exists('decision_note', $data) && !array_key_exists('return_tracking', $data)) {
+                throw ValidationException::withMessages(['return_request' => ['Provide an internal note or tracking update.']]);
+            }
+            $returnRequest->update([
+                'decision_note' => $data['decision_note'] ?? $returnRequest->decision_note,
+                'return_tracking' => $data['return_tracking'] ?? $returnRequest->return_tracking,
+            ]);
+            return $this->show($request, $returnRequest);
+        }
+        $allowed = ['requested' => ['approved', 'rejected', 'cancelled'], 'approved' => ['in_transit', 'received', 'cancelled'], 'in_transit' => ['received', 'cancelled'], 'received' => [$returnRequest->type === 'refund' ? 'refunded' : 'exchanged']];
         $next = $data['status'];
         if ($actor instanceof Seller && $next === 'refunded') abort(403, 'Only an administrator can record a completed refund.');
         if (!in_array($next, $allowed[$returnRequest->status] ?? [], true)) throw ValidationException::withMessages(['status' => 'Invalid return transition.']);
-        if (in_array($next, ['refunded', 'exchanged'], true) && empty($data['outcome_reference'])) throw ValidationException::withMessages(['outcome_reference' => 'Record the payment or replacement reference before completion.']);
+        if ($next === 'in_transit' && empty($data['return_tracking'])) throw ValidationException::withMessages(['return_tracking' => 'Enter the courier tracking code before marking this return in transit.']);
+        if ($next === 'exchanged') {
+            $exchangeOrderId = $data['exchange_order_id'] ?? $returnRequest->exchange_order_id;
+            $exchangeOrder = $exchangeOrderId ? \App\Models\Order::query()->find($exchangeOrderId) : null;
+            if (
+                !$exchangeOrder
+                || (int) $exchangeOrder->customer_id !== (int) $returnRequest->customer_id
+                || (string) $exchangeOrder->exchange_for !== (string) $returnRequest->id
+                || $exchangeOrder->status !== 'delivered'
+            ) {
+                throw ValidationException::withMessages(['exchange_order_id' => ['Link a delivered replacement order for this customer before completing the exchange.']]);
+            }
+            $data['exchange_order_id'] = $exchangeOrder->id;
+            $data['outcome_reference'] = $exchangeOrder->order_number;
+        }
+        if ($next === 'refunded' && empty($data['outcome_reference'])) throw ValidationException::withMessages(['outcome_reference' => 'Record the payment reference before completion.']);
         if ($next === 'refunded') {
             $maximum = (float) $returnRequest->item->unit_selling_price * $returnRequest->quantity;
             if (!isset($data['refund_amount']) || $data['refund_amount'] > $maximum) throw ValidationException::withMessages(['refund_amount' => 'A valid refund amount up to the item value is required.']);
         }
         $updates = ['status' => $next, 'decision_note' => $data['decision_note'] ?? $returnRequest->decision_note, 'return_tracking' => $data['return_tracking'] ?? $returnRequest->return_tracking];
+        if (array_key_exists('exchange_order_id', $data)) $updates['exchange_order_id'] = $data['exchange_order_id'];
         if (in_array($next, ['approved', 'rejected'], true)) $updates['reviewed_at'] = now();
         if ($next === 'received') $updates['received_at'] = now();
         if (in_array($next, ['refunded', 'exchanged'], true)) { $updates['completed_at'] = now(); $updates['outcome_reference'] = $data['outcome_reference']; $updates['refund_amount'] = $data['refund_amount'] ?? null; }
@@ -98,6 +136,32 @@ class ReturnRequestController extends Controller
             }
         });
         return $this->show($request, $returnRequest);
+    }
+
+    public function restock(Request $request, ReturnRequest $returnRequest): JsonResponse
+    {
+        $actor = $this->actor($request);
+        $this->authorizeRequest($actor, $returnRequest);
+        abort_if($actor instanceof Customer, 403);
+
+        $updated = DB::transaction(function () use ($returnRequest, $actor) {
+            $locked = ReturnRequest::query()->lockForUpdate()->findOrFail($returnRequest->id);
+            if ($locked->restocked_at) return $locked;
+            if (!in_array($locked->status, ['received', 'refunded', 'exchanged'], true)) {
+                throw ValidationException::withMessages(['status' => ['Restock is available after staff have received the returned item.']]);
+            }
+            $item = OrderItem::query()->lockForUpdate()->findOrFail($locked->order_item_id);
+            $this->inventory->restoreOrderItemQuantity($item, (int) $locked->quantity, $actor, 'return_restock', [
+                'return_request_id' => $locked->id,
+            ]);
+            $locked->update(['restocked_at' => now()]);
+            return $locked;
+        });
+
+        return response()->json($updated->fresh()->load([
+            'item', 'order:id,order_number,customer_id,payment_method_id,payment_method_name,payment_status,total,shipping_name,shipping_phone,shipping_email,shipping_address,status,created_at',
+            'order.paymentMethod:id,name,code', 'exchangeOrder:id,order_number,status,total,exchange_for', 'customer:id,name,email,phone', 'seller:id,store_name', 'ticket:id,subject',
+        ]));
     }
 
     private function actor(Request $request): Customer|Seller|Admin

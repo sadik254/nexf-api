@@ -57,6 +57,44 @@ class InventoryService
         }
     }
 
+    public function restoreOrderItemQuantity(OrderItem $item, int $quantity, $actor, string $reason, array $meta = []): void
+    {
+        if ($quantity < 1 || $quantity > (int) $item->quantity) {
+            throw ValidationException::withMessages(['quantity' => ['The restock quantity is outside this order item.']]);
+        }
+        $remaining = $quantity;
+        foreach ($item->lot_allocations ?? [] as $allocation) {
+            if ($remaining <= 0) break;
+            $lotId = (int) ($allocation['lot_id'] ?? 0);
+            $allocated = (int) ($allocation['quantity'] ?? 0);
+            if ($lotId <= 0 || $allocated <= 0) {
+                throw ValidationException::withMessages(['order' => ['Order inventory allocation data is invalid.']]);
+            }
+            $take = min($remaining, $allocated);
+            $lot = ProductLot::query()->lockForUpdate()->find($lotId);
+            if (!$lot) {
+                throw ValidationException::withMessages(['order' => ['Cannot restock an order item whose inventory lot no longer exists.']]);
+            }
+            $lot->increment('quantity_remaining', $take);
+            ProductLotMovement::create([
+                'product_lot_id' => $lot->id,
+                'quantity_change' => $take,
+                'reason' => $reason,
+                'actor_type' => $actor::class,
+                'actor_id' => $actor->id,
+                'meta' => array_merge($meta, [
+                    'order_id' => $item->order_id,
+                    'order_item_id' => $item->id,
+                    'restored_from_order_sale' => true,
+                ]),
+            ]);
+            $remaining -= $take;
+        }
+        if ($remaining > 0) {
+            throw ValidationException::withMessages(['order' => ['The order item does not contain enough lot allocation data to restock this quantity.']]);
+        }
+    }
+
     public function consumeProduct(Product $product, int $quantity, $actor, string $reason = 'sale', array $meta = []): array
     {
         return $this->consumeLots(

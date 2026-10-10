@@ -10,6 +10,7 @@ class OrderStoreGroup extends Model
     protected $fillable = [
         'order_id',
         'seller_id',
+        'shipping_method_id',
         'store_name',
         'subtotal',
         'shipping_method_code',
