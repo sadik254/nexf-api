@@ -19,6 +19,25 @@ class SupportTicketController extends Controller
 {
     public function __construct(private MediaUploadService $uploads) {}
 
+    public function contact(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:150'],
+            'email' => ['required', 'email', 'max:255'],
+            'subject' => ['required', 'string', 'max:180'],
+            'message' => ['required', 'string', 'max:5000'],
+        ]);
+        $ticket = DB::transaction(function () use ($data) {
+            $ticket = SupportTicket::create([
+                'guest_name' => trim($data['name']), 'guest_email' => strtolower(trim($data['email'])),
+                'category' => 'Contact', 'subject' => trim($data['subject']),
+            ]);
+            $ticket->messages()->create(['author_type' => 'guest', 'author_id' => 0, 'body' => trim($data['message']), 'attachments' => []]);
+            return $ticket;
+        });
+        return response()->json(['message' => 'Message received.', 'id' => $ticket->id], 201);
+    }
+
     public function upload(Request $request): JsonResponse
     {
         $this->actor($request);

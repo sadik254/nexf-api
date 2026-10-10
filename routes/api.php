@@ -123,7 +123,10 @@ Route::get('/homepage/trust-badges', [HomepageTrustBadgeController::class, 'publ
 Route::get('/homepage/category-cards', [HomepageCategoryCardController::class, 'publicIndex']);
 Route::get('/homepage/offer-blocks', [HomepageOfferBlockController::class, 'publicIndex']);
 Route::get('/store/promotions', [SellerPromotionController::class, 'publicIndex']);
+Route::get('/homepage/layout/{section}/products', [StoreProductController::class, 'homepageProducts']);
+Route::get('/store/marketplace-stats', [StoreProductController::class, 'marketplaceStats']);
 Route::get('/homepage/layout', [HomepageLayoutController::class, 'show']);
+Route::post('/contact', [SupportTicketController::class, 'contact'])->middleware('throttle:5,1');
 Route::get('/site-info', [SiteInfoController::class, 'show']);
 Route::get('/store/brands', [CatalogTermController::class, 'brands']);
 Route::get('/store/tags', [CatalogTermController::class, 'tags']);
@@ -184,6 +187,7 @@ Route::prefix('sellers')->group(function () {
     Route::post('/forgot-password', [SellerController::class, 'forgotPassword']);
     Route::post('/reset-password', [SellerController::class, 'resetPassword']);
     Route::middleware('sanctum.type:seller,seller:basic')->post('/logout', [SellerController::class, 'logout']);
+    Route::middleware('sanctum.type:seller,seller:basic')->post('/me', [SellerController::class, 'updateProfile']);
     Route::middleware('sanctum.type:seller,seller:basic')->post('/me/password', [SellerController::class, 'updatePassword']);
 });
 
@@ -266,9 +270,12 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/homepage/offer-sets/{offerSet}', [HomepageOfferBlockController::class, 'updateSet']);
     Route::post('/homepage/offer-sets/{offerSet}/delete', [HomepageOfferBlockController::class, 'destroySet']);
     Route::post('/homepage/offer-blocks/{block}', [HomepageOfferBlockController::class, 'update']);
-    Route::get('/homepage/layout', [HomepageLayoutController::class, 'show']);
+    Route::get('/homepage/layout/{section}/products', [StoreProductController::class, 'homepageProducts']);
+Route::get('/store/marketplace-stats', [StoreProductController::class, 'marketplaceStats']);
+Route::get('/homepage/layout', [HomepageLayoutController::class, 'show']);
     Route::post('/homepage/layout', [HomepageLayoutController::class, 'update']);
-    Route::get('/site-info', [SiteInfoController::class, 'show']);
+    Route::post('/contact', [SupportTicketController::class, 'contact'])->middleware('throttle:5,1');
+Route::get('/site-info', [SiteInfoController::class, 'show']);
     Route::post('/site-info', [SiteInfoController::class, 'update']);
     Route::post('/homepage/banners', [HomepageBannerController::class, 'store']);
     Route::post('/homepage/banners/{homepageBanner}', [HomepageBannerController::class, 'update']);

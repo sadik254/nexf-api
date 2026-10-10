@@ -26,7 +26,7 @@ class HomepageBannerController extends Controller
     {
         $this->authorizeAdmin($request);
         $data = $this->validated($request, true);
-        $data['image'] = $this->upload($request->file('image'));
+        if ($request->hasFile('image')) $data['image'] = $this->upload($request->file('image'));
         $banner = HomepageBanner::create($data);
         return response()->json(['message' => 'Homepage banner created.', 'banner' => $banner], 201);
     }
@@ -36,7 +36,7 @@ class HomepageBannerController extends Controller
         $this->authorizeAdmin($request);
         $data = $this->validated($request, false);
         $this->assertHeroRemainsVisible($homepageBanner, $data, false);
-        if ($request->hasFile('image')) $data['image'] = $this->upload($request->file('image'));
+        if ($request->hasFile('image')) if ($request->hasFile('image')) $data['image'] = $this->upload($request->file('image'));
         $homepageBanner->fill($data)->save();
         return response()->json(['message' => 'Homepage banner updated.', 'banner' => $homepageBanner]);
     }
@@ -51,9 +51,11 @@ class HomepageBannerController extends Controller
 
     private function validated(Request $request, bool $creating): array
     {
-        return $request->validate([
+        $data = $request->validate([
             'placement' => [$creating ? 'required' : 'sometimes', 'in:hero,side_top,side_bottom'],
-            'image' => [$creating ? 'required' : 'sometimes', 'image', 'max:5120'],
+            'image' => [$creating ? 'required' : 'sometimes'],
+            'cta' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'theme' => ['sometimes', 'nullable', \Illuminate\Validation\Rule::in(['slate','gray','zinc','neutral','stone','red','orange','amber','yellow','lime','green','emerald','teal','cyan','sky','blue','indigo','violet','purple','fuchsia','pink','rose'])],
             'href' => ['sometimes', 'string', 'max:2048'],
             'title' => ['sometimes', 'nullable', 'string', 'max:100'],
             'emphasis' => ['sometimes', 'nullable', 'string', 'max:100'],
@@ -61,6 +63,20 @@ class HomepageBannerController extends Controller
             'is_active' => ['sometimes', 'boolean'],
             'sort_order' => ['sometimes', 'integer', 'min:0'],
         ]);
+        if ($request->hasFile('image')) {
+            $request->validate(['image' => ['file', 'image', 'max:5120']]);
+        } elseif (isset($data['image'])) {
+            $request->validate(['image' => ['string', 'url', 'max:2048', 'regex:/^https:\/\//']]);
+            $asset = \App\Models\MediaAsset::where('url', $data['image'])->where('owner_type', 'admin')->where('owner_id', $request->user()->id)->first();
+            $existing = $request->route('homepageBanner');
+            if (!$asset && (!$existing || $existing->image !== $data['image'])) {
+                throw ValidationException::withMessages(['image' => 'Choose an image from your media library.']);
+            }
+        }
+        if (isset($data['href']) && !(str_starts_with($data['href'], '/') && !str_starts_with($data['href'], '//')) && !preg_match('~^https?://[^\s]+$~i', $data['href'])) {
+            throw ValidationException::withMessages(['href' => 'Use an internal path or HTTP/HTTPS link.']);
+        }
+        return $data;
     }
 
     private function authorizeAdmin(Request $request): void

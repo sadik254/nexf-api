@@ -12,8 +12,9 @@ class SiteInfoTest extends TestCase
 
     public function test_only_super_admin_can_change_public_footer_content(): void
     {
-        $default = $this->getJson('/api/site-info')->assertOk()->json();
-        $this->assertSame('NEXF Lifestyle Ltd.', $default['name']);
+        $this->getJson('/api/site-info')->assertOk()->assertJsonPath('address', '')->assertJsonPath('socials', []);
+        // Explicit fixture input for persistence tests; public responses have no seeded fallback.
+        $default = config('site-content.footer');
 
         $admin = Admin::create(['name' => 'Admin', 'email' => 'admin-footer@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);
         $super = Admin::create(['name' => 'Super', 'email' => 'super-footer@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);

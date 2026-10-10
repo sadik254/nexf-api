@@ -34,10 +34,49 @@ class HomepageLayoutController extends Controller
             'sections.*.enabled' => ['required', 'boolean'],
             'sections.*.title' => ['sometimes', 'nullable', 'string', 'max:120'],
             'sections.*.collection_id' => ['sometimes', 'nullable', 'integer', 'exists:product_collections,id'],
+            'sections.*.topSource' => ['sometimes', 'in:auto,picked'],
+            'sections.*.newSource' => ['sometimes', 'in:auto,picked'],
+            'sections.*.showNewArrivals' => ['sometimes', 'boolean'],
+            'sections.*.source' => ['sometimes', 'in:collection,category,tag,products'],
+            'sections.*.sourceValue' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'sections.*.limit' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'sections.*.autoplay' => ['sometimes', 'boolean'],
+            'sections.*.support' => ['sometimes', 'array:badge,title,body,messengerLabel,messenger,whatsappLabel,whatsapp'],
+            'sections.*.support.badge' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'sections.*.support.title' => ['sometimes', 'nullable', 'string', 'max:200'],
+            'sections.*.support.body' => ['sometimes', 'nullable', 'string', 'max:2000'],
+            'sections.*.support.messengerLabel' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'sections.*.support.whatsappLabel' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'sections.*.support.messenger' => ['sometimes', 'nullable', 'url', 'max:500', 'regex:/^https?:\/\//'],
+            'sections.*.support.whatsapp' => ['sometimes', 'nullable', 'url', 'max:500', 'regex:/^https?:\/\//'],
+            'sections.*.topProductIds' => ['sometimes', 'array', 'max:100'],
+            'sections.*.topProductIds.*' => ['integer', 'exists:products,id'],
+            'sections.*.newProductIds' => ['sometimes', 'array', 'max:100'],
+            'sections.*.newProductIds.*' => ['integer', 'exists:products,id'],
+            'sections.*.productIds' => ['sometimes', 'array', 'max:100'],
+            'sections.*.productIds.*' => ['integer', 'exists:products,id'],
+            'sections.*.reviewIds' => ['sometimes', 'array', 'max:100'],
+            'sections.*.reviewIds.*' => ['integer', 'exists:reviews,id'],
             'sections.*.offer_set_id' => ['sometimes', 'nullable', 'integer', 'exists:homepage_offer_sets,id'],
         ]);
         foreach ($data['sections'] as $index => $section) {
-            if ($section['type'] === 'collection' && empty($section['collection_id'])) {
+            foreach (['topProductIds', 'newProductIds', 'productIds', 'reviewIds'] as $key) {
+                $ids = $section[$key] ?? [];
+                if (count($ids) !== count(array_unique($ids))) throw ValidationException::withMessages(["sections.{$index}.{$key}" => 'Each selection must be unique within its block.']);
+            }
+            if ($section['type'] === 'collection') {
+                $source = $section['source'] ?? 'collection';
+                $value = $section['sourceValue'] ?? $section['collection_id'] ?? null;
+                $exists = match ($source) {
+                    'products' => true,
+                    'category' => \App\Models\ProductCategory::where('slug', $value)->exists(),
+                    'tag' => \App\Models\Tag::where('slug', $value)->exists(),
+                    default => \App\Models\ProductCollection::whereKey($value)->exists(),
+                };
+                if (!$exists) throw ValidationException::withMessages(["sections.{$index}.sourceValue" => 'Choose an existing source.']);
+            }
+
+            if ($section['type'] === 'collection' && ($section['source'] ?? 'collection') === 'collection' && empty($section['collection_id']) && empty($section['sourceValue'])) {
                 throw ValidationException::withMessages(["sections.{$index}.collection_id" => 'Choose a collection for this section.']);
             }
             if (str_starts_with($section['type'], 'offer') && !empty($section['offer_set_id'])) {

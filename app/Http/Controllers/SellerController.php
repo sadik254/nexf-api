@@ -201,6 +201,28 @@ class SellerController extends Controller
         return response()->json(['message' => 'Logged out successfully.']);
     }
 
+    public function updateProfile(Request $request): JsonResponse
+    {
+        $seller = $request->user();
+        abort_unless($seller instanceof Seller, 403);
+        $request->merge(array_filter([
+            'seller_name' => $request->has('seller_name') ? trim((string) $request->input('seller_name')) : null,
+            'email' => $request->has('email') ? strtolower(trim((string) $request->input('email'))) : null,
+        ], fn ($value) => $value !== null));
+        $data = $request->validate([
+            'seller_name' => ['sometimes', 'required', 'string', 'max:255'],
+            'email' => ['sometimes', 'required', 'email', 'max:255', \Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],
+            'phone' => ['sometimes', 'nullable', 'string', 'max:32', \Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],
+            'image' => ['sometimes', 'file', 'image', 'max:5120'],
+            'clear_image' => ['sometimes', 'boolean'],
+        ]);
+        if (!empty($data['clear_image'])) $data['seller_image'] = null;
+        if ($request->hasFile('image')) $data['seller_image'] = app(\App\Services\MediaUploadService::class)->upload($request->file('image'));
+        unset($data['image'], $data['clear_image']);
+        $seller->fill($data)->save();
+        return response()->json(['message' => 'Profile updated.', 'seller' => $seller]);
+    }
+
     public function updatePassword(Request $request): JsonResponse
     {
         /** @var Seller|null $seller */

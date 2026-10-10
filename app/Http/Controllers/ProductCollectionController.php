@@ -83,7 +83,21 @@ class ProductCollectionController extends Controller
         $actor = $this->actor($request);
         $this->authorizeCollection($actor, $collection);
         $this->authorizeWrite($actor);
-        $collection->delete();
+        DB::transaction(function () use ($collection) {
+            $coupons = \App\Models\Coupon::query()->whereJsonContains('eligible_collection_ids', $collection->id)->orWhereJsonContains('buy_collection_ids', $collection->id)->lockForUpdate()->get();
+            foreach ($coupons as $coupon) {
+                foreach (['eligible_collection_ids', 'buy_collection_ids'] as $key) {
+                    $ids = $coupon->{$key};
+                    if ($ids === null || !in_array($collection->id, $ids, true)) continue;
+                    $coupon->{$key} = array_values(array_filter($ids, fn ($id) => $id !== $collection->id));
+                    $prefix = $key === 'buy_collection_ids' ? 'buy' : 'eligible';
+                    // A removed last target must never broaden a discount to the entire cart.
+                    if (!$coupon->{$key} && !$coupon->{$prefix.'_product_ids'} && !$coupon->{$prefix.'_category_ids'}) $coupon->is_active = false;
+                }
+                $coupon->save();
+            }
+            $collection->delete();
+        });
         return response()->json(['message' => 'Collection deleted.']);
     }
 

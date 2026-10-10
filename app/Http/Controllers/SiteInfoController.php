@@ -14,7 +14,11 @@ class SiteInfoController extends Controller
     public function show(): JsonResponse
     {
         $saved = SiteSetting::find('footer')?->payload;
-        return response()->json($saved ?? config('site-content.footer'));
+        return response()->json($saved ?? [
+            'name' => '', 'blurb' => '', 'address' => '', 'helpline' => '', 'email' => '', 'hours' => '',
+            'copyright' => '', 'contactTitle' => '', 'locatorLabel' => '', 'locatorHref' => '/stores', 'helplineLabel' => '',
+            'socials' => [], 'supportButtons' => [], 'footerColumns' => [],
+        ]);
     }
 
     public function update(Request $request): JsonResponse

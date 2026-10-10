@@ -32,15 +32,66 @@ class StoreProductController extends Controller
         return $this->paginateProducts($query, $request);
     }
 
-    public function testimonials(): JsonResponse
+    public function marketplaceStats(): JsonResponse
     {
-        $reviews = Review::query()->where('status', 'approved')->whereNotNull('comment')
-            ->whereHas('product', fn ($q) => $q->where('status', 'active'))
-            ->with(['customer:id,name,profile_picture', 'product:id,name,slug'])->latest()->limit(12)->get();
+        return response()->json([
+            'sellers' => Seller::where('status', 'approved')->where('is_active', true)->count(),
+            'products' => $this->baseStoreQuery()->count(),
+            'customers' => \App\Models\Customer::count(),
+            // The order schema only retains free-form addresses; coverage cannot be inferred reliably.
+            'districts' => null,
+        ]);
+    }
+
+    public function homepageProducts(Request $request, string $section): JsonResponse
+    {
+        $sections = \App\Models\SiteSetting::find('home_layout')?->payload ?? config('site-content.home_layout');
+        $settings = collect($sections)->firstWhere('id', $section);
+        abort_unless($settings && $settings['enabled'], 404);
+        $tab = $request->validate(['tab' => ['sometimes', 'in:top,new']])['tab'] ?? 'top';
+        $query = $this->baseStoreQuery();
+        $ids = null;
+        if ($settings['type'] === 'trending') {
+            if ($tab === 'new' && ($settings['showNewArrivals'] ?? true) === false) return response()->json([]);
+            $source = $tab === 'new' ? ($settings['newSource'] ?? 'auto') : ($settings['topSource'] ?? 'auto');
+            if ($source === 'picked') $ids = $settings[$tab === 'new' ? 'newProductIds' : 'topProductIds'] ?? [];
+            elseif ($tab === 'top') $query->withSum(['orderItems as homepage_sales' => fn ($items) => $items->where('fulfillment_status', 'delivered')->whereHas('order', fn ($orders) => $orders->whereIn('status', ['delivered', 'completed']))], 'quantity')->orderByDesc('homepage_sales');
+        } elseif ($settings['type'] === 'featured') {
+            $ids = $settings['productIds'] ?? [];
+        } elseif ($settings['type'] === 'collection') {
+            $source = $settings['source'] ?? 'collection';
+            $value = $settings['sourceValue'] ?? $settings['collection_id'] ?? null;
+            if ($source === 'products') $ids = $settings['productIds'] ?? [];
+            elseif ($source === 'category') $query->whereHas('category', fn ($category) => $category->where('slug', $value)->orWhereHas('parent', fn ($parent) => $parent->where('slug', $value)));
+            elseif ($source === 'tag') $query->whereHas('tags', fn ($tags) => $tags->where('slug', $value));
+            else $query->whereIn('products.id', DB::table('collection_product')->select('product_id')->where('product_collection_id', $value));
+        } else abort(422, 'This block does not contain products.');
+        if ($ids !== null) {
+            $query->whereIn('products.id', $ids);
+            if ($ids) {
+                $cases = collect($ids)->map(fn ($id, $position) => 'WHEN '.(int) $id.' THEN '.(int) $position)->join(' ');
+                $query->orderByRaw('CASE products.id '.$cases.' END');
+            }
+        } else $query->latest('products.created_at');
+        return response()->json($query->limit($settings['limit'] ?? ($settings['type'] === 'trending' ? 10 : 12))->get()->map(fn ($product) => $this->transformProduct($product)));
+    }
+
+    public function testimonials(Request $request): JsonResponse
+    {
+        $request->validate(['ids' => ['sometimes', 'string', 'max:1000', 'regex:/^\d+(,\d+)*$/']]);
+        $ids = $request->filled('ids') ? array_values(array_unique(array_map('intval', explode(',', $request->query('ids'))))) : null;
+        $query = Review::query()->where('status', 'approved')->whereNotNull('comment')
+            ->whereHas('product', fn ($q) => $q->where('status', 'active')->where(fn ($visible) => $visible->whereNull('seller_id')->orWhereHas('seller', fn ($seller) => $seller->where('status', 'approved')->where('is_active', true))))
+            ->with(['customer:id,name,profile_picture', 'product:id,name,slug']);
+        if ($ids !== null) {
+            $cases = collect($ids)->map(fn ($id, $position) => 'WHEN '.$id.' THEN '.$position)->join(' ');
+            $query->whereIn('id', $ids)->orderByRaw('CASE reviews.id '.$cases.' END');
+        } else $query->latest()->limit(12);
+        $reviews = $query->get();
         return response()->json($reviews->map(fn ($review) => [
             'id' => $review->id, 'rating' => $review->rating, 'body' => $review->comment,
             'author' => $review->customer?->name ?? 'Customer', 'avatar' => $review->customer?->profile_picture,
-            'purchased' => $review->product?->name, 'product_slug' => $review->product?->slug, 'verified' => true,
+            'purchased' => $review->product?->name, 'product_slug' => $review->product?->slug, 'verified' => $review->order_item_id !== null,
         ]));
     }
 
