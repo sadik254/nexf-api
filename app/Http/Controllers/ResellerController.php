@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use App\Services\PasswordResetCodeService;
+use Illuminate\Support\Carbon;
 
 class ResellerController extends Controller
 {
@@ -51,6 +52,40 @@ class ResellerController extends Controller
         $data = $request->validate(['month' => ['sometimes', 'date_format:Y-m']]);
         $month = isset($data['month']) ? now()->createFromFormat('Y-m', $data['month']) : now();
         return response()->json($this->withMonth($reseller, $month->copy()->startOfMonth(), $month->copy()->endOfMonth()));
+    }
+
+    public function commissionPeriod(Request $request): JsonResponse
+    {
+        $reseller = $request->user();
+        if (!$reseller || !$reseller->is_active) return response()->json(['message' => 'Unauthorized.'], 401);
+        $data = $request->validate([
+            'from' => ['required', 'date_format:Y-m'],
+            'to' => ['required', 'date_format:Y-m', 'after_or_equal:from'],
+        ]);
+        $from = Carbon::createFromFormat('Y-m', $data['from'])->startOfMonth();
+        $to = Carbon::createFromFormat('Y-m', $data['to'])->startOfMonth();
+        if ($from->diffInMonths($to) > 23) return response()->json(['message' => 'Select a range of 24 months or less.'], 422);
+        $months = [];
+        for ($month = $from->copy(); $month->lte($to); $month->addMonth()) {
+            $row = $this->withMonth(clone $reseller, $month->copy()->startOfMonth(), $month->copy()->endOfMonth());
+            $months[] = [
+                'month' => $month->format('Y-m'),
+                'units' => (int) $row->units_this_month,
+                'sales' => (float) $row->sales_this_month,
+                'target_met' => (bool) $row->target_met,
+                'commission_earned' => (float) $row->commission_earned,
+                'potential_commission' => round((float) $row->sales_this_month * (float) $row->commission_rate / 100, 2),
+            ];
+        }
+        return response()->json([
+            'from' => $data['from'], 'to' => $data['to'],
+            'reseller' => $reseller,
+            'months' => $months,
+            'units' => array_sum(array_column($months, 'units')),
+            'sales' => round(array_sum(array_column($months, 'sales')), 2),
+            'commission_earned' => round(array_sum(array_column($months, 'commission_earned')), 2),
+            'months_on_target' => count(array_filter($months, fn (array $month) => $month['target_met'])),
+        ]);
     }
 
     public function updatePassword(Request $request): JsonResponse

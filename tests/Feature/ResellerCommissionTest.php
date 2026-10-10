@@ -35,6 +35,9 @@ class ResellerCommissionTest extends TestCase
         $response = $this->postJson('/api/resellers/login', ['email' => $reseller->email, 'password' => 'password123'])->assertOk()->assertJsonPath('reseller.id', $reseller->id);
         $token = $response->json('token');
         $this->withToken($token)->getJson('/api/resellers/me')->assertOk()->assertJsonPath('id', $reseller->id)->assertJsonPath('commission_rate', '12.00');
+        $month = now()->format('Y-m');
+        $this->withToken($token)->getJson("/api/resellers/me/commission-period?from={$month}&to={$month}")
+            ->assertOk()->assertJsonPath('months.0.month', $month)->assertJsonPath('months_on_target', 0);
         $this->withToken($token)->getJson('/api/admin/resellers')->assertForbidden();
         $this->postJson('/api/resellers/login', ['email' => $reseller->email, 'password' => 'wrong-password'])->assertUnauthorized();
 
