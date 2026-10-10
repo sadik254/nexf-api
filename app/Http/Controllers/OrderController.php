@@ -280,7 +280,7 @@ class OrderController extends Controller
             $subtotal = 0.0;
             $shippingLines = [];
             foreach ($data['items'] as $itemData) {
-                $product = Product::query()->with('seller')->whereIn('status', ['active', 'unlisted'])->find($itemData['product_id']);
+                $product = Product::query()->with('seller')->availableForSale()->find($itemData['product_id']);
                 if (!$product || ($product->seller_id !== null && (!$product->seller || $product->seller->status !== 'approved' || !$product->seller->is_active))) {
                     throw ValidationException::withMessages(['items' => ['One or more products are unavailable.']]);
                 }
@@ -315,7 +315,7 @@ class OrderController extends Controller
             }
 
             $paymentMethod = PaymentMethod::query()->active()->findOrFail($data['payment_method_id']);
-            $shippingMethod = ShippingMethod::query()->active()->findOrFail($data['shipping_method_id']);
+            $shippingMethod = ShippingMethod::query()->whereNull('seller_id')->where('is_store_option',false)->active()->findOrFail($data['shipping_method_id']);
             $shipping = $this->storeShipping->quote($shippingLines, $shippingMethod, $data['store_shipping_methods'] ?? []);
             $coupon = $preview['coupon'] ? Coupon::query()->lockForUpdate()->find($preview['coupon']->id) : null;
             if ($coupon && ($reason = $coupon->unusableReason())) throw ValidationException::withMessages(['coupon_code' => [$reason]]);
@@ -659,7 +659,7 @@ class OrderController extends Controller
                 ]);
             }
 
-            $shippingMethod = ShippingMethod::query()->active()->find($data['shipping_method_id']);
+            $shippingMethod = ShippingMethod::query()->whereNull('seller_id')->where('is_store_option',false)->active()->find($data['shipping_method_id']);
             if (!$shippingMethod) {
                 throw ValidationException::withMessages([
                     'shipping_method_id' => ['Selected shipping method is unavailable.'],
@@ -705,7 +705,7 @@ class OrderController extends Controller
             foreach ($data['items'] as $itemData) {
                 $product = Product::query()
                     ->with('seller')
-                    ->whereIn('status', ['active', 'unlisted'])
+                    ->availableForSale()
                     ->find($itemData['product_id']);
 
                 if (!$product) {

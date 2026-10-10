@@ -9,6 +9,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class ShippingMethod extends Model
 {
     protected $fillable = [
+        'seller_id',
+        'is_store_option',
         'name',
         'code',
         'description',
@@ -21,6 +23,7 @@ class ShippingMethod extends Model
     protected function casts(): array
     {
         return [
+            'is_store_option' => 'boolean',
             'charge' => 'decimal:2',
             'is_active' => 'boolean',
             'sort_order' => 'integer',

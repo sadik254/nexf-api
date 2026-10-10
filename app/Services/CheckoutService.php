@@ -23,7 +23,7 @@ class CheckoutService
     public function preview(?Customer $customer, array $data): array
     {
         $paymentMethod = PaymentMethod::query()->active()->find($data['payment_method_id']);
-        $shippingMethod = ShippingMethod::query()->active()->find($data['shipping_method_id']);
+        $shippingMethod = ShippingMethod::query()->whereNull('seller_id')->where('is_store_option',false)->active()->find($data['shipping_method_id']);
         if (!$paymentMethod || !$shippingMethod) {
             throw ValidationException::withMessages(['checkout' => ['Selected payment or shipping method is unavailable.']]);
         }
@@ -31,7 +31,7 @@ class CheckoutService
         $items = [];
         $subtotal = 0.0;
         foreach ($data['items'] as $itemData) {
-            $product = Product::query()->with(['seller', 'collections:id'])->whereIn('status', ['active', 'unlisted'])->find($itemData['product_id']);
+            $product = Product::query()->with(['seller', 'collections:id'])->availableForSale()->find($itemData['product_id']);
             if (!$product || ($product->seller_id && (!$product->seller || $product->seller->status !== 'approved' || !$product->seller->is_active))) {
                 throw ValidationException::withMessages(['items' => ['One or more products are unavailable.']]);
             }

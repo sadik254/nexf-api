@@ -6,6 +6,7 @@ use App\Models\Product;
 use App\Models\ShippingMethod;
 use App\Models\SellerShippingRate;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Str;
 
 class StoreShippingService
 {
@@ -21,6 +22,7 @@ class StoreShippingService
         $groups = [];
         $sellerIds = collect($lines)->pluck('product.seller_id')->filter()->unique()->values();
         $sellerRates = SellerShippingRate::query()->whereIn('seller_id', $sellerIds)->get()->groupBy('seller_id');
+        $customized = \App\Models\Seller::whereIn('id',$sellerIds)->pluck('delivery_options_customized','id');
         $methods = ShippingMethod::query()->active()->orderBy('sort_order')->orderBy('id')->get()->keyBy('id');
 
         foreach ($lines as $line) {
@@ -30,13 +32,14 @@ class StoreShippingService
 
             if (!isset($groups[$key])) {
                 $selectionKey = $sellerId === null ? 'house' : (string) $sellerId;
-                $selectedId = (int) ($selectedMethods[$selectionKey] ?? $shippingMethod->id);
-                $selectedMethod = $methods->get($selectedId);
-                if (!$selectedMethod) {
-                    throw ValidationException::withMessages(['store_shipping_methods' => ["Selected delivery option for {$selectionKey} is unavailable."]]);
-                }
+                $custom = $sellerId === null ? (bool)\App\Models\Store::primary()?->delivery_options_customized : (bool)$customized->get($sellerId);
+                $storeMethods = $methods->filter(fn($method)=>$custom ? ($sellerId === null ? $method->seller_id === null && $method->is_store_option : (int)$method->seller_id === $sellerId) : $method->seller_id === null && !$method->is_store_option);
+                if ($storeMethods->isEmpty()) throw ValidationException::withMessages(['store_shipping_methods'=>['This store has no available delivery option.']]);
+                if (array_key_exists($selectionKey,$selectedMethods)) $selectedMethod=$storeMethods->get((int)$selectedMethods[$selectionKey]);
+                else $selectedMethod=$custom ? ($storeMethods->first(fn($method)=>Str::slug($method->name,'_') === Str::slug($shippingMethod->name,'_')) ?? $storeMethods->first()) : $storeMethods->get($shippingMethod->id);
+                if (!$selectedMethod) throw ValidationException::withMessages(['store_shipping_methods'=>["Selected delivery option for {$selectionKey} is unavailable."]]);
                 $rateMap = $sellerRates->get((string) $sellerId, collect())->keyBy('shipping_method_id');
-                $options = $methods->map(fn (ShippingMethod $method) => [
+                $options = $storeMethods->map(fn (ShippingMethod $method) => [
                     'shipping_method_id' => $method->id,
                     'code' => $method->code,
                     'name' => $method->name,
@@ -47,7 +50,7 @@ class StoreShippingService
                     'seller_id' => $sellerId,
                     'shipping_method_id' => $selectedMethod->id,
                     'store_name' => $sellerId === null
-                        ? 'NEXF Lifestyle'
+                        ? (\App\Models\Store::primary()?->name ?? config('app.name'))
                         : ($product->seller?->store_name ?? 'Seller Store'),
                     'subtotal' => 0.0,
                     'shipping_method_code' => $selectedMethod->code,

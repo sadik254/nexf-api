@@ -37,6 +37,7 @@ class OrderItem extends Model
         'courier_updated_at',
         'courier_error',
         'courier_tracking_message',
+        'confirmed_at',
         'shipped_at',
         'delivered_at',
     ];
@@ -54,11 +55,21 @@ class OrderItem extends Model
             'line_cost' => 'decimal:2',
             'line_profit' => 'decimal:2',
             'lot_allocations' => 'array',
+            'confirmed_at' => 'datetime',
             'shipped_at' => 'datetime',
             'delivered_at' => 'datetime',
             'courier_created_at' => 'datetime',
             'courier_updated_at' => 'datetime',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::saving(function (OrderItem $item): void {
+            if ($item->isDirty('fulfillment_status') && $item->fulfillment_status === 'confirmed' && !$item->confirmed_at) {
+                $item->confirmed_at = now();
+            }
+        });
     }
 
     public function order(): BelongsTo

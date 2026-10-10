@@ -44,6 +44,7 @@ class Order extends Model
         'exchange_for',
         'placed_at',
         'packed_at',
+        'payment_paid_at',
         'cancelled_at',
     ];
 
@@ -60,8 +61,18 @@ class Order extends Model
             'manual_ship' => 'boolean',
             'placed_at' => 'datetime',
             'packed_at' => 'datetime',
+            'payment_paid_at' => 'datetime',
             'cancelled_at' => 'datetime',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::saving(function (Order $order): void {
+            if ($order->isDirty('payment_status') && $order->payment_status === 'paid' && !$order->payment_paid_at) {
+                $order->payment_paid_at = now();
+            }
+        });
     }
 
     public function customer(): BelongsTo

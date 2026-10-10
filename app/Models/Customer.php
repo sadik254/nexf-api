@@ -27,6 +27,7 @@ class Customer extends Authenticatable
         'password',
         'profile_picture',
         'reseller_id',
+        'crm_status', 'contact_street', 'contact_area', 'contact_district', 'roster_archived_at',
     ];
 
     /**

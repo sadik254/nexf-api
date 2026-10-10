@@ -14,6 +14,8 @@ class Store extends Model
         'logo',
     ];
 
+    protected function casts(): array { return ['delivery_options_customized' => 'boolean']; }
+
     public static function primary(): ?self
     {
         return static::query()->where('setup_key', self::PRIMARY_KEY)->first();

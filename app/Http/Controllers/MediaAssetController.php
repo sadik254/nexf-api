@@ -17,7 +17,7 @@ class MediaAssetController extends Controller
     public function index(Request $request): JsonResponse
     {
         $actor = $this->actor($request);
-        $query = MediaAsset::query()->latest();
+        $query = MediaAsset::query()->whereIn('owner_type', ['admin', 'seller'])->latest();
         if ($actor instanceof Seller) $query->where('owner_type', 'seller')->where('owner_id', $actor->id);
         if ($actor instanceof Admin && $request->query('owner_type') === 'admin') $query->where('owner_type', 'admin');
         if ($request->filled('search')) {
@@ -102,6 +102,7 @@ class MediaAssetController extends Controller
 
     private function authorizeAsset(Admin|Seller $actor, MediaAsset $asset): void
     {
+        abort_if($asset->owner_type === 'customer', 404);
         abort_if($actor instanceof Seller && ($asset->owner_type !== 'seller' || $asset->owner_id !== $actor->id), 404);
     }
 }

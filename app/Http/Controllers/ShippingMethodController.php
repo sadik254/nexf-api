@@ -13,7 +13,7 @@ class ShippingMethodController extends Controller
     public function index(Request $request): JsonResponse
     {
         return response()->json(
-            ShippingMethod::query()
+            ShippingMethod::query()->whereNull('seller_id')->where('is_store_option',false)
                 ->active()
                 ->orderBy('sort_order')
                 ->orderBy('name')
@@ -68,6 +68,7 @@ class ShippingMethodController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
+        abort_unless($shippingMethod->seller_id === null && !$shippingMethod->is_store_option, 404);
         $data = $request->validate([
             'name' => ['sometimes', 'string', 'max:255'],
             'code' => ['sometimes', 'string', 'max:64'],
@@ -116,6 +117,7 @@ class ShippingMethodController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
+        abort_unless($shippingMethod->seller_id === null && !$shippingMethod->is_store_option, 404);
         $shippingMethod->delete();
 
         return response()->json(['message' => 'Shipping method deleted successfully.']);

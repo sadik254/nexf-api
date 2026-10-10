@@ -128,6 +128,11 @@ class ConsoleDesignApiTest extends TestCase
         $response = $this->withToken($token)->getJson('/api/admin/sellers?from=2026-09-01&to=2026-09-30');
         $response->assertOk()->assertJsonPath('sales_period.from', '2026-09-01')->assertJsonPath('data.0.units_sold', 2);
         $this->assertEquals(200, $response->json('data.0.revenue'));
+        $this->assertEquals(300, $response->json('data.0.previous_revenue'));
+        $this->assertEquals(-33.33, $response->json('data.0.revenue_delta'));
+        $response->assertJsonCount(1, 'data.0.revenue_daily')->assertJsonPath('data.0.revenue_daily.0.date', '2026-09-15');
+        $this->assertEquals(200, $response->json('data.0.revenue_daily.0.amount'));
+        $this->withToken($token)->getJson('/api/admin/sellers?from=2026-08-01&to=2026-08-31')->assertOk()->assertJsonPath('data.0.revenue_delta', null);
         $this->withToken($token)->getJson('/api/admin/sellers?from=2026-10-01&to=2026-09-30')->assertUnprocessable();
     }
     public function test_reference_category_and_offer_colours_persist(): void

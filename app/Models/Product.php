@@ -16,6 +16,7 @@ class Product extends Model
 
     protected $fillable = [
         'seller_id',
+        'owner_unassigned',
         'created_by_admin_id',
         'category_id',
         'brand_id',
@@ -39,9 +40,16 @@ class Product extends Model
         'homepage_trending', 'homepage_new_arrival', 'homepage_featured', 'homepage_sort_order',
     ];
 
+    public function scopeAvailableForSale(\Illuminate\Database\Eloquent\Builder $query): \Illuminate\Database\Eloquent\Builder
+    {
+        return $query->whereIn('products.status', ['active', 'unlisted'])->where('products.owner_unassigned', false)
+            ->where(fn($owner) => $owner->whereNull('products.seller_id')->orWhereHas('seller', fn($seller) => $seller->where('status', 'approved')->where('is_active', true)));
+    }
+
     protected function casts(): array
     {
         return [
+            'owner_unassigned' => 'boolean',
             'gallery' => 'array',
             'specifications' => 'array',
             'specification_tables' => 'array',
@@ -94,8 +102,8 @@ class Product extends Model
         return $this->belongsTo(ProductCategory::class, 'category_id');
     }
 
-    public function brand(): BelongsTo { return $this->belongsTo(Brand::class); }
-    public function tags(): BelongsToMany { return $this->belongsToMany(Tag::class); }
+    public function brand(): BelongsTo { return $this->belongsTo(Brand::class)->withTrashed(); }
+    public function tags(): BelongsToMany { return $this->belongsToMany(Tag::class)->withTrashed(); }
     public function collections(): BelongsToMany { return $this->belongsToMany(ProductCollection::class, 'collection_product'); }
 
     public function variations(): HasMany

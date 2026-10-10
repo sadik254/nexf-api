@@ -28,6 +28,21 @@ class ReferencePersistenceTest extends TestCase {
   $this->postJson("/api/admin/homepage/banners/{$id}",['image'=>'https://example.test/unowned.png'])->assertUnprocessable();
   $this->postJson("/api/admin/homepage/banners/{$id}",['href'=>'javascript:alert(1)'])->assertUnprocessable();
  }
+ public function test_side_banners_follow_saved_order_and_reordering_is_atomic(): void {
+  $admin=Admin::create(['name'=>'Admin','email'=>'banner-order@example.test','password'=>'password123','role'=>'super_admin','is_active'=>true]);
+  $a=\App\Models\HomepageBanner::create(['placement'=>'side_top','image'=>'https://example.test/a.png','href'=>'/shop','title'=>'A','sort_order'=>0,'is_active'=>true]);
+  $b=\App\Models\HomepageBanner::create(['placement'=>'side_bottom','image'=>'https://example.test/b.png','href'=>'/shop','title'=>'B','sort_order'=>1,'is_active'=>true]);
+  $c=\App\Models\HomepageBanner::create(['placement'=>'side_top','image'=>'https://example.test/c.png','href'=>'/shop','title'=>'C','sort_order'=>2,'is_active'=>true]);
+  $this->withToken($admin->createToken('test',['admin:basic'])->plainTextToken);
+  $this->postJson('/api/admin/homepage/banners/reorder',['group'=>'side','ids'=>[$c->id,$a->id,$b->id]])->assertOk()->assertJsonPath('0.id',$c->id);
+  $this->getJson('/api/homepage/banners')->assertOk()->assertJsonCount(2)->assertJsonPath('0.id',$c->id)->assertJsonPath('1.id',$a->id);
+  $this->postJson('/api/admin/homepage/banners/reorder',['group'=>'side','ids'=>[$b->id,$a->id]])->assertUnprocessable();
+  $this->assertDatabaseHas('homepage_banners',['id'=>$c->id,'sort_order'=>0]);
+  $this->postJson('/api/admin/homepage/banners/'.$b->id.'/delete')->assertOk();
+  $this->postJson('/api/admin/homepage/banners/'.$a->id.'/delete')->assertUnprocessable();
+  $hero=\App\Models\HomepageBanner::create(['placement'=>'hero','image'=>'https://example.test/hero.png','href'=>'/shop','sort_order'=>0,'is_active'=>true]);
+  $this->postJson('/api/admin/homepage/banners/'.$hero->id,['placement'=>'side_top'])->assertUnprocessable();
+ }
  public function test_homepage_picked_sources_preserve_order_and_exclude_nonpublic_products(): void {
   $category=\App\Models\ProductCategory::create(['name'=>'Home test','slug'=>'home-test','is_active'=>true]);
   $one=\App\Models\Product::create(['category_id'=>$category->id,'name'=>'One','slug'=>'home-one','product_type'=>'simple','status'=>'active','default_selling_price'=>100]);
@@ -40,6 +55,8 @@ class ReferencePersistenceTest extends TestCase {
    ['id'=>'disabled','type'=>'featured','enabled'=>false,'productIds'=>[$one->id]],
    ['id'=>'support','type'=>'support','enabled'=>true,'support'=>['title'=>'Need help','messenger'=>'https://example.test/help']],
   ]])->assertOk()->assertJsonPath('1.autoplay',true)->assertJsonPath('3.support.title','Need help');
+  $this->postJson('/api/admin/homepage/preview-products',['type'=>'collection','source'=>'products','productIds'=>[$two->id,$one->id],'limit'=>4])->assertOk()->assertJsonPath('0.id',$two->id)->assertJsonPath('1.id',$one->id);
+  $this->getJson('/api/homepage/layout/manual/products')->assertOk()->assertJsonCount(1)->assertJsonPath('0.id',$one->id);
   $this->getJson('/api/homepage/layout/picked/products')->assertOk()->assertJsonCount(2)->assertJsonPath('0.id',$two->id)->assertJsonPath('1.id',$one->id);
   $this->getJson('/api/homepage/layout/picked/products?tab=new')->assertOk()->assertExactJson([]);
   $this->getJson('/api/homepage/layout/manual/products')->assertOk()->assertJsonCount(1)->assertJsonPath('0.id',$one->id);
@@ -55,6 +72,29 @@ class ReferencePersistenceTest extends TestCase {
   $two=\App\Models\Review::create(['customer_id'=>$customer->id,'product_id'=>$product->id,'rating'=>5,'comment'=>'Second','status'=>'approved']);
   $hidden=\App\Models\Review::create(['customer_id'=>$customer->id,'product_id'=>$draft->id,'rating'=>5,'comment'=>'Hidden','status'=>'approved']);
   $this->getJson('/api/store/testimonials?ids='.$two->id.','.$hidden->id.','.$one->id)->assertOk()->assertJsonCount(2)->assertJsonPath('0.id',$two->id)->assertJsonPath('1.id',$one->id)->assertJsonPath('0.verified',false);
+ }
+ public function test_taxonomy_save_is_atomic_scoped_and_preserves_products(): void {
+  $admin=Admin::create(['name'=>'Admin','email'=>'taxonomy@example.test','password'=>'password123','role'=>'super_admin','is_active'=>true]);
+  $this->withToken($admin->createToken('test',['admin:basic'])->plainTextToken);
+  $created=$this->postJson('/api/admin/product-categories/taxonomy',['name'=>'Home','subcategories'=>[['name'=>'Lights'],['name'=>'Decor']]])->assertOk();
+  $id=$created->json('category.id');$child=$created->json('category.children.0.id');
+  $product=\App\Models\Product::create(['category_id'=>$child,'name'=>'Lamp','slug'=>'taxonomy-lamp','product_type'=>'simple','status'=>'active']);
+  $this->postJson('/api/admin/product-categories/'.$id.'/taxonomy',['name'=>'Home updated','subcategories'=>[]])->assertOk()->assertJsonCount(0,'category.children');
+  $this->assertDatabaseHas('products',['id'=>$product->id,'category_id'=>$id]);
+  $other=\App\Models\ProductCategory::create(['name'=>'Other','slug'=>'taxonomy-other','is_active'=>true]);
+  $this->postJson('/api/admin/product-categories/'.$id.'/taxonomy',['name'=>'Invalid rename','subcategories'=>[['id'=>$other->id,'name'=>'Hijack']]])->assertUnprocessable();
+  $this->assertDatabaseHas('product_categories',['id'=>$id,'name'=>'Home updated']);
+  $this->postJson('/api/admin/product-categories/'.$id.'/delete')->assertUnprocessable();
+  $empty=$this->postJson('/api/admin/product-categories/taxonomy',['name'=>'Empty','subcategories'=>[['name'=>'Empty child']]])->assertOk()->json('category.id');
+  $this->postJson('/api/admin/product-categories/'.$empty.'/delete')->assertOk();
+ }
+ public function test_store_directory_includes_empty_approved_stores_and_hides_inactive_stores(): void {
+  $base=['kyc_type'=>'nid','kyc_document_url'=>'https://example.test/id','product_category'=>'Clothing','password'=>'password123','is_active'=>true];
+  $seller=Seller::create($base+['kyc_number'=>'directory-a','seller_name'=>'Owner','email'=>'directory@example.test','store_name'=>'Empty approved store','store_slug'=>'directory-empty','status'=>'approved']);
+  Seller::create($base+['kyc_number'=>'directory-b','seller_name'=>'Pending','email'=>'directory-pending@example.test','store_name'=>'Pending store','store_slug'=>'directory-pending','status'=>'pending']);
+  $this->getJson('/api/store/stores')->assertOk()->assertJsonCount(1)->assertJsonPath('0.slug','directory-empty')->assertJsonPath('0.rating_summary.review_count',0)->assertJsonPath('0.rating_summary.average',null);
+  $this->getJson('/api/store/stores/directory-empty')->assertOk()->assertJsonPath('id',$seller->id);
+  $this->getJson('/api/store/stores/directory-pending')->assertNotFound();
  }
  public function test_collection_deletion_cleans_discount_targets_without_broadening_them(): void {
   $admin=Admin::create(['name'=>'Admin','email'=>'col-cleanup@example.test','password'=>'password123','role'=>'super_admin','is_active'=>true]);

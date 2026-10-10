@@ -14,12 +14,14 @@ class HomepageBannerController extends Controller
 {
     public function index(): JsonResponse
     {
-        return response()->json(HomepageBanner::query()->where('is_active', true)->orderBy('placement')->orderBy('sort_order')->get());
+        $hero = HomepageBanner::where('placement', 'hero')->where('is_active', true)->orderBy('sort_order')->orderBy('id')->get();
+        $side = HomepageBanner::where('placement', '!=', 'hero')->orderBy('sort_order')->orderBy('id')->limit(2)->get();
+        return response()->json($hero->concat($side)->values());
     }
 
     public function indexAdmin(): JsonResponse
     {
-        return response()->json(HomepageBanner::query()->orderBy('placement')->orderBy('sort_order')->get());
+        return response()->json(HomepageBanner::query()->orderBy('sort_order')->orderBy('id')->get());
     }
 
     public function store(Request $request): JsonResponse
@@ -36,7 +38,7 @@ class HomepageBannerController extends Controller
         $this->authorizeAdmin($request);
         $data = $this->validated($request, false);
         $this->assertHeroRemainsVisible($homepageBanner, $data, false);
-        if ($request->hasFile('image')) if ($request->hasFile('image')) $data['image'] = $this->upload($request->file('image'));
+        if ($request->hasFile('image')) $data['image'] = $this->upload($request->file('image'));
         $homepageBanner->fill($data)->save();
         return response()->json(['message' => 'Homepage banner updated.', 'banner' => $homepageBanner]);
     }
@@ -45,8 +47,26 @@ class HomepageBannerController extends Controller
     {
         $this->authorizeAdmin($request);
         $this->assertHeroRemainsVisible($homepageBanner, [], true);
+        if ($homepageBanner->placement !== 'hero' && HomepageBanner::where('placement', '!=', 'hero')->count() <= 2) {
+            throw ValidationException::withMessages(['banner' => 'The homepage needs two side banners.']);
+        }
         $homepageBanner->delete();
         return response()->json(['message' => 'Homepage banner deleted.']);
+    }
+
+    public function reorder(Request $request): JsonResponse
+    {
+        $this->authorizeAdmin($request);
+        $data = $request->validate(['group' => ['required', 'in:hero,side'], 'ids' => ['required', 'array'], 'ids.*' => ['required', 'integer', 'distinct']]);
+        $rows = \Illuminate\Support\Facades\DB::transaction(function () use ($data) {
+            $rows = HomepageBanner::query()->where('placement', $data['group'] === 'hero' ? '=' : '!=', 'hero')->lockForUpdate()->get();
+            $expected = $rows->pluck('id')->sort()->values()->all();
+            $supplied = collect($data['ids'])->map(fn ($id) => (int) $id)->sort()->values()->all();
+            if ($expected !== $supplied) throw ValidationException::withMessages(['ids' => 'The banner list has changed. Reload and try again.']);
+            foreach ($data['ids'] as $position => $id) $rows->firstWhere('id', $id)->update(['sort_order' => $position]);
+            return $rows->sortBy('sort_order')->values();
+        });
+        return response()->json($rows);
     }
 
     private function validated(Request $request, bool $creating): array
@@ -87,7 +107,7 @@ class HomepageBannerController extends Controller
     /** The storefront slider must always retain an active slide. */
     private function assertHeroRemainsVisible(HomepageBanner $banner, array $data, bool $deleting): void
     {
-        if ($banner->placement !== 'hero' || !$banner->is_active || (!$deleting && ($data['is_active'] ?? true))) return;
+        if ($banner->placement !== 'hero' || !$banner->is_active || (!$deleting && ($data['is_active'] ?? true) && ($data['placement'] ?? $banner->placement) === 'hero')) return;
         $otherActive = HomepageBanner::query()->where('placement', 'hero')->where('is_active', true)->whereKeyNot($banner->id)->exists();
         if (!$otherActive) throw ValidationException::withMessages(['is_active' => ['The hero slider needs at least one visible banner.']]);
     }

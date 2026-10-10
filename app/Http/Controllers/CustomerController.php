@@ -4,6 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Mail\CustomerVerificationCodeMail;
 use App\Models\Customer;
+use App\Models\Admin;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use App\Models\CustomerVerificationCode;
 use App\Services\PasswordResetCodeService;
 use Illuminate\Http\JsonResponse;
@@ -25,18 +29,63 @@ class CustomerController extends Controller
         $perPage = max(1, min($perPage, 100));
         $search = trim((string) $request->query('search', ''));
 
-        $customers = Customer::query()
+        $customers = Customer::query()->whereNull('roster_archived_at')
             ->when($search !== '', fn ($query) => $query->where(fn ($match) => $match
                 ->where('name', 'like', "%{$search}%")
                 ->orWhere('email', 'like', "%{$search}%")
                 ->orWhere('phone', 'like', "%{$search}%")))
             ->withCount('orders')
             ->withCount(['orders as received_orders_count' => fn ($orders) => $orders->whereIn('status', ['delivered', 'completed'])])
+            ->withCount(['orders as failed_orders_count' => fn ($orders) => $orders->whereIn('status', ['cancelled', 'refused'])])
+            ->withCount(['orders as pending_orders_count' => fn ($orders) => $orders->whereNotIn('status', ['delivered', 'completed', 'cancelled', 'refused'])])
             ->withSum(['orders as total_spent' => fn ($orders) => $orders->where('status', '!=', 'cancelled')], 'total')
             ->latest()
             ->paginate($perPage);
 
         return response()->json($customers);
+    }
+
+    public function adminSaveContact(Request $request, ?Customer $customer = null): JsonResponse
+    {
+        abort_unless($request->user() instanceof Admin, 403);
+        abort_if($customer?->roster_archived_at !== null, 404);
+        $id = $customer?->id;
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'phone' => ['required', 'regex:/^01[0-9]{9}$/', Rule::unique('customers', 'phone')->ignore($id)],
+            'email' => ['nullable', 'email', 'max:255', Rule::unique('customers', 'email')->ignore($id)],
+            'street' => ['nullable', 'string', 'max:500'],
+            'area' => ['nullable', 'string', 'max:150'],
+            'district' => ['nullable', 'string', 'max:100'],
+            'crm_status' => ['required', Rule::in(['new', 'active', 'vip'])],
+        ]);
+        $created = $customer === null;
+        $result = DB::transaction(function () use ($customer, $data) {
+            $record = $customer ? Customer::whereKey($customer->id)->lockForUpdate()->firstOrFail() : new Customer();
+            abort_if($record->roster_archived_at !== null, 404);
+            $email = $data['email'] ?? null;
+            if ($record->exists && $record->email !== $email) {
+                $record->forceFill(['email_verified_at' => null]);
+                $record->tokens()->delete();
+            }
+            $record->fill(['name' => trim($data['name']), 'phone' => $data['phone'], 'email' => $email,
+                'contact_street' => $data['street'] ?? null, 'contact_area' => $data['area'] ?? null,
+                'contact_district' => $data['district'] ?? null, 'crm_status' => $data['crm_status']]);
+            // A contact record grants no verified account or known login password.
+            if (!$record->exists) $record->password = Str::random(64);
+            $record->save();
+            return $record;
+        });
+        return response()->json($result, $created ? 201 : 200);
+    }
+
+    public function adminDeleteContact(Request $request, Customer $customer): JsonResponse
+    {
+        abort_unless($request->user() instanceof Admin, 403);
+        abort_if($customer->roster_archived_at !== null, 404);
+        // Hide the roster entry while preserving the customer's actual orders and wallet.
+        $customer->forceFill(['roster_archived_at' => now()])->save();
+        return response()->json(['message' => 'Customer removed from the roster.']);
     }
 
     public function show(Customer $customer): JsonResponse
@@ -246,6 +295,7 @@ class CustomerController extends Controller
             'email' => ['sometimes', 'email', 'max:255'],
             'phone' => ['sometimes', 'string', 'max:32'],
             'profile_picture' => ['sometimes', 'file', 'image', 'max:5120'],
+            'remove_profile_picture' => ['sometimes', 'boolean'],
         ]);
 
         if ($request->filled('email')) {
@@ -266,7 +316,7 @@ class CustomerController extends Controller
             }
         }
 
-        $profileUrl = $customer->profile_picture;
+        $profileUrl = $request->boolean('remove_profile_picture') ? null : $customer->profile_picture;
         if ($request->hasFile('profile_picture')) {
             $configuration = Configuration::create(
                 config('services.uploadcare.public_key'),

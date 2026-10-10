@@ -7,11 +7,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ProductQuestion extends Model
 {
-    protected $fillable = ['product_id', 'customer_id', 'question', 'answer', 'answered_by_type', 'answered_by_id', 'answered_at'];
+    protected $fillable = ['product_id', 'customer_id', 'question', 'answer', 'answered_by_type', 'answered_by_id', 'answered_at', 'status', 'rejection_note', 'moderated_at'];
 
     protected function casts(): array
     {
-        return ['answered_at' => 'datetime'];
+        return ['answered_at' => 'datetime', 'moderated_at' => 'datetime'];
     }
 
     public function product(): BelongsTo { return $this->belongsTo(Product::class); }

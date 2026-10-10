@@ -12,6 +12,6 @@ class MediaUploadService
     {
         $api = new Api(Configuration::create(config('services.uploadcare.public_key'), config('services.uploadcare.secret_key')));
         $uploaded = $api->uploader()->fromPath($file->getPathname());
-        return "https://ucarecdn.com/{$uploaded->getUuid()}/-/preview/";
+        return "https://ucarecdn.com/{$uploaded->getUuid()}/".(str_starts_with($file->getMimeType() ?? "", "image/") ? "-/preview/" : "");
     }
 }

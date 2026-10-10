@@ -32,6 +32,33 @@ class StoreProductController extends Controller
         return $this->paginateProducts($query, $request);
     }
 
+    public function stores(): JsonResponse
+    {
+        return response()->json(Seller::where('status', 'approved')->where('is_active', true)->orderBy('store_name')->get()->map(fn ($seller) => $this->transformSellerStore($seller)));
+    }
+
+    public function storeProfile(string $slug): JsonResponse
+    {
+        $seller = Seller::where('store_slug', $slug)->where('status', 'approved')->where('is_active', true)->firstOrFail();
+        return response()->json($this->transformSellerStore($seller));
+    }
+
+    private function transformSellerStore(Seller $seller): array
+    {
+        $reviews = Review::where('status', 'approved')->whereHas('product', fn ($products) => $products->where('seller_id', $seller->id)->where('status', 'active'));
+        $count = (clone $reviews)->count();
+        return [
+            'type' => 'seller', 'id' => $seller->id, 'name' => $seller->store_name,
+            'slug' => $seller->store_slug, 'logo' => $seller->store_logo, 'image' => $seller->store_image,
+            'location' => $seller->city ? trim($seller->city.($seller->country ? ', '.$seller->country : '')) : null,
+            'joined_at' => $seller->created_at?->toDateString(),
+            'rating_summary' => ['average' => $count ? round((float) (clone $reviews)->avg('rating'), 2) : null, 'review_count' => $count,
+                'sold_count' => (int) $seller->orderItems()->where('fulfillment_status', 'delivered')->whereHas('order', fn ($orders) => $orders->whereIn('status', ['delivered', 'completed']))->sum('quantity')],
+            'performance' => ['positive_rating_percentage' => $seller->positive_rating_percentage,
+                'on_time_shipping_percentage' => $seller->on_time_shipping_percentage, 'chat_response_percentage' => $seller->chat_response_percentage],
+        ];
+    }
+
     public function marketplaceStats(): JsonResponse
     {
         return response()->json([
@@ -49,6 +76,27 @@ class StoreProductController extends Controller
         $settings = collect($sections)->firstWhere('id', $section);
         abort_unless($settings && $settings['enabled'], 404);
         $tab = $request->validate(['tab' => ['sometimes', 'in:top,new']])['tab'] ?? 'top';
+        return $this->resolveHomepageProducts($settings, $tab);
+    }
+
+    public function previewHomepageProducts(Request $request): JsonResponse
+    {
+        abort_unless($request->user() instanceof \App\Models\Admin && $request->user()->role === 'super_admin', 403);
+        $data = $request->validate([
+            'type' => ['required', 'in:trending,collection,featured'],
+            'tab' => ['sometimes', 'in:top,new'], 'topSource' => ['sometimes', 'in:auto,picked'], 'newSource' => ['sometimes', 'in:auto,picked'],
+            'showNewArrivals' => ['sometimes', 'boolean'], 'source' => ['sometimes', 'in:products,collection,category,tag'],
+            'sourceValue' => ['sometimes', 'nullable', 'string', 'max:255'], 'collection_id' => ['sometimes', 'nullable', 'integer'],
+            'limit' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'productIds' => ['sometimes', 'array', 'max:100'], 'productIds.*' => ['integer'],
+            'topProductIds' => ['sometimes', 'array', 'max:100'], 'topProductIds.*' => ['integer'],
+            'newProductIds' => ['sometimes', 'array', 'max:100'], 'newProductIds.*' => ['integer'],
+        ]);
+        return $this->resolveHomepageProducts($data, $data['tab'] ?? 'top');
+    }
+
+    private function resolveHomepageProducts(array $settings, string $tab): JsonResponse
+    {
         $query = $this->baseStoreQuery();
         $ids = null;
         if ($settings['type'] === 'trending') {
@@ -81,7 +129,7 @@ class StoreProductController extends Controller
         $request->validate(['ids' => ['sometimes', 'string', 'max:1000', 'regex:/^\d+(,\d+)*$/']]);
         $ids = $request->filled('ids') ? array_values(array_unique(array_map('intval', explode(',', $request->query('ids'))))) : null;
         $query = Review::query()->where('status', 'approved')->whereNotNull('comment')
-            ->whereHas('product', fn ($q) => $q->where('status', 'active')->where(fn ($visible) => $visible->whereNull('seller_id')->orWhereHas('seller', fn ($seller) => $seller->where('status', 'approved')->where('is_active', true))))
+            ->whereHas('product', fn ($q) => $q->where('status', 'active')->availableForSale()->where(fn ($visible) => $visible->whereNull('seller_id')->orWhereHas('seller', fn ($seller) => $seller->where('status', 'approved')->where('is_active', true))))
             ->with(['customer:id,name,profile_picture', 'product:id,name,slug']);
         if ($ids !== null) {
             $cases = collect($ids)->map(fn ($id, $position) => 'WHEN '.$id.' THEN '.$position)->join(' ');
@@ -108,7 +156,7 @@ class StoreProductController extends Controller
     {
         $product = Product::where('slug', $product)->whereIn('status', ['active', 'unlisted'])->firstOrFail();
         $perPage = max(1, min((int) $request->query('per_page', 10), 50));
-        return response()->json($product->reviews()->where('status', 'approved')->with('customer:id,name')->latest()->paginate($perPage)->through(fn ($review) => ['id'=>$review->id,'rating'=>$review->rating,'comment'=>$review->comment,'customer_name'=>$review->customer?->name,'created_at'=>$review->created_at?->toDateString()]));
+        return response()->json($product->reviews()->where('status', 'approved')->with(['customer:id,name,profile_picture','orderItem:id,variation_attributes'])->withCount(['likes','responseLikes'])->latest()->paginate($perPage)->through(fn ($review) => ['id'=>$review->id,'rating'=>$review->rating,'comment'=>$review->comment,'customer_name'=>$review->customer?->name,'avatar'=>$review->customer?->profile_picture,'images'=>$review->images??[],'videos'=>$review->videos??[],'likes'=>$review->likes_count,'verified'=>$review->order_item_id!==null,'purchased_variant'=>$review->orderItem?->variation_attributes,'media_details'=>$review->media_details,'seller_response_likes'=>$review->response_likes_count,'seller_response'=>$review->seller_response,'seller_responded_at'=>$review->seller_responded_at?->toDateString(),'created_at'=>$review->created_at?->toDateString()]));
     }
 
     public function indexByCategory(ProductCategory $category, Request $request): JsonResponse
@@ -156,7 +204,7 @@ class StoreProductController extends Controller
     private function baseStoreQuery(bool $directLink = false): Builder
     {
         $query = Product::query()
-            ->whereIn('status', $directLink ? ['active', 'unlisted'] : ['active'])
+            ->whereIn('status', $directLink ? ['active', 'unlisted'] : ['active'])->availableForSale()
             ->where(function (Builder $q) {
                 $q->whereNull('seller_id')
                     ->orWhereHas('seller', function (Builder $sq) {
@@ -197,18 +245,7 @@ class StoreProductController extends Controller
                 'logo' => $platformStore?->logo,
                 'image' => null,
             ]
-            : [
-                'type' => 'seller',
-                'id' => $product->seller?->id,
-                'name' => $product->seller?->store_name,
-                'slug' => $product->seller?->store_slug,
-                'logo' => $product->seller?->store_logo,
-                'image' => $product->seller?->store_image,
-                'location' => $product->seller?->city ? trim(($product->seller->city ?? '') . ($product->seller->country ? ', '.$product->seller->country : '')) : null,
-                'joined_at' => $product->seller?->created_at?->toDateString(),
-                'rating_summary' => ['average'=>null,'review_count'=>0,'sold_count'=>(int)$product->seller?->orderItems()->where('fulfillment_status','delivered')->whereHas('order', fn($q)=>$q->whereIn('status',['delivered','completed']))->sum('quantity')],
-                'performance' => ['positive_rating_percentage'=>$product->seller?->positive_rating_percentage,'on_time_shipping_percentage'=>$product->seller?->on_time_shipping_percentage,'chat_response_percentage'=>$product->seller?->chat_response_percentage],
-            ];
+            : $this->transformSellerStore($product->seller);
 
         $availableQuantity = (int) ($product->available_quantity ?? 0);
         $currentPrice = $product->default_selling_price !== null ? (string) $product->default_selling_price : null;

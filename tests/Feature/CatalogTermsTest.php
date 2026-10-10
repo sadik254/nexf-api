@@ -57,9 +57,16 @@ class CatalogTermsTest extends TestCase
         $this->getJson('/api/store/products?brand=nexf-original&tag=featured')->assertOk()->assertJsonPath('total', 1);
         $this->getJson('/api/store/products?tag=unknown')->assertOk()->assertJsonPath('total', 0);
         $this->getJson('/api/store/products?search=Featured')->assertOk()->assertJsonPath('total', 1);
-        $this->withToken($superToken)->postJson("/api/admin/brands/{$brandId}/delete")->assertUnprocessable();
-        $this->withToken($sellerToken)->postJson("/api/seller/products/{$productId}", ['tag_ids' => []])->assertOk();
+        $this->withToken($superToken)->postJson("/api/admin/brands/{$brandId}/delete")->assertOk();
+        $this->assertSoftDeleted('brands', ['id' => $brandId]);
+        $this->getJson('/api/store/brands')->assertOk()->assertJsonMissing(['id' => $brandId]);
+        $this->getJson('/api/store/products/tagged-jacket')->assertOk()->assertJsonPath('brand', 'NEXF Original');
+        $this->withToken($superToken)->postJson('/api/admin/brands', ['name' => 'NEXF Original'])->assertCreated()->assertJsonPath('id', $brandId);
+
         $this->withToken($superToken)->postJson("/api/admin/tags/{$tagId}/delete")->assertOk();
+        $this->assertSoftDeleted('tags', ['id' => $tagId]);
+        $this->getJson('/api/store/tags')->assertOk()->assertJsonMissing(['id' => $tagId]);
+        $this->getJson('/api/store/products/tagged-jacket')->assertOk()->assertJsonPath('tags.0', 'featured');
         $this->withToken($sellerToken)->post("/api/seller/products/{$productId}", ['brand_id' => '', 'clear_tags' => '1'])->assertOk();
         $this->assertNull(Product::findOrFail($productId)->brand_id);
     }

@@ -43,8 +43,8 @@ class CatalogTermController extends Controller
         abort_unless($request->user() instanceof Admin || $request->user() instanceof Seller, 403);
         $request->merge(['name' => trim((string) $request->input('name'))]);
         $name = $request->validate(['name' => ['required', 'string', 'max:255']])['name'];
-        $existing = $model::whereRaw('LOWER(name) = ?', [mb_strtolower($name)])->first();
-        if ($existing) return response()->json($existing->loadCount('products'));
+        $existing = $model::withTrashed()->whereRaw('LOWER(name) = ?', [mb_strtolower($name)])->first();
+        if ($existing) { if ($existing->trashed()) $existing->restore(); return response()->json($existing->loadCount('products')); }
         $term = $model::create(['name' => $name, 'slug' => $this->uniqueSlug($model, $name)]);
         return response()->json($term->loadCount('products'), 201);
     }
@@ -53,7 +53,10 @@ class CatalogTermController extends Controller
     {
         $this->authorizeManager($request);
         $request->merge(['name' => trim((string) $request->input('name'))]);
-        $name = $request->validate(['name' => ['required', 'string', 'max:255', Rule::unique((new $model)->getTable())]])['name'];
+        $name = $request->validate(['name' => ['required', 'string', 'max:255']])['name'];
+        $existing = $model::withTrashed()->whereRaw('LOWER(name) = ?', [mb_strtolower($name)])->first();
+        if ($existing?->trashed()) { $existing->restore(); return response()->json($existing->loadCount('products'), 201); }
+        if ($existing) throw \Illuminate\Validation\ValidationException::withMessages(['name' => 'This name is already in the catalogue.']);
         $slug = $this->uniqueSlug($model, $name);
         $term = $model::create(['name' => trim($name), 'slug' => $slug]);
         return response()->json($term->loadCount('products'), 201);
@@ -77,7 +80,6 @@ class CatalogTermController extends Controller
     private function delete(Request $request, Brand|Tag $term): JsonResponse
     {
         $this->authorizeManager($request);
-        if ($term->products()->exists()) return response()->json(['message' => 'This item is used by products and cannot be deleted.'], 422);
         $term->delete();
         return response()->json(['message' => 'Deleted.']);
     }
@@ -92,7 +94,7 @@ class CatalogTermController extends Controller
     {
         $base = Str::slug($name) ?: Str::random(8);
         $slug = $base;
-        for ($number = 2; $model::where('slug', $slug)->when($ignoreId, fn ($query) => $query->where('id', '!=', $ignoreId))->exists(); $number++) {
+        for ($number = 2; $model::withTrashed()->where('slug', $slug)->when($ignoreId, fn ($query) => $query->where('id', '!=', $ignoreId))->exists(); $number++) {
             $slug = $base.'-'.$number;
         }
         return $slug;

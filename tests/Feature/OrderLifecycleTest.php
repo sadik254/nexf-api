@@ -25,6 +25,20 @@ class OrderLifecycleTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_lifecycle_times_record_real_transitions_without_restamping_history(): void
+    {
+        $order = \App\Models\Order::create(['order_number'=>'ISOLATED-TIMELINE', 'status'=>'pending','payment_status'=>'unpaid','subtotal'=>10,'shipping_charge'=>0,'discount_total'=>0,'total'=>10,'shipping_name'=>'Timeline tester','shipping_phone'=>'01700000000','shipping_address'=>'Test address']);
+        $item = $order->items()->create(['product_name'=>'Timeline item','quantity'=>1,'unit_selling_price'=>10,'unit_buying_price'=>0,'line_subtotal'=>10,'line_cost'=>0,'line_profit'=>10,'fulfillment_status'=>'pending']);
+        $this->assertNull($order->payment_paid_at);$this->assertNull($item->confirmed_at);
+        $this->travelTo(now()->startOfSecond());
+        $order->update(['payment_status'=>'paid']);$item->update(['fulfillment_status'=>'confirmed']);
+        $paid = $order->fresh()->payment_paid_at;$confirmed = $item->fresh()->confirmed_at;
+        $this->assertNotNull($paid);$this->assertNotNull($confirmed);
+        $this->travel(1)->hours();$order->update(['notes'=>'Changed note']);$item->update(['tracking_number'=>'Local reference']);
+        $this->assertTrue($order->fresh()->payment_paid_at->equalTo($paid));$this->assertTrue($item->fresh()->confirmed_at->equalTo($confirmed));
+        $this->travelBack();
+    }
+
     public function test_coupon_validation_reports_the_exact_unavailable_reason(): void
     {
         $base = [
@@ -468,6 +482,56 @@ class OrderLifecycleTest extends TestCase
         $item->update(['fulfillment_status' => 'shipped', 'courier_provider' => 'steadfast', 'courier_consignment_id' => '54321', 'courier_invoice' => 'INV-54321']);
         $this->withHeader('Authorization', 'Bearer webhook-test-token')->postJson('/api/webhooks/steadfast', ['notification_type' => 'delivery_status', 'consignment_id' => 54321, 'invoice' => 'INV-54321', 'status' => 'delivered', 'tracking_message' => 'Delivered'])->assertOk();
         $this->assertDatabaseHas('order_items', ['id' => $item->id, 'fulfillment_status' => 'delivered', 'courier_tracking_message' => 'Delivered']);
+    }
+
+    public function test_store_delivery_options_persist_and_checkout_uses_only_that_stores_options(): void
+    {
+        Mail::fake();
+        [$customer,$product]=$this->checkoutFixtures(4);
+        $seller=Seller::create(['seller_name'=>'Delivery Owner','email'=>'delivery-owner@example.test','store_name'=>'Delivery Owner Store','store_slug'=>'delivery-owner','kyc_type'=>'nid','kyc_number'=>'owner','kyc_document_url'=>'https://example.test/id','product_category'=>'Clothing','status'=>'approved','is_active'=>true,'password'=>'password123']);
+        $product->update(['seller_id'=>$seller->id]);
+        $token=$seller->createToken('test',['seller:basic'])->plainTextToken;
+        $this->withToken($token);
+        $rates=$this->postJson('/api/seller/delivery-rates',['options'=>[['name'=>'Inside Dhaka','charge'=>31],['name'=>'Custom regional delivery','charge'=>57]]])->assertOk()->assertJsonCount(2)->assertJsonPath('0.name','Inside Dhaka')->assertJsonPath('0.is_custom',true)->json();
+        $this->getJson('/api/seller/delivery-rates')->assertOk()->assertJsonPath('1.name','Custom regional delivery');
+        $this->getJson('/api/shipping-methods')->assertOk()->assertJsonCount(1);
+        $payload=['items'=>[['product_id'=>$product->id,'quantity'=>1]],'payment_method_id'=>PaymentMethod::firstOrFail()->id,'shipping_method_id'=>ShippingMethod::whereNull('seller_id')->firstOrFail()->id];
+        $customerToken=$customer->createToken('test',['customer:basic'])->plainTextToken;
+        $this->withToken($customerToken)->postJson('/api/customers/orders/preview',$payload)->assertOk()->assertJsonPath('shipping_charge',31)->assertJsonCount(2,'shipping_groups.0.shipping_options');
+        $selected=$payload+['store_shipping_methods'=>[(string)$seller->id=>$rates[1]['shipping_method_id']]];
+        $this->postJson('/api/customers/orders/preview',$selected)->assertOk()->assertJsonPath('shipping_charge',57)->assertJsonPath('shipping_groups.0.shipping_method_name','Custom regional delivery');
+        $order=$this->postJson('/api/customers/orders',$selected+['shipping_name'=>'Customer','shipping_phone'=>'01700000000','shipping_address'=>'Dhaka'])->assertCreated()->assertJsonPath('order.shipping_charge','57.00')->json('order');
+        $this->withToken($token)->postJson('/api/seller/delivery-rates',['options'=>[['shipping_method_id'=>$rates[0]['shipping_method_id'],'name'=>'Inside Dhaka','charge'=>33]]])->assertOk()->assertJsonCount(1);
+        $this->assertDatabaseHas('shipping_methods',['id'=>$rates[1]['shipping_method_id'],'is_active'=>false]);
+        $this->assertDatabaseHas('order_store_groups',['order_id'=>$order['id'],'shipping_method_id'=>$rates[1]['shipping_method_id'],'shipping_method_name'=>'Custom regional delivery','shipping_charge'=>57]);
+        $this->withToken($customerToken)->postJson('/api/customers/orders/preview',$selected)->assertUnprocessable();
+        $foreign=Seller::create(['seller_name'=>'Other','email'=>'delivery-other@example.test','store_name'=>'Other Store','store_slug'=>'delivery-other','kyc_type'=>'nid','kyc_number'=>'other','kyc_document_url'=>'https://example.test/id','product_category'=>'Clothing','status'=>'approved','is_active'=>true,'password'=>'password123']);
+        $foreignMethod=ShippingMethod::create(['seller_id'=>$foreign->id,'name'=>'Private delivery','code'=>'private_delivery','charge'=>1,'is_active'=>true,'currency'=>'BDT']);
+        $this->withToken($token)->postJson('/api/seller/delivery-rates',['options'=>[['shipping_method_id'=>$foreignMethod->id,'name'=>'Stolen option','charge'=>1]]])->assertForbidden();
+        $this->postJson('/api/seller/delivery-rates',['rates'=>[['shipping_method_id'=>$foreignMethod->id,'charge'=>1]]])->assertForbidden();
+        $this->withToken($customerToken)->postJson('/api/customers/orders/preview',$payload+['store_shipping_methods'=>[(string)$seller->id=>$foreignMethod->id]])->assertUnprocessable();
+        $this->postJson('/api/customers/orders/preview',array_replace($payload,['shipping_method_id'=>$foreignMethod->id]))->assertUnprocessable();
+    }
+
+    public function test_house_delivery_options_do_not_change_other_store_defaults(): void
+    {
+        [$customer,$houseProduct]=$this->checkoutFixtures(3);
+        $seller=Seller::create(['seller_name'=>'Store owner','email'=>'house-delivery-other@example.test','store_name'=>'Other Store','store_slug'=>'house-delivery-other','kyc_type'=>'nid','kyc_number'=>'other','kyc_document_url'=>'https://example.test/id','product_category'=>'Clothing','status'=>'approved','is_active'=>true,'password'=>'password123']);
+        $other=Product::create(['seller_id'=>$seller->id,'category_id'=>$houseProduct->category_id,'name'=>'Other product','slug'=>'house-delivery-other-product','product_type'=>'simple','status'=>'active','default_selling_price'=>100]);
+        ProductLot::create(['product_id'=>$other->id,'lot_number'=>'HOUSE-DELIVERY-OTHER','buying_price'=>50,'selling_price'=>100,'quantity'=>3,'quantity_remaining'=>3]);
+        $admin=Admin::create(['name'=>'Super','email'=>'house-delivery-admin@example.test','password'=>'password123','role'=>'super_admin']);
+        $this->withToken($admin->createToken('test',['admin:basic','admin:shipping-methods'])->plainTextToken);
+        $this->getJson('/api/admin/platform-delivery-rates')->assertOk()->assertJsonCount(1,'rates');
+        $saved=$this->postJson('/api/admin/platform-delivery-rates',['options'=>[['name'=>'House priority','charge'=>17],['name'=>'House collection','charge'=>0]]])->assertOk()->assertJsonCount(2,'rates')->json('rates');
+        $this->getJson('/api/shipping-methods')->assertOk()->assertJsonCount(1);
+        $this->assertDatabaseHas('shipping_methods',['seller_id'=>null,'is_store_option'=>false,'charge'=>20]);
+        $this->postJson('/api/admin/shipping-methods/'.$saved[0]['shipping_method_id'],['charge'=>1])->assertNotFound();
+        $payload=['items'=>[['product_id'=>$houseProduct->id,'quantity'=>1],['product_id'=>$other->id,'quantity'=>1]],'payment_method_id'=>PaymentMethod::firstOrFail()->id,'shipping_method_id'=>ShippingMethod::whereNull('seller_id')->where('is_store_option',false)->firstOrFail()->id];
+        $this->withToken($customer->createToken('test',['customer:basic'])->plainTextToken)->postJson('/api/customers/orders/preview',$payload)->assertOk()->assertJsonPath('shipping_charge',37)->assertJsonPath('shipping_groups.0.shipping_method_name','House priority')->assertJsonPath('shipping_groups.1.shipping_charge',20);
+        $this->postJson('/api/customers/orders/preview',$payload+['store_shipping_methods'=>[(string)$seller->id=>$saved[0]['shipping_method_id']]])->assertUnprocessable();
+        $this->withToken($seller->createToken('test',['seller:basic'])->plainTextToken)->postJson('/api/seller/delivery-rates',['options'=>[['shipping_method_id'=>$saved[0]['shipping_method_id'],'name'=>'Stolen house option','charge'=>1]]])->assertForbidden();
+        $regular=Admin::create(['name'=>'Regular','email'=>'house-delivery-regular@example.test','password'=>'password123','role'=>'admin']);
+        $this->withToken($regular->createToken('test',['admin:basic'])->plainTextToken)->postJson('/api/admin/platform-delivery-rates',['options'=>[['name'=>'Unauthorized change','charge'=>1]]])->assertForbidden();
     }
 
     private function checkoutFixtures(int $quantity, bool $sellerOwned = false): array

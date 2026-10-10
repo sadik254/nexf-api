@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\CustomerController;
+use App\Http\Controllers\CustomerReviewMediaController;
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\SellerController;
 use App\Http\Controllers\ProductCategoryController;
@@ -71,6 +72,11 @@ Route::prefix('customers')->group(function () {
 
     Route::middleware('sanctum.type:customer,customer:basic')->group(function () {
         Route::post('/me', [CustomerController::class, 'update']);
+        Route::get('/addresses', [\App\Http\Controllers\CustomerAddressController::class, 'index']);
+        Route::post('/addresses', [\App\Http\Controllers\CustomerAddressController::class, 'save']);
+        Route::post('/addresses/{address}', [\App\Http\Controllers\CustomerAddressController::class, 'save']);
+        Route::post('/addresses/{address}/default', [\App\Http\Controllers\CustomerAddressController::class, 'makeDefault']);
+        Route::post('/addresses/{address}/delete', [\App\Http\Controllers\CustomerAddressController::class, 'destroy']);
         Route::post('/me/password', [CustomerController::class, 'updatePassword']);
         Route::post('/logout', [CustomerController::class, 'logout']);
         Route::get('/orders', [OrderController::class, 'indexCustomer']);
@@ -82,6 +88,9 @@ Route::prefix('customers')->group(function () {
         Route::post('/products/{product:slug}/reviews', [ProductEngagementController::class, 'review']);
         Route::post('/products/{product:slug}/questions', [ProductEngagementController::class, 'ask']);
         Route::get('/reviews', [ProductEngagementController::class, 'reviewsForCustomer']);
+        Route::post('/review-media', [CustomerReviewMediaController::class, 'store'])->middleware('throttle:20,1');
+        Route::get('/review-likes', [ProductEngagementController::class, 'likedReviews']);
+        Route::post('/reviews/{review}/like', [ProductEngagementController::class, 'likeReview']);
         Route::get('/reviewable-items', [ProductEngagementController::class, 'reviewableItems']);
         Route::get('/questions', [ProductEngagementController::class, 'questionsForCustomer']);
         Route::get('/support-tickets', [SupportTicketController::class, 'index']);
@@ -97,6 +106,12 @@ Route::prefix('customers')->group(function () {
         Route::get('/return-requests', [ReturnRequestController::class, 'index']);
         Route::post('/return-requests', [ReturnRequestController::class, 'store']);
         Route::get('/return-requests/{returnRequest}', [ReturnRequestController::class, 'show']);
+        Route::get('/wallet', [WithdrawalController::class, 'wallet']);
+        Route::get('/payout-accounts', [\App\Http\Controllers\CustomerPayoutController::class, 'index']);
+        Route::post('/payout-accounts', [\App\Http\Controllers\CustomerPayoutController::class, 'save']);
+        Route::post('/payout-accounts/{payout}', [\App\Http\Controllers\CustomerPayoutController::class, 'save']);
+        Route::post('/payout-accounts/{payout}/select', [\App\Http\Controllers\CustomerPayoutController::class, 'select']);
+        Route::post('/payout-accounts/{payout}/delete', [\App\Http\Controllers\CustomerPayoutController::class, 'destroy']);
         Route::get('/withdrawals', [WithdrawalController::class, 'customerIndex']);
         Route::post('/withdrawals', [WithdrawalController::class, 'customerStore']);
         Route::post('/me/ping', function () {
@@ -107,6 +122,9 @@ Route::prefix('customers')->group(function () {
 
 Route::prefix('admin')->middleware(['sanctum.type:admin,admin:customers'])->group(function () {
     Route::get('/customers', [CustomerController::class, 'index']);
+    Route::post('/customers', [CustomerController::class, 'adminSaveContact']);
+    Route::post('/customers/{customer}/delete', [CustomerController::class, 'adminDeleteContact']);
+    Route::post('/customers/{customer}', [CustomerController::class, 'adminSaveContact']);
     Route::get('/customers/{customer}', [CustomerController::class, 'show']);
 });
 
@@ -194,6 +212,9 @@ Route::prefix('sellers')->group(function () {
 Route::prefix('admin')->group(function () {
     Route::middleware('sanctum.type:admin,admin:basic')->post('/sellers/{seller}/approve', [SellerController::class, 'approve']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/sellers/{seller}/reject', [SellerController::class, 'reject']);
+    Route::middleware('sanctum.type:admin,admin:basic')->post('/sellers/{seller}/delete', [SellerController::class, 'archive']);
+    Route::middleware('sanctum.type:admin,admin:basic')->post('/sellers', [SellerController::class, 'adminSave']);
+    Route::middleware('sanctum.type:admin,admin:basic')->post('/sellers/{seller}', [SellerController::class, 'adminSave']);
     Route::middleware('sanctum.type:admin,admin:basic')->get('/sellers', [SellerController::class, 'index']);
     Route::middleware('sanctum.type:admin,admin:basic')->get('/sellers/{seller}', [SellerController::class, 'show']);
 });
@@ -250,6 +271,8 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/tags', [CatalogTermController::class, 'storeTag']);
     Route::post('/tags/{tag}', [CatalogTermController::class, 'updateTag']);
     Route::post('/tags/{tag}/delete', [CatalogTermController::class, 'deleteTag']);
+    Route::get('/platform-delivery-rates', [SellerShippingRateController::class, 'platformIndex']);
+    Route::post('/platform-delivery-rates', [SellerShippingRateController::class, 'platformUpdate']);
     Route::get('/sellers/{seller}/delivery-rates', [SellerShippingRateController::class, 'adminIndex']);
     Route::post('/sellers/{seller}/delivery-rates', [SellerShippingRateController::class, 'adminUpdate']);
     Route::get('/console-summary', [\App\Http\Controllers\ConsoleController::class, 'summary']);
@@ -270,20 +293,24 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/homepage/offer-sets/{offerSet}', [HomepageOfferBlockController::class, 'updateSet']);
     Route::post('/homepage/offer-sets/{offerSet}/delete', [HomepageOfferBlockController::class, 'destroySet']);
     Route::post('/homepage/offer-blocks/{block}', [HomepageOfferBlockController::class, 'update']);
-    Route::get('/homepage/layout/{section}/products', [StoreProductController::class, 'homepageProducts']);
-Route::get('/store/marketplace-stats', [StoreProductController::class, 'marketplaceStats']);
-Route::get('/homepage/layout', [HomepageLayoutController::class, 'show']);
+    Route::get('/homepage/layout', [HomepageLayoutController::class, 'show']);
     Route::post('/homepage/layout', [HomepageLayoutController::class, 'update']);
-    Route::post('/contact', [SupportTicketController::class, 'contact'])->middleware('throttle:5,1');
-Route::get('/site-info', [SiteInfoController::class, 'show']);
+    Route::post('/homepage/preview-products', [StoreProductController::class, 'previewHomepageProducts']);
+    Route::get('/site-info', [SiteInfoController::class, 'show']);
     Route::post('/site-info', [SiteInfoController::class, 'update']);
     Route::post('/homepage/banners', [HomepageBannerController::class, 'store']);
+    Route::post('/homepage/banners/reorder', [HomepageBannerController::class, 'reorder']);
     Route::post('/homepage/banners/{homepageBanner}', [HomepageBannerController::class, 'update']);
     Route::post('/homepage/banners/{homepageBanner}/delete', [HomepageBannerController::class, 'destroy']);
     Route::get('/product-reviews', [ProductEngagementController::class, 'reviewsForAdmin']);
     Route::post('/product-reviews/{review}/moderate', [ProductEngagementController::class, 'moderateReview']);
+    Route::post('/product-reviews/{review}', [ProductEngagementController::class, 'editReview']);
+    Route::post('/product-reviews/{review}/delete', [ProductEngagementController::class, 'deleteReview']);
     Route::get('/product-questions', [ProductEngagementController::class, 'questionsForAdmin']);
+    Route::post('/product-questions/{question}/moderate', [ProductEngagementController::class, 'moderateQuestion']);
     Route::post('/product-questions/{question}/answer', [ProductEngagementController::class, 'answer']);
+    Route::post('/product-questions/{question}', [ProductEngagementController::class, 'editQuestion']);
+    Route::post('/product-questions/{question}/delete', [ProductEngagementController::class, 'deleteQuestion']);
     Route::get('/inventory', [InventoryController::class, 'indexAdmin']);
     Route::get('/inventory/history', [InventoryController::class, 'historyAdmin']);
     Route::post('/inventory/lots/{lot}/adjust', [ProductLotController::class, 'adjust']);
@@ -294,6 +321,8 @@ Route::get('/site-info', [SiteInfoController::class, 'show']);
 
     Route::get('/product-categories', [ProductCategoryController::class, 'index']);
     Route::post('/product-categories', [ProductCategoryController::class, 'store']);
+    Route::post('/product-categories/taxonomy', [ProductCategoryController::class, 'saveTaxonomy']);
+    Route::post('/product-categories/{category}/taxonomy', [ProductCategoryController::class, 'saveTaxonomy']);
     Route::get('/product-categories/{category}', [ProductCategoryController::class, 'show']);
     Route::post('/product-categories/{category}', [ProductCategoryController::class, 'update']);
     Route::post('/product-categories/{category}/delete', [ProductCategoryController::class, 'destroy']);
@@ -354,8 +383,11 @@ Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(f
     Route::get('/dashboard', [DashboardController::class, 'seller']);
     Route::get('/product-reviews', [ProductEngagementController::class, 'reviewsForSeller']);
     Route::post('/product-reviews/{review}/moderate', [ProductEngagementController::class, 'moderateReviewForSeller']);
+    Route::post('/product-reviews/{review}/respond', [ProductEngagementController::class, 'respondToReview']);
     Route::get('/product-questions', [ProductEngagementController::class, 'questionsForSeller']);
     Route::post('/product-questions/{question}/answer', [ProductEngagementController::class, 'answer']);
+    Route::post('/product-questions/{question}', [ProductEngagementController::class, 'editQuestion']);
+    Route::post('/product-questions/{question}/delete', [ProductEngagementController::class, 'deleteQuestion']);
     Route::get('/inventory', [InventoryController::class, 'indexSeller']);
     Route::get('/inventory/history', [InventoryController::class, 'historySeller']);
     Route::post('/inventory/lots/{lot}/adjust', [ProductLotController::class, 'adjust']);
@@ -394,6 +426,8 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 });
 
 Route::prefix('store')->group(function () {
+    Route::get('/stores', [StoreProductController::class, 'stores']);
+    Route::get('/stores/{slug}', [StoreProductController::class, 'storeProfile']);
     Route::get('/products', [StoreProductController::class, 'indexAll']);
     Route::get('/testimonials', [StoreProductController::class, 'testimonials']);
     Route::get('/products/{product:slug}', [StoreProductController::class, 'show']);

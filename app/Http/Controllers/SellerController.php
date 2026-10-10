@@ -33,8 +33,14 @@ class SellerController extends Controller
                 if (isset($period['to'])) $orders->where('created_at', '<=', $period['to'].' 23:59:59');
             });
         };
-        $query = Seller::query()
+        $query = Seller::query()->whereNull('roster_archived_at')
             ->withCount('products')
+            ->withCount(['productReviews as review_count' => fn($reviews) => $reviews->where('reviews.status', 'approved')])
+            ->withCount(['productReviews as positive_review_count' => fn($reviews) => $reviews->where('reviews.status', 'approved')->where('reviews.rating', '>=', 4)])
+            ->withCount(['storeChats as customer_chat_count' => fn($chats) => $chats->whereHas('messages', fn($messages) => $messages->where('author_type', 'customer'))])
+            ->withCount(['storeChats as replied_chat_count' => fn($chats) => $chats->whereHas('messages', fn($messages) => $messages->where('author_type', 'customer'))->whereHas('messages', fn($messages) => $messages->where('author_type', 'seller')->whereColumn('store_chat_messages.author_id', 'store_chats.seller_id'))])
+            ->withAvg(['productReviews as rating_average' => fn($reviews) => $reviews->where('reviews.status', 'approved')], 'rating')
+            ->withSum(['orderItems as lifetime_units_sold' => fn($items) => $items->where('fulfillment_status', 'delivered')->whereHas('order', fn($orders) => $orders->whereIn('status', ['delivered', 'completed']))], 'quantity')
             ->withSum(['orderItems as units_sold' => $salesScope], 'quantity')
             ->withSum(['orderItems as revenue' => $salesScope], 'line_subtotal')
             ->latest();
@@ -52,13 +58,96 @@ class SellerController extends Controller
             $query->where('status', $status);
         }
 
-        return response()->json(array_merge($query->paginate($perPage)->toArray(), ['sales_period' => $period ?: null]));
+        $page = $query->paginate($perPage);
+        foreach ($page->getCollection() as $seller) {
+            $seller->setAttribute('lifetime_units_sold', (int) ($seller->lifetime_units_sold ?? 0));
+            $seller->setAttribute('positive_rating_percentage', $seller->review_count > 0 ? round($seller->positive_review_count / $seller->review_count * 100, 1) : null);
+            $seller->setAttribute('chat_response_percentage', $seller->customer_chat_count > 0 ? round($seller->replied_chat_count / $seller->customer_chat_count * 100, 1) : null);
+        }
+        if (isset($period['from'], $period['to'])) {
+            $from = \Carbon\CarbonImmutable::parse($period['from'])->startOfDay();
+            $to = \Carbon\CarbonImmutable::parse($period['to'])->endOfDay();
+            $days = (int) $from->diffInDays($to->startOfDay()) + 1;
+            $priorFrom = $from->subDays($days);$priorTo = $from->subSecond();
+            $ids = $page->getCollection()->pluck('id');
+            $base = \App\Models\OrderItem::query()->join('orders', 'orders.id', '=', 'order_items.order_id')
+                ->whereIn('order_items.seller_id', $ids)->whereNull('orders.deleted_at')->where('orders.status', '!=', 'cancelled');
+            $prior = (clone $base)->whereBetween('orders.created_at', [$priorFrom, $priorTo])
+                ->selectRaw('order_items.seller_id, SUM(order_items.line_subtotal) AS total')->groupBy('order_items.seller_id')->pluck('total', 'seller_id');
+            $daily = (clone $base)->whereBetween('orders.created_at', [$from, $to])
+                ->selectRaw('order_items.seller_id, DATE(orders.created_at) AS day, SUM(order_items.line_subtotal) AS total')
+                ->groupBy('order_items.seller_id')->groupByRaw('DATE(orders.created_at)')->get()->groupBy('seller_id');
+            foreach ($page->getCollection() as $seller) {
+                $previous = (float) ($prior[$seller->id] ?? 0);$current = (float) ($seller->revenue ?? 0);
+                $seller->setAttribute('previous_revenue', $previous);
+                $seller->setAttribute('revenue_delta', $previous > 0 ? round(($current - $previous) / $previous * 100, 2) : null);
+                $trend = ($daily[$seller->id] ?? collect())->sortBy('day')->map(fn($row) => ['date' => $row->day, 'amount' => (float) $row->total])->values()->all();
+                $seller->setAttribute('revenue_daily', $trend);
+            }
+        }
+        return response()->json(array_merge($page->toArray(), ['sales_period' => $period ?: null]));
     }
 
     public function show(Seller $seller): JsonResponse
     {
         return response()->json($seller);
     }
+    public function adminSave(Request $request, ?Seller $seller = null): JsonResponse
+    {
+        abort_if($seller?->roster_archived_at !== null, 404);
+        $actor = $request->user();
+        abort_unless($actor instanceof Admin && in_array($actor->role, ['super_admin', 'admin'], true), 403);
+        $request->merge([
+            'store_name' => trim((string) $request->input('store_name')),
+            'email' => strtolower(trim((string) $request->input('email'))),
+            'sku_prefix' => strtoupper(trim((string) $request->input('sku_prefix'))),
+        ]);
+        $data = $request->validate([
+            'store_name' => ['required', 'string', 'max:255'],
+            'sku_prefix' => ['required', 'regex:/^[A-Z0-9]{4}$/', \Illuminate\Validation\Rule::unique('sellers')->ignore($seller?->id)],
+            'email' => ['required', 'email', 'max:255', \Illuminate\Validation\Rule::unique('sellers')->ignore($seller?->id)],
+            'phone' => ['required', 'regex:/^01[3-9][0-9]{8}$/', \Illuminate\Validation\Rule::unique('sellers')->ignore($seller?->id)],
+            'address_line' => ['required', 'string', 'max:255'],
+            'address_area' => ['required', 'string', 'max:255'],
+            'address_district' => ['required', 'string', 'max:255'],
+            'commission_rate' => ['required', 'numeric', 'between:0,100'],
+        ]);
+        $data['store_address'] = implode(', ', [$data['address_line'], $data['address_area'], $data['address_district']]);
+        $data['city'] = $data['address_district'];
+        $saved = \Illuminate\Support\Facades\DB::transaction(function () use ($seller, $data, $actor) {
+            if ($seller) {
+                $locked = Seller::query()->lockForUpdate()->findOrFail($seller->id);
+                if (strtolower((string) $locked->email) !== $data['email']) {
+                    $data['email_verified_at'] = null;
+                    $locked->tokens()->delete();
+                }
+                $locked->fill($data)->save();
+                return $locked;
+            }
+            return Seller::create($data + [
+                'store_slug' => $this->uniqueStoreSlug($data['store_name']),
+                'password' => Str::random(64),
+                'status' => 'approved', 'is_active' => true,
+                'approved_by' => $actor->id, 'approved_at' => now(),
+            ]);
+        });
+        return response()->json($saved, $seller ? 200 : 201);
+    }
+
+    public function archive(Request $request, Seller $seller): JsonResponse
+    {
+        $actor = $request->user();
+        abort_unless($actor instanceof Admin && in_array($actor->role, ['super_admin', 'admin'], true), 403);
+        \Illuminate\Support\Facades\DB::transaction(function () use ($seller) {
+            $locked = Seller::query()->lockForUpdate()->findOrFail($seller->id);
+            if ($locked->roster_archived_at) return;
+            $locked->products()->update(['seller_id' => null, 'owner_unassigned' => true]);
+            $locked->tokens()->delete();
+            $locked->forceFill(['roster_archived_at' => now(), 'is_active' => false, 'status' => 'suspended'])->save();
+        });
+        return response()->json(['message' => 'Seller removed from the marketplace. Products remain unassigned and order history is preserved.']);
+    }
+
     public function onboard(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -267,6 +356,7 @@ class SellerController extends Controller
 
     public function approve(Seller $seller, Request $request): JsonResponse
     {
+        abort_if($seller->roster_archived_at !== null, 404);
         /** @var Admin|null $actor */
         $actor = $request->user();
         if (!$actor || !in_array($actor->role, ['super_admin', 'admin'], true)) {
