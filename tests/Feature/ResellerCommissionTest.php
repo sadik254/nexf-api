@@ -6,6 +6,7 @@ use App\Models\Admin;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Reseller;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -24,5 +25,20 @@ class ResellerCommissionTest extends TestCase
         $this->withToken($token)->getJson('/api/admin/commissions')->assertOk()->assertJsonPath('resellers.0.units_this_month', 2)->assertJsonPath('resellers.0.commission_earned', 0);
         OrderItem::create(['order_id' => $order->id, 'product_name' => 'Socks', 'quantity' => 1, 'unit_selling_price' => 20, 'unit_buying_price' => 10, 'line_subtotal' => 20, 'line_cost' => 10, 'line_profit' => 10, 'fulfillment_status' => 'delivered']);
         $this->withToken($token)->getJson('/api/admin/commissions')->assertOk()->assertJsonPath('resellers.0.units_this_month', 3)->assertJsonPath('resellers.0.commission_earned', 22);
+    }
+
+    public function test_reseller_can_sign_in_and_only_read_own_live_month_figures(): void
+    {
+        $reseller = Reseller::create(['name' => 'Partner', 'email' => 'partner-login@example.test', 'password' => 'password123', 'commission_rate' => 12, 'monthly_target' => 5]);
+        $other = Reseller::create(['name' => 'Other', 'email' => 'other-login@example.test', 'password' => 'password123', 'commission_rate' => 8, 'monthly_target' => 2]);
+
+        $response = $this->postJson('/api/resellers/login', ['email' => $reseller->email, 'password' => 'password123'])->assertOk()->assertJsonPath('reseller.id', $reseller->id);
+        $token = $response->json('token');
+        $this->withToken($token)->getJson('/api/resellers/me')->assertOk()->assertJsonPath('id', $reseller->id)->assertJsonPath('commission_rate', '12.00');
+        $this->withToken($token)->getJson('/api/admin/resellers')->assertForbidden();
+        $this->postJson('/api/resellers/login', ['email' => $reseller->email, 'password' => 'wrong-password'])->assertUnauthorized();
+
+        $other->update(['is_active' => false]);
+        $this->postJson('/api/resellers/login', ['email' => $other->email, 'password' => 'password123'])->assertForbidden();
     }
 }

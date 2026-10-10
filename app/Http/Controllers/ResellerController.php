@@ -7,10 +7,69 @@ use App\Models\Reseller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
+use App\Services\PasswordResetCodeService;
 
 class ResellerController extends Controller
 {
+    public function __construct(private PasswordResetCodeService $passwordResets) {}
+
+    public function login(Request $request): JsonResponse
+    {
+        $data = $request->validate(['email' => ['required', 'email'], 'password' => ['required', 'string']]);
+        $reseller = Reseller::where('email', $data['email'])->first();
+        if (!$reseller || !$reseller->password || !Hash::check($data['password'], $reseller->password)) {
+            return response()->json(['message' => 'Invalid credentials.'], 401);
+        }
+        if (!$reseller->is_active) return response()->json(['message' => 'Account is inactive.'], 403);
+        return response()->json(['token' => $reseller->createToken('reseller-api', ['reseller:basic'])->plainTextToken, 'reseller' => $reseller]);
+    }
+
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        $data = $request->validate(['email' => ['required', 'email']]);
+        $reseller = Reseller::where('email', $data['email'])->where('is_active', true)->first();
+        if ($reseller) $this->passwordResets->send($reseller, 'reseller');
+        return response()->json(['message' => 'If that email exists, a code has been sent.']);
+    }
+
+    public function resetPassword(Request $request): JsonResponse
+    {
+        $data = $request->validate(['email' => ['required', 'email'], 'code' => ['required', 'digits:6'], 'password' => ['required', 'string', 'min:8', 'confirmed']]);
+        $reseller = Reseller::where('email', $data['email'])->where('is_active', true)->first();
+        if (!$reseller || !$this->passwordResets->consume($reseller, 'reseller', $data['code'])) return response()->json(['message' => 'Invalid or expired code.'], 422);
+        $reseller->forceFill(['password' => $data['password']])->save();
+        $reseller->tokens()->delete();
+        return response()->json(['message' => 'Password set successfully.']);
+    }
+
+    public function me(Request $request): JsonResponse
+    {
+        $reseller = $request->user();
+        if (!$reseller || !$reseller->is_active) return response()->json(['message' => 'Unauthorized.'], 401);
+        $data = $request->validate(['month' => ['sometimes', 'date_format:Y-m']]);
+        $month = isset($data['month']) ? now()->createFromFormat('Y-m', $data['month']) : now();
+        return response()->json($this->withMonth($reseller, $month->copy()->startOfMonth(), $month->copy()->endOfMonth()));
+    }
+
+    public function updatePassword(Request $request): JsonResponse
+    {
+        $reseller = $request->user();
+        $data = $request->validate(['current_password' => ['required', 'string'], 'new_password' => ['required', 'string', 'min:8', 'confirmed']]);
+        if (!Hash::check($data['current_password'], $reseller->password ?? '')) return response()->json(['message' => 'Current password is incorrect.'], 422);
+        if ($data['current_password'] === $data['new_password']) return response()->json(['message' => 'New password must be different from current password.'], 422);
+        $reseller->forceFill(['password' => $data['new_password']])->save();
+        $reseller->tokens()->delete();
+        return response()->json(['message' => 'Password updated successfully.']);
+    }
+
+    public function logout(Request $request): JsonResponse
+    {
+        $request->user()->currentAccessToken()?->delete();
+        return response()->json(['message' => 'Logged out successfully.']);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $search = trim((string) $request->query('search', ''));

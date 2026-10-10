@@ -42,6 +42,17 @@ use App\Http\Controllers\SellerPromotionController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
+Route::prefix('resellers')->group(function () {
+    Route::post('/login', [ResellerController::class, 'login']);
+    Route::post('/forgot-password', [ResellerController::class, 'forgotPassword']);
+    Route::post('/reset-password', [ResellerController::class, 'resetPassword']);
+    Route::middleware('sanctum.type:reseller,reseller:basic')->group(function () {
+        Route::get('/me', [ResellerController::class, 'me']);
+        Route::post('/me/password', [ResellerController::class, 'updatePassword']);
+        Route::post('/logout', [ResellerController::class, 'logout']);
+    });
+});
+
 // temporary allow admin creation without authentication for testing purposes
     // Route::post('/admin/create', [AdminController::class, 'store']);
 Route::prefix('customers')->group(function () {
