@@ -7,6 +7,7 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\ProductLot;
 use App\Models\ProductLotMovement;
+use App\Services\RestockAlertService;
 use App\Models\Seller;
 use App\Models\SizeChart;
 use App\Models\MediaAsset;
@@ -294,6 +295,7 @@ class ProductController extends Controller
                     'actor_id' => $actor->id,
                     'meta' => ['lot_number' => $lot->lot_number, 'source' => 'product_create'],
                 ]);
+                app(RestockAlertService::class)->notify($product->id);
             }
 
             return $product;

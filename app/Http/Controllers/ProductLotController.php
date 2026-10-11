@@ -8,6 +8,7 @@ use App\Models\ProductLot;
 use App\Models\ProductLotMovement;
 use App\Models\ProductVariation;
 use App\Models\Seller;
+use App\Services\RestockAlertService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -44,6 +45,7 @@ class ProductLotController extends Controller
             ]);
             return $locked;
         });
+        if ((int) $data['quantity_change'] > 0) app(RestockAlertService::class)->notify($product->id, $lot->variation_id);
         return response()->json(['message' => 'Stock adjusted.', 'lot' => $updated]);
     }
 
@@ -72,6 +74,7 @@ class ProductLotController extends Controller
             'expires_at' => $data['expires_at'] ?? null,
             ]);
             $this->recordReceipt($created, $request->user());
+            app(RestockAlertService::class)->notify($product->id);
             return $created;
         });
 
@@ -96,7 +99,7 @@ class ProductLotController extends Controller
             'expires_at' => ['nullable', 'date'],
         ]);
 
-        $lot = DB::transaction(function () use ($variation, $data, $request) {
+        $lot = DB::transaction(function () use ($product, $variation, $data, $request) {
             $created = ProductLot::create([
             'product_id' => null,
             'variation_id' => $variation->id,
@@ -109,6 +112,7 @@ class ProductLotController extends Controller
             'expires_at' => $data['expires_at'] ?? null,
             ]);
             $this->recordReceipt($created, $request->user());
+            app(RestockAlertService::class)->notify($product->id, $variation->id);
             return $created;
         });
 

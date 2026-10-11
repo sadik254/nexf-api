@@ -73,6 +73,18 @@ Route::prefix('customers')->group(function () {
 
     Route::middleware('sanctum.type:customer,customer:basic')->group(function () {
         Route::post('/me', [CustomerController::class, 'update']);
+        Route::get('/wishlist', [\App\Http\Controllers\CustomerAccountController::class, 'wishlist']);
+        Route::post('/wishlist', [\App\Http\Controllers\CustomerAccountController::class, 'addWishlist']);
+        Route::post('/wishlist/{product}/delete', [\App\Http\Controllers\CustomerAccountController::class, 'removeWishlist']);
+        Route::get('/followed-stores', [\App\Http\Controllers\CustomerAccountController::class, 'followedStores']);
+        Route::post('/followed-stores', [\App\Http\Controllers\CustomerAccountController::class, 'followStore']);
+        Route::post('/followed-stores/{seller}/delete', [\App\Http\Controllers\CustomerAccountController::class, 'unfollowStore']);
+        Route::get('/restock-alerts', [\App\Http\Controllers\CustomerAccountController::class, 'restockAlerts']);
+        Route::post('/restock-alerts', [\App\Http\Controllers\CustomerAccountController::class, 'addRestockAlert']);
+        Route::post('/restock-alerts/{alert}/delete', [\App\Http\Controllers\CustomerAccountController::class, 'removeRestockAlert']);
+        Route::get('/notifications', [\App\Http\Controllers\CustomerAccountController::class, 'notifications']);
+        Route::post('/notifications/read-all', [\App\Http\Controllers\CustomerAccountController::class, 'markAllNotificationsRead']);
+        Route::post('/notifications/{notification}/read', [\App\Http\Controllers\CustomerAccountController::class, 'markNotificationRead']);
         Route::get('/addresses', [\App\Http\Controllers\CustomerAddressController::class, 'index']);
         Route::post('/addresses', [\App\Http\Controllers\CustomerAddressController::class, 'save']);
         Route::post('/addresses/{address}', [\App\Http\Controllers\CustomerAddressController::class, 'save']);

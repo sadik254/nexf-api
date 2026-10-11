@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Admin;
 use App\Models\Product;
 use App\Models\ProductVariation;
+use App\Services\RestockAlertService;
 use App\Models\ProductLot;
 use App\Models\ProductLotMovement;
 use App\Models\Seller;
@@ -115,6 +116,7 @@ class ProductVariationController extends Controller
                         'actor_id' => $request->user()->id,
                         'meta' => ['lot_number' => $lotNumber, 'source' => 'variant_matrix'],
                     ]);
+                    app(RestockAlertService::class)->notify($lockedProduct->id, $variation->id);
                 }
                 $saved[] = $variation;
             }

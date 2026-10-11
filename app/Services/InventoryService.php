@@ -54,6 +54,7 @@ class InventoryService
                     'restored_from_order_sale' => true,
                 ],
             ]);
+            app(RestockAlertService::class)->notify($lot->product_id ?? $lot->variation?->product_id ?? 0, $lot->variation_id);
         }
     }
 
@@ -88,6 +89,7 @@ class InventoryService
                     'restored_from_order_sale' => true,
                 ]),
             ]);
+            app(RestockAlertService::class)->notify($lot->product_id ?? $lot->variation?->product_id ?? 0, $lot->variation_id);
             $remaining -= $take;
         }
         if ($remaining > 0) {
