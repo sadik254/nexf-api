@@ -85,6 +85,7 @@ Route::prefix('customers')->group(function () {
         Route::get('/notifications', [\App\Http\Controllers\CustomerAccountController::class, 'notifications']);
         Route::post('/notifications/read-all', [\App\Http\Controllers\CustomerAccountController::class, 'markAllNotificationsRead']);
         Route::post('/notifications/{notification}/read', [\App\Http\Controllers\CustomerAccountController::class, 'markNotificationRead']);
+        Route::post('/notifications/clear', [\App\Http\Controllers\CustomerAccountController::class, 'clearNotifications']);
         Route::get('/addresses', [\App\Http\Controllers\CustomerAddressController::class, 'index']);
         Route::post('/addresses', [\App\Http\Controllers\CustomerAddressController::class, 'save']);
         Route::post('/addresses/{address}', [\App\Http\Controllers\CustomerAddressController::class, 'save']);

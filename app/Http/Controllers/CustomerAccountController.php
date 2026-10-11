@@ -78,21 +78,27 @@ class CustomerAccountController extends Controller
             'variation_id' => ['nullable', 'integer', 'exists:product_variations,id'],
         ]);
         $product = Product::availableForSale()->findOrFail($data['product_id']);
-        $variation = null;
+        $variations = collect();
         if ($product->product_type === 'variable') {
-            if (empty($data['variation_id'])) throw ValidationException::withMessages(['variation_id' => ['Select a variation for this product.']]);
-            $variation = ProductVariation::where('product_id', $product->id)->where('is_active', true)->findOrFail($data['variation_id']);
+            $variations = ProductVariation::where('product_id', $product->id)->where('is_active', true)
+                ->when(!empty($data['variation_id']), fn ($query) => $query->whereKey($data['variation_id']))->get();
+            if ($variations->isEmpty()) throw ValidationException::withMessages(['variation_id' => ['No active variation is available for this product.']]);
         } elseif (!empty($data['variation_id'])) {
             throw ValidationException::withMessages(['variation_id' => ['This simple product has no variations.']]);
         }
-        $stock = (int) ($variation ? $variation->lots()->sum('quantity_remaining') : $product->lots()->sum('quantity_remaining'));
-        if ($stock > 0) throw ValidationException::withMessages(['product_id' => ['This item is already in stock.']]);
-        $key = $variation ? (string) $variation->id : 'simple';
-        $alert = CustomerRestockAlert::updateOrCreate(
-            ['customer_id' => $customer->id, 'product_id' => $product->id, 'variation_key' => $key],
-            ['variation_id' => $variation?->id, 'notified_at' => null],
-        );
-        return response()->json($alert->load(['product:id,name,slug,thumbnail,seller_id,status', 'variation:id,product_id,sku,attributes,is_active']), 201);
+        $targets = $product->product_type === 'simple' ? collect([null]) : $variations;
+        $alerts = $targets->map(function ($variation) use ($customer, $product) {
+            $stock = (int) ($variation ? $variation->lots()->sum('quantity_remaining') : $product->lots()->sum('quantity_remaining'));
+            if ($stock > 0) return null;
+            $key = $variation ? (string) $variation->id : 'simple';
+            return CustomerRestockAlert::updateOrCreate(
+                ['customer_id' => $customer->id, 'product_id' => $product->id, 'variation_key' => $key],
+                ['variation_id' => $variation?->id, 'notified_at' => null],
+            );
+        })->filter()->values();
+        if ($alerts->isEmpty()) throw ValidationException::withMessages(['product_id' => ['This item is already in stock.']]);
+        $alerts->each->load(['product:id,name,slug,thumbnail,seller_id,status', 'variation:id,product_id,sku,attributes,is_active']);
+        return response()->json(['alerts' => $alerts], 201);
     }
 
     public function removeRestockAlert(Request $request, CustomerRestockAlert $alert): JsonResponse
@@ -123,6 +129,12 @@ class CustomerAccountController extends Controller
     {
         CustomerInSiteNotification::where('customer_id', $this->customer($request)->id)->whereNull('read_at')->update(['read_at' => now()]);
         return response()->json(['message' => 'Notifications marked as read.']);
+    }
+
+    public function clearNotifications(Request $request): JsonResponse
+    {
+        CustomerInSiteNotification::where('customer_id', $this->customer($request)->id)->delete();
+        return response()->json(['message' => 'Notifications cleared.']);
     }
 
     private function customer(Request $request): Customer
