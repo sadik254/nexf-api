@@ -143,7 +143,7 @@ class OrderLifecycleTest extends TestCase
         [$customer, $product] = $this->checkoutFixtures(1);
         Coupon::create(['code' => 'FREESHIP', 'discount_kind' => 'shipping', 'discount_type' => 'percentage', 'discount_value' => 0, 'is_active' => true]);
         $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
-        $this->withToken($token)->postJson('/api/customers/orders/preview', ['items' => [['product_id' => $product->id, 'quantity' => 1]], 'payment_method_id' => PaymentMethod::firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'FREESHIP', 'shipping_phone' => '01700000000'])
+        $this->withToken($token)->postJson('/api/customers/orders/preview', ['items' => [['product_id' => $product->id, 'quantity' => 1]], 'payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'FREESHIP', 'shipping_phone' => '01700000000'])
             ->assertOk()->assertJsonPath('shipping_charge', 20)->assertJsonPath('discount_total', 20)->assertJsonPath('total', 100);
     }
 
@@ -172,7 +172,7 @@ class OrderLifecycleTest extends TestCase
         $collection->products()->attach($product->id, ['sort_order' => 0]);
         Coupon::create(['code' => 'COLLECTION10', 'discount_kind' => 'products', 'discount_type' => 'fixed', 'discount_value' => 10, 'eligible_collection_ids' => [$collection->id], 'is_active' => true]);
         $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
-        $this->withToken($token)->postJson('/api/customers/orders/preview', ['items' => [['product_id' => $product->id, 'quantity' => 1]], 'payment_method_id' => PaymentMethod::firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'COLLECTION10', 'shipping_phone' => '01700000000'])
+        $this->withToken($token)->postJson('/api/customers/orders/preview', ['items' => [['product_id' => $product->id, 'quantity' => 1]], 'payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'COLLECTION10', 'shipping_phone' => '01700000000'])
             ->assertOk()->assertJsonPath('discount_total', 10)->assertJsonPath('total', 110);
     }
 
@@ -182,7 +182,7 @@ class OrderLifecycleTest extends TestCase
         FraudGuardSetting::create(['enabled' => true, 'ip_block' => false, 'device_block' => true, 'phone_blacklist' => false, 'fake_number_detection' => false]);
         FraudGuardBlock::create(['kind' => 'device', 'value' => '0123456789abcdef']);
         $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
-        $this->withToken($token)->postJson('/api/customers/orders/preview', ['items' => [['product_id' => $product->id, 'quantity' => 1]], 'payment_method_id' => PaymentMethod::firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'shipping_phone' => '01700000000', 'device_id' => '0123456789abcdef'])
+        $this->withToken($token)->postJson('/api/customers/orders/preview', ['items' => [['product_id' => $product->id, 'quantity' => 1]], 'payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'shipping_phone' => '01700000000', 'device_id' => '0123456789abcdef'])
             ->assertUnprocessable()->assertJsonValidationErrors('checkout');
     }
 
@@ -287,7 +287,7 @@ class OrderLifecycleTest extends TestCase
         $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
         $payload = [
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
-            'payment_method_id' => PaymentMethod::firstOrFail()->id,
+            'payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id,
             'shipping_method_id' => ShippingMethod::firstOrFail()->id,
         ];
         $this->withToken($token)->postJson('/api/customers/orders/preview', $payload)
@@ -339,7 +339,7 @@ class OrderLifecycleTest extends TestCase
                 ['product_id' => $firstProduct->id, 'quantity' => 1],
                 ['product_id' => $secondProduct->id, 'quantity' => 1],
             ],
-            'payment_method_id' => PaymentMethod::firstOrFail()->id,
+            'payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id,
             'shipping_method_id' => ShippingMethod::firstOrFail()->id,
         ];
 
@@ -494,7 +494,7 @@ class OrderLifecycleTest extends TestCase
         $this->withToken($token)->postJson('/api/admin/orders', [
             'guest' => true,
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
-            'payment_method_id' => PaymentMethod::firstOrFail()->id,
+            'payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id,
             'shipping_method_id' => ShippingMethod::firstOrFail()->id,
             'shipping_name' => 'Walk-in Customer',
             'shipping_phone' => '01711111111',
@@ -544,7 +544,7 @@ class OrderLifecycleTest extends TestCase
         $rates=$this->postJson('/api/seller/delivery-rates',['options'=>[['name'=>'Inside Dhaka','charge'=>31],['name'=>'Custom regional delivery','charge'=>57]]])->assertOk()->assertJsonCount(2)->assertJsonPath('0.name','Inside Dhaka')->assertJsonPath('0.is_custom',true)->json();
         $this->getJson('/api/seller/delivery-rates')->assertOk()->assertJsonPath('1.name','Custom regional delivery');
         $this->getJson('/api/shipping-methods')->assertOk()->assertJsonCount(1);
-        $payload=['items'=>[['product_id'=>$product->id,'quantity'=>1]],'payment_method_id'=>PaymentMethod::firstOrFail()->id,'shipping_method_id'=>ShippingMethod::whereNull('seller_id')->firstOrFail()->id];
+        $payload=['items'=>[['product_id'=>$product->id,'quantity'=>1]],'payment_method_id'=>PaymentMethod::where('code', 'cod')->firstOrFail()->id,'shipping_method_id'=>ShippingMethod::whereNull('seller_id')->firstOrFail()->id];
         $customerToken=$customer->createToken('test',['customer:basic'])->plainTextToken;
         $this->withToken($customerToken)->postJson('/api/customers/orders/preview',$payload)->assertOk()->assertJsonPath('shipping_charge',31)->assertJsonCount(2,'shipping_groups.0.shipping_options');
         $selected=$payload+['store_shipping_methods'=>[(string)$seller->id=>$rates[1]['shipping_method_id']]];
@@ -562,6 +562,41 @@ class OrderLifecycleTest extends TestCase
         $this->postJson('/api/customers/orders/preview',array_replace($payload,['shipping_method_id'=>$foreignMethod->id]))->assertUnprocessable();
     }
 
+    public function test_product_delivery_options_are_quoted_and_selected_per_store(): void
+    {
+        [$customer, $product] = $this->checkoutFixtures(3);
+        $product->update(['shipping_options' => [
+            ['label' => 'Inside Dhaka', 'price' => 60],
+            ['label' => 'Outside Dhaka', 'price' => 120],
+        ]]);
+        $payload = [
+            'items' => [['product_id' => $product->id, 'quantity' => 1]],
+            'payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id,
+            'shipping_method_id' => ShippingMethod::whereNull('seller_id')->where('is_store_option', false)->firstOrFail()->id,
+        ];
+        $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+
+        $this->withToken($token)->postJson('/api/customers/orders/preview', $payload + ['store_delivery_options' => ['house' => 'outside dhaka']])
+            ->assertOk()
+            ->assertJsonPath('shipping_charge', 120)
+            ->assertJsonPath('shipping_groups.0.shipping_method_id', null)
+            ->assertJsonPath('shipping_groups.0.shipping_method_name', 'Outside Dhaka')
+            ->assertJsonPath('shipping_groups.0.shipping_options.0.key', 'inside dhaka');
+
+        $order = $this->withToken($token)->postJson('/api/customers/orders', $payload + [
+            'store_delivery_options' => ['house' => 'outside dhaka'],
+            'shipping_name' => 'Customer',
+            'shipping_phone' => '01700000000',
+            'shipping_address' => 'Dhaka',
+        ])->assertCreated()->json('order');
+        $this->assertDatabaseHas('order_store_groups', [
+            'order_id' => $order['id'],
+            'shipping_method_id' => null,
+            'shipping_method_name' => 'Outside Dhaka',
+            'shipping_charge' => 120,
+        ]);
+    }
+
     public function test_house_delivery_options_do_not_change_other_store_defaults(): void
     {
         [$customer,$houseProduct]=$this->checkoutFixtures(3);
@@ -575,7 +610,7 @@ class OrderLifecycleTest extends TestCase
         $this->getJson('/api/shipping-methods')->assertOk()->assertJsonCount(1);
         $this->assertDatabaseHas('shipping_methods',['seller_id'=>null,'is_store_option'=>false,'charge'=>20]);
         $this->postJson('/api/admin/shipping-methods/'.$saved[0]['shipping_method_id'],['charge'=>1])->assertNotFound();
-        $payload=['items'=>[['product_id'=>$houseProduct->id,'quantity'=>1],['product_id'=>$other->id,'quantity'=>1]],'payment_method_id'=>PaymentMethod::firstOrFail()->id,'shipping_method_id'=>ShippingMethod::whereNull('seller_id')->where('is_store_option',false)->firstOrFail()->id];
+        $payload=['items'=>[['product_id'=>$houseProduct->id,'quantity'=>1],['product_id'=>$other->id,'quantity'=>1]],'payment_method_id'=>PaymentMethod::where('code', 'cod')->firstOrFail()->id,'shipping_method_id'=>ShippingMethod::whereNull('seller_id')->where('is_store_option',false)->firstOrFail()->id];
         $this->withToken($customer->createToken('test',['customer:basic'])->plainTextToken)->postJson('/api/customers/orders/preview',$payload)->assertOk()->assertJsonPath('shipping_charge',37)->assertJsonPath('shipping_groups.0.shipping_method_name','House priority')->assertJsonPath('shipping_groups.1.shipping_charge',20);
         $this->postJson('/api/customers/orders/preview',$payload+['store_shipping_methods'=>[(string)$seller->id=>$saved[0]['shipping_method_id']]])->assertUnprocessable();
         $this->withToken($seller->createToken('test',['seller:basic'])->plainTextToken)->postJson('/api/seller/delivery-rates',['options'=>[['shipping_method_id'=>$saved[0]['shipping_method_id'],'name'=>'Stolen house option','charge'=>1]]])->assertForbidden();

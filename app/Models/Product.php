@@ -35,8 +35,9 @@ class Product extends Model
         'videos',
         'default_buying_price',
         'default_selling_price',
-        'compare_at_price', 'option_groups', 'size_chart_id',
+        'compare_at_price', 'discount_kind', 'discount_value', 'option_groups', 'size_chart_id',
         'weight_kg',
+        'shipping_options',
         'homepage_trending', 'homepage_new_arrival', 'homepage_featured', 'homepage_sort_order',
     ];
 
@@ -56,7 +57,9 @@ class Product extends Model
             'videos' => 'array',
             'weight_kg' => 'decimal:2',
             'option_groups' => 'array',
+            'shipping_options' => 'array',
             'compare_at_price' => 'decimal:2',
+            'discount_value' => 'decimal:2',
             'homepage_trending' => 'boolean',
             'homepage_new_arrival' => 'boolean',
             'homepage_featured' => 'boolean',

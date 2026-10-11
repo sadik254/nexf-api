@@ -17,7 +17,7 @@ class StoreShippingService
      * @param array<int, array{product: Product, subtotal: float|int|string}> $lines
      * @return array{groups: array<int, array<string, mixed>>, total: float}
      */
-    public function quote(array $lines, ShippingMethod $shippingMethod, array $selectedMethods = []): array
+    public function quote(array $lines, ShippingMethod $shippingMethod, array $selectedMethods = [], array $selectedDeliveryOptions = []): array
     {
         $groups = [];
         $sellerIds = collect($lines)->pluck('product.seller_id')->filter()->unique()->values();
@@ -32,6 +32,34 @@ class StoreShippingService
 
             if (!isset($groups[$key])) {
                 $selectionKey = $sellerId === null ? 'house' : (string) $sellerId;
+                $productOptions = [];
+                foreach ($lines as $storeLine) {
+                    if (($storeLine['product']->seller_id === null ? 'platform' : 'seller:' . (int) $storeLine['product']->seller_id) !== $key) continue;
+                    foreach ($storeLine['product']->shipping_options ?? [] as $option) {
+                        $label = trim((string) ($option['label'] ?? ''));
+                        if ($label === '') continue;
+                        $optionKey = mb_strtolower($label);
+                        if (!isset($productOptions[$optionKey]) || (float) $option['price'] > $productOptions[$optionKey]['charge']) {
+                            $productOptions[$optionKey] = ['key' => $optionKey, 'shipping_method_id' => null, 'code' => 'product_option', 'name' => $label, 'charge' => (float) $option['price'], 'currency' => 'BDT'];
+                        }
+                    }
+                }
+                if ($productOptions) {
+                    $options = array_values($productOptions);
+                    $selectedKey = mb_strtolower(trim((string) ($selectedDeliveryOptions[$selectionKey] ?? '')));
+                    $selectedOption = collect($options)->firstWhere('key', $selectedKey) ?? $options[0];
+                    $groups[$key] = [
+                        'seller_id' => $sellerId,
+                        'shipping_method_id' => null,
+                        'store_name' => $sellerId === null ? (\App\Models\Store::primary()?->name ?? config('app.name')) : ($product->seller?->store_name ?? 'Seller Store'),
+                        'subtotal' => 0.0,
+                        'shipping_method_code' => $selectedOption['code'],
+                        'shipping_method_name' => $selectedOption['name'],
+                        'shipping_charge' => $selectedOption['charge'],
+                        'shipping_currency' => $selectedOption['currency'],
+                        'shipping_options' => $options,
+                    ];
+                } else {
                 $custom = $sellerId === null ? (bool)\App\Models\Store::primary()?->delivery_options_customized : (bool)$customized->get($sellerId);
                 $storeMethods = $methods->filter(fn($method)=>$custom ? ($sellerId === null ? $method->seller_id === null && $method->is_store_option : (int)$method->seller_id === $sellerId) : $method->seller_id === null && !$method->is_store_option);
                 if ($storeMethods->isEmpty()) throw ValidationException::withMessages(['store_shipping_methods'=>['This store has no available delivery option.']]);
@@ -59,6 +87,7 @@ class StoreShippingService
                     'shipping_currency' => $selectedMethod->currency,
                     'shipping_options' => $options,
                 ];
+                }
             }
 
             $groups[$key]['subtotal'] = round(

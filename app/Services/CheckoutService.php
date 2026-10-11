@@ -49,7 +49,7 @@ class CheckoutService
         $shipping = $this->storeShipping->quote(array_map(fn ($item) => [
             'product' => $item['product'],
             'subtotal' => $item['quote']['subtotal'],
-        ], $items), $shippingMethod, $data['store_shipping_methods'] ?? []);
+        ], $items), $shippingMethod, $data['store_shipping_methods'] ?? [], $data['store_delivery_options'] ?? []);
         $coupon = $this->resolveCoupon($data['coupon_code'] ?? null, $subtotal, $customer, $items, isset($data['exclude_order_id']) ? (int) $data['exclude_order_id'] : null);
         $discount = $coupon ? $this->discountForCart($coupon, $items, $subtotal, (float) $shipping['total']) : 0.0;
         $total = round($subtotal + $shipping['total'] - $discount, 2);

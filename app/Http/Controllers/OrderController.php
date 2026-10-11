@@ -371,7 +371,7 @@ class OrderController extends Controller
 
             $paymentMethod = PaymentMethod::query()->active()->findOrFail($data['payment_method_id']);
             $shippingMethod = ShippingMethod::query()->whereNull('seller_id')->where('is_store_option',false)->active()->findOrFail($data['shipping_method_id']);
-            $shipping = $this->storeShipping->quote($shippingLines, $shippingMethod, $data['store_shipping_methods'] ?? []);
+            $shipping = $this->storeShipping->quote($shippingLines, $shippingMethod, $data['store_shipping_methods'] ?? [], $data['store_delivery_options'] ?? []);
             $coupon = $preview['coupon'] ? Coupon::query()->lockForUpdate()->find($preview['coupon']->id) : null;
             if ($coupon && ($reason = $coupon->unusableReason())) throw ValidationException::withMessages(['coupon_code' => [$reason]]);
             if ($coupon && $customer && $coupon->per_customer_limit !== null && CouponRedemption::query()->where('coupon_id', $coupon->id)->where('customer_id', $customer->id)->count() >= $coupon->per_customer_limit) {
@@ -853,7 +853,7 @@ class OrderController extends Controller
                 $shippingLines[] = ['product' => $product, 'subtotal' => $lineSubtotal];
             }
 
-            $shipping = $this->storeShipping->quote($shippingLines, $shippingMethod, $data['store_shipping_methods'] ?? []);
+            $shipping = $this->storeShipping->quote($shippingLines, $shippingMethod, $data['store_shipping_methods'] ?? [], $data['store_delivery_options'] ?? []);
             $coupon = $preview['coupon'] ? Coupon::query()->lockForUpdate()->find($preview['coupon']->id) : null;
             if ($coupon && ($reason = $coupon->unusableReason())) {
                 throw ValidationException::withMessages(['coupon_code' => [$reason]]);
@@ -970,6 +970,8 @@ class OrderController extends Controller
             'coupon_code' => ['nullable', 'string', 'max:64'],
             'store_shipping_methods' => ['nullable', 'array'],
             'store_shipping_methods.*' => ['integer'],
+            'store_delivery_options' => ['nullable', 'array'],
+            'store_delivery_options.*' => ['string', 'max:100'],
             'device_id' => ['nullable', 'string', 'regex:/^[a-f0-9]{16,64}$/i'],
             'shipping_email' => ['sometimes', 'nullable', 'email', 'max:255'],
             'shipping_area' => ['sometimes', 'nullable', 'string', 'max:150'],

@@ -119,6 +119,11 @@ class ProductController extends Controller
             ->where('quantity_remaining', '>', 0)->orderByRaw('received_at is null')->orderBy('received_at')->orderBy('id')->first();
         return array_merge($product->toArray(), [
             'current_buying_price' => $costLot?->buying_price,
+            'available_quantity' => (int) ProductLot::query()
+                ->when($product->product_type === 'variable',
+                    fn ($query) => $query->whereIn('variation_id', $product->variations->pluck('id')),
+                    fn ($query) => $query->where('product_id', $product->id)->whereNull('variation_id'))
+                ->sum('quantity_remaining'),
         ]);
     }
 
@@ -193,6 +198,11 @@ class ProductController extends Controller
             'initial_quantity' => ['sometimes', 'integer', 'min:1'],
             'initial_buying_price' => ['required_with:initial_quantity', 'prohibited_without:initial_quantity', 'numeric', 'min:0'],
             'compare_at_price' => ['nullable', 'numeric', 'min:0'],
+            'discount_kind' => ['nullable', 'in:flat,percent'],
+            'discount_value' => ['nullable', 'numeric', 'min:0'],
+            'shipping_options' => ['nullable', 'array', 'max:20'],
+            'shipping_options.*.label' => ['required', 'string', 'max:100'],
+            'shipping_options.*.price' => ['required', 'numeric', 'min:0', 'max:999999'],
             'weight_kg' => ['nullable', 'numeric', 'min:0.1', 'max:999999'],
             'size_chart_id' => ['nullable', 'integer', 'exists:size_charts,id'],
             'homepage_trending' => ['nullable', 'boolean'],
@@ -268,6 +278,9 @@ class ProductController extends Controller
                 'videos' => $data['videos'] ?? null,
                 'default_selling_price' => $data['default_selling_price'] ?? null,
                 'compare_at_price' => $data['compare_at_price'] ?? null,
+                'discount_kind' => $data['discount_kind'] ?? null,
+                'discount_value' => $data['discount_value'] ?? null,
+                'shipping_options' => $data['shipping_options'] ?? null,
                 'weight_kg' => $data['weight_kg'] ?? 0.5,
                 'size_chart_id' => $data['size_chart_id'] ?? null,
                 'homepage_trending' => (bool) ($data['homepage_trending'] ?? false),
@@ -314,6 +327,7 @@ class ProductController extends Controller
         if (!$authorizedSellerProduct) $this->authorizeProductWrite($product, $request->user());
 
         $data = $request->validate([
+            'seller_id' => ['sometimes', 'nullable', 'integer', 'exists:sellers,id'],
             'category_id' => ['sometimes', 'integer', 'exists:product_categories,id'],
             'brand_id' => ['sometimes', 'nullable', 'integer', 'exists:brands,id'],
             'tag_ids' => ['sometimes', 'array'],
@@ -366,6 +380,12 @@ class ProductController extends Controller
             'clear_videos' => ['sometimes', 'boolean'],
             'default_selling_price' => ['sometimes', 'numeric', 'min:0'],
             'compare_at_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'discount_kind' => ['sometimes', 'nullable', 'in:flat,percent'],
+            'discount_value' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'shipping_options' => ['sometimes', 'nullable', 'array', 'max:20'],
+            'shipping_options.*.label' => ['required', 'string', 'max:100'],
+            'shipping_options.*.price' => ['required', 'numeric', 'min:0', 'max:999999'],
+            'clear_shipping_options' => ['sometimes', 'boolean'],
             'weight_kg' => ['sometimes', 'nullable', 'numeric', 'min:0.1', 'max:999999'],
             'size_chart_id' => ['sometimes', 'nullable', 'integer', 'exists:size_charts,id'],
             'homepage_trending' => ['sometimes', 'boolean'],
@@ -373,6 +393,10 @@ class ProductController extends Controller
             'homepage_featured' => ['sometimes', 'boolean'],
             'homepage_sort_order' => ['sometimes', 'integer', 'min:0'],
         ]);
+
+        if (array_key_exists('seller_id', $data) && (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin')) {
+            abort(403, 'Only super admins can change product ownership.');
+        }
 
         $data = $this->normalizeSpecifications($data);
         if (array_key_exists('option_groups', $data)) $this->validateOptionGroups($data['option_groups'] ?? []);
@@ -393,6 +417,8 @@ class ProductController extends Controller
         unset($data['clear_option_groups']);
         if (!empty($data['clear_videos'])) $data['videos'] = [];
         unset($data['clear_videos']);
+        if (!empty($data['clear_shipping_options'])) $data['shipping_options'] = [];
+        unset($data['clear_shipping_options']);
 
         if (array_key_exists('slug', $data)) {
             $product->slug = $data['slug'];
@@ -440,6 +466,7 @@ class ProductController extends Controller
         if (!empty($data['clear_gallery'])) $galleryUrls = [];
 
         $product->fill([
+            'seller_id' => array_key_exists('seller_id', $data) ? $data['seller_id'] : $product->seller_id,
             'category_id' => $data['category_id'] ?? $product->category_id,
             'brand_id' => array_key_exists('brand_id', $data) ? $data['brand_id'] : $product->brand_id,
             'name' => $data['name'] ?? $product->name,
@@ -457,6 +484,9 @@ class ProductController extends Controller
             'videos' => array_key_exists('videos', $data) ? $data['videos'] : $product->videos,
             'default_selling_price' => $data['default_selling_price'] ?? $product->default_selling_price,
             'compare_at_price' => array_key_exists('compare_at_price', $data) ? $data['compare_at_price'] : $product->compare_at_price,
+            'discount_kind' => array_key_exists('discount_kind', $data) ? $data['discount_kind'] : $product->discount_kind,
+            'discount_value' => array_key_exists('discount_value', $data) ? $data['discount_value'] : $product->discount_value,
+            'shipping_options' => array_key_exists('shipping_options', $data) ? $data['shipping_options'] : $product->shipping_options,
             'weight_kg' => array_key_exists('weight_kg', $data) ? $data['weight_kg'] : $product->weight_kg,
             'size_chart_id' => array_key_exists('size_chart_id', $data) ? $data['size_chart_id'] : $product->size_chart_id,
             'homepage_trending' => $data['homepage_trending'] ?? $product->homepage_trending,

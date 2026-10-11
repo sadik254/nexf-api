@@ -24,12 +24,14 @@ class ProductEditorFieldsTest extends TestCase
             'specification_tables' => [['title' => 'Material', 'rows' => [['label' => 'Fabric', 'value' => 'Cotton']]]],
             'videos' => ['https://example.com/demo.mp4'],
             'weight_kg' => 0.75,
+            'shipping_options' => [['label' => 'Inside Dhaka', 'price' => 60]],
         ]);
 
         $this->assertSame('Cotton', $product->specification_tables[0]['rows'][0]['value']);
         $this->assertSame(['https://example.com/demo.mp4'], $product->videos);
         $this->assertEquals(0.75, $product->weight_kg);
-        $this->assertTrue(\Schema::hasColumns('products', ['specification_tables', 'videos', 'weight_kg']));
+        $this->assertSame('Inside Dhaka', $product->shipping_options[0]['label']);
+        $this->assertTrue(\Schema::hasColumns('products', ['specification_tables', 'videos', 'weight_kg', 'shipping_options']));
     }
 
     public function test_product_description_removes_unsafe_markup(): void
@@ -67,19 +69,29 @@ class ProductEditorFieldsTest extends TestCase
         $this->assertNotNull($assignedId);
         $basic = Admin::create(['name' => 'Basic', 'email' => 'basic-editor@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);
         $this->withToken($basic->createToken('test', ['admin:basic'])->plainTextToken)->postJson('/api/admin/products', ['seller_id' => $seller->id, 'category_id' => $category->id, 'name' => 'Forbidden coat', 'product_type' => 'simple'])->assertForbidden();
+        $houseProduct = Product::create(['category_id' => $category->id, 'name' => 'House coat', 'slug' => 'house-coat', 'product_type' => 'simple', 'status' => 'draft']);
+        $this->withToken($token)->postJson("/api/admin/products/{$houseProduct->id}", ['seller_id' => $seller->id])->assertOk()->assertJsonPath('product.seller_id', $seller->id);
+        $this->withToken($basic->createToken('test', ['admin:basic'])->plainTextToken)->postJson("/api/admin/products/{$houseProduct->id}", ['seller_id' => null])->assertForbidden();
 
         $this->withToken($token)->postJson("/api/admin/sellers/{$seller->id}/products/{$product->id}", [
             'thumbnail_media_id' => $asset->id,
             'videos' => ['https://example.test/coat.mp4'],
             'description' => '<p>Coat</p><img src="https://example.test/coat.jpg" alt="Coat">',
             'compare_at_price' => 700,
+            'discount_kind' => 'flat',
+            'discount_value' => 100,
+            'shipping_options' => [['label' => 'Inside Dhaka', 'price' => 60], ['label' => 'Outside Dhaka', 'price' => 120]],
             'option_groups' => [['key' => 'Color', 'label' => 'Color', 'display_type' => 'swatch', 'values' => [['value' => 'Pink', 'label' => 'Pink', 'swatch' => '#f5a5c8']]], ['key' => 'Pattern', 'label' => 'Pattern', 'display_type' => 'image', 'values' => [['value' => 'Floral', 'label' => 'Floral', 'image_url' => 'https://example.test/floral.jpg']]]],
         ])->assertOk()->assertJsonPath('product.thumbnail', $asset->url)
             ->assertJsonPath('product.videos.0', 'https://example.test/coat.mp4')
             ->assertJsonPath('product.option_groups.0.values.0.swatch', '#f5a5c8')
             ->assertJsonPath('product.option_groups.1.values.0.image_url', 'https://example.test/floral.jpg')
-            ->assertJsonPath('product.compare_at_price', '700.00');
+            ->assertJsonPath('product.compare_at_price', '700.00')
+            ->assertJsonPath('product.discount_kind', 'flat')
+            ->assertJsonPath('product.discount_value', '100.00')
+            ->assertJsonPath('product.shipping_options.1.label', 'Outside Dhaka');
         $this->assertStringContainsString('<img src="https://example.test/coat.jpg"', $product->fresh()->description);
+        $this->withToken($token)->postJson("/api/admin/sellers/{$seller->id}/products/{$product->id}", ['clear_shipping_options' => true])->assertOk()->assertJsonPath('product.shipping_options', []);
         $this->withToken($token)->postJson("/api/admin/products/{$product->id}/variations", ['attributes' => ['Color' => 'Pink', 'Size' => 'M'], 'default_selling_price' => 500])
             ->assertCreated()->assertJsonPath('variation.attributes.Color', 'Pink');
         $this->withToken($token)->postJson("/api/admin/sellers/{$seller->id}/products/{$product->id}", ['product_type' => 'simple'])
@@ -100,7 +112,7 @@ class ProductEditorFieldsTest extends TestCase
         ProductLot::create(['product_id' => $product->id, 'lot_number' => 'SALE-1', 'buying_price' => 200, 'selling_price' => 360, 'quantity' => 5, 'quantity_remaining' => 5]);
 
         $this->withToken($token)->getJson("/api/admin/products/{$product->id}")
-            ->assertOk()->assertJsonPath('default_selling_price', 360)->assertJsonPath('compare_at_price', '500.00')->assertJsonPath('current_buying_price', 200);
+            ->assertOk()->assertJsonPath('default_selling_price', 360)->assertJsonPath('compare_at_price', '500.00')->assertJsonPath('current_buying_price', 200)->assertJsonPath('available_quantity', 5);
     }
 
     public function test_storefront_and_checkout_use_product_price_instead_of_lot_selling_snapshot(): void
