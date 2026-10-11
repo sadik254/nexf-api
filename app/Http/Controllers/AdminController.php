@@ -55,7 +55,7 @@ class AdminController extends Controller
         $sellers = DB::table('sellers')->whereNull('roster_archived_at')
             ->when($role !== null && $role !== 'seller', fn ($q) => $q->whereRaw('1 = 0'))
             ->when($search !== '', fn ($q) => $q->where(fn ($q) => $q->where('seller_name', 'like', "%{$search}%")->orWhere('store_name', 'like', "%{$search}%")->orWhere('email', 'like', "%{$search}%")))
-            ->selectRaw("id as actor_id, 'seller' as actor_type, COALESCE(NULLIF(seller_name, ''), store_name) as name, email, 'seller' as role, CASE WHEN status = 'approved' AND is_active = 1 THEN 'active' WHEN status IN ('rejected', 'suspended') THEN 'suspended' ELSE 'invited' END as status, store_name as linked_to, created_at");
+            ->selectRaw("id as actor_id, 'seller' as actor_type, COALESCE(NULLIF(seller_name, ''), store_name) as name, email, 'seller' as role, CASE WHEN status IN ('rejected', 'suspended') OR (status = 'approved' AND is_active = 0) THEN 'suspended' WHEN status = 'approved' THEN 'active' ELSE 'invited' END as status, store_name as linked_to, created_at");
         $resellers = DB::table('resellers')
             ->when($role !== null && $role !== 'reseller', fn ($q) => $q->whereRaw('1 = 0'))
             ->when($search !== '', fn ($q) => $q->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('email', 'like', "%{$search}%")))
