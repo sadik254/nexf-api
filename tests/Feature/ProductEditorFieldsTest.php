@@ -115,6 +115,25 @@ class ProductEditorFieldsTest extends TestCase
             ->assertOk()->assertJsonPath('default_selling_price', 360)->assertJsonPath('compare_at_price', '500.00')->assertJsonPath('current_buying_price', 200)->assertJsonPath('available_quantity', 5);
     }
 
+    public function test_product_editor_can_save_product_level_buying_cost(): void
+    {
+        $admin = Admin::create(['name' => 'Cost Editor', 'email' => 'cost-editor@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $category = ProductCategory::create(['name' => 'Cost Items', 'slug' => 'cost-items']);
+        $token = $admin->createToken('test', ['admin:basic'])->plainTextToken;
+        $productId = $this->withToken($token)->postJson('/api/admin/products', [
+            'category_id' => $category->id,
+            'name' => 'Costed item',
+            'product_type' => 'simple',
+            'default_selling_price' => 500,
+            'default_buying_price' => 240,
+        ])->assertCreated()->assertJsonPath('product.default_buying_price', 240)->json('product.id');
+
+        $this->withToken($token)->postJson("/api/admin/products/{$productId}", ['default_buying_price' => 260])
+            ->assertOk()->assertJsonPath('product.default_buying_price', 260);
+        $this->withToken($token)->postJson("/api/admin/products/{$productId}", ['default_buying_price' => -1])
+            ->assertUnprocessable();
+    }
+
     public function test_storefront_and_checkout_use_product_price_instead_of_lot_selling_snapshot(): void
     {
         $category = ProductCategory::create(['name' => 'Jackets', 'slug' => 'pricing-jackets']);
