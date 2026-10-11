@@ -16,7 +16,8 @@ class InventoryController extends Controller
     public function historyAdmin(Request $request): JsonResponse
     {
         abort_unless($request->user() instanceof Admin, 403);
-        return response()->json($this->history($request, null));
+        $scope = $request->validate(['scope' => ['sometimes', 'in:house,all']])['scope'] ?? 'house';
+        return response()->json($this->history($request, null, $scope === 'all'));
     }
 
     public function historySeller(Request $request): JsonResponse
@@ -26,7 +27,7 @@ class InventoryController extends Controller
         return response()->json($this->history($request, $seller->id));
     }
 
-    private function history(Request $request, ?int $sellerId): LengthAwarePaginator
+    private function history(Request $request, ?int $sellerId, bool $allStores = false): LengthAwarePaginator
     {
         $filters = $request->validate([
             'product_id' => ['sometimes', 'integer', 'min:1'],
@@ -39,10 +40,10 @@ class InventoryController extends Controller
             ->whereHas('lot', function ($lots) use ($sellerId, $filters) {
                 $lots->where(function ($query) use ($sellerId, $filters) {
                     $query->whereHas('product', fn ($product) => $product
-                        ->where('seller_id', $sellerId)
+                        ->when(!$allStores, fn ($q) => $q->where('seller_id', $sellerId))
                         ->when(isset($filters['product_id']), fn ($q) => $q->whereKey($filters['product_id'])))
                         ->orWhereHas('variation.product', fn ($product) => $product
-                            ->where('seller_id', $sellerId)
+                            ->when(!$allStores, fn ($q) => $q->where('seller_id', $sellerId))
                             ->when(isset($filters['product_id']), fn ($q) => $q->whereKey($filters['product_id'])));
                 })->when(isset($filters['variation_id']), fn ($q) => $q->where('variation_id', $filters['variation_id']));
             })
@@ -53,7 +54,9 @@ class InventoryController extends Controller
     public function indexAdmin(Request $request): JsonResponse
     {
         abort_unless($request->user() instanceof Admin, 403);
-        return response()->json($this->rows(Product::query()->whereNull('seller_id'), $request));
+        $scope = $request->validate(['scope' => ['sometimes', 'in:house,all']])['scope'] ?? 'house';
+        $query = Product::query()->when($scope !== 'all', fn ($q) => $q->whereNull('seller_id'));
+        return response()->json($this->rows($query, $request));
     }
 
     public function indexSeller(Request $request): JsonResponse

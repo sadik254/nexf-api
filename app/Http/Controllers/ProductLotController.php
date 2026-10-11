@@ -124,9 +124,6 @@ class ProductLotController extends Controller
             abort(403, 'Forbidden.');
         }
 
-        if ($actor instanceof Admin && $product->seller_id !== null) {
-            abort(403, 'Forbidden.');
-        }
     }
 
     private function recordReceipt(ProductLot $lot, $actor): void

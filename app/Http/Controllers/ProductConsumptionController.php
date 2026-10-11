@@ -60,8 +60,5 @@ class ProductConsumptionController extends Controller
             abort(403, 'Forbidden.');
         }
 
-        if ($actor instanceof Admin && $product->seller_id !== null) {
-            abort(403, 'Forbidden.');
-        }
     }
 }

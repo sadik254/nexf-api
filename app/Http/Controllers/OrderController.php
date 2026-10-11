@@ -63,6 +63,8 @@ class OrderController extends Controller
             'shipping_name' => ['required', 'string', 'max:255'],
             'shipping_phone' => ['required', 'string', 'max:32'],
             'shipping_address' => ['required', 'string'],
+            'shipping_area' => ['nullable', 'string', 'max:150'],
+            'shipping_district' => ['nullable', 'string', 'max:150'],
         ] + $this->checkoutRules());
 
         $customer = !empty($data['customer_id']) ? Customer::findOrFail($data['customer_id']) : null;
@@ -118,7 +120,6 @@ class OrderController extends Controller
 
         $query = Order::query()
             ->with(['customer', 'items', 'storeGroups'])
-            ->whereDoesntHave('items', fn ($q) => $q->whereNotNull('seller_id'))
             ->latest();
 
         return response()->json($this->paginateOrderList($query, $request));
@@ -128,10 +129,6 @@ class OrderController extends Controller
     {
         if (!$request->user() instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
-        }
-
-        if ($order->items()->whereNotNull('seller_id')->exists()) {
-            return response()->json(['message' => 'Seller orders are available through the super-admin seller-order endpoints.'], 403);
         }
 
         return response()->json($order->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']));
@@ -236,6 +233,8 @@ class OrderController extends Controller
             'shipping_phone' => ['required', 'string', 'max:32'],
             'shipping_email' => ['nullable', 'email', 'max:255'],
             'shipping_address' => ['required', 'string'],
+            'shipping_area' => ['nullable', 'string', 'max:150'],
+            'shipping_district' => ['nullable', 'string', 'max:150'],
             'notes' => ['nullable', 'string'],
             'internal_note' => ['nullable', 'string', 'max:5000'],
             'paid_amount' => ['nullable', 'numeric', 'min:0'],
@@ -625,10 +624,6 @@ class OrderController extends Controller
             'turnstile_token' => ['nullable', 'string', 'max:2048'],
         ]);
 
-        if (!$isAdminOrder && ($data['shipping_email'] ?? null) !== null) {
-            throw ValidationException::withMessages(['shipping_email' => ['Only administrators may set an order contact email.']]);
-        }
-
         if (!$isAdminOrder) {
             $this->turnstile->assertHuman($request);
         }
@@ -694,7 +689,10 @@ class OrderController extends Controller
                 'shipping_email' => $data['shipping_email'] ?? $customer?->email,
                 'is_guest' => $isGuestOrder,
                 'ip_address' => $data['ip_address'],
+                'device_id' => $data['device_id'] ?? null,
                 'shipping_address' => $data['shipping_address'],
+                'shipping_area' => $data['shipping_area'] ?? null,
+                'shipping_district' => $data['shipping_district'] ?? null,
                 'notes' => $data['notes'] ?? null,
                 'placed_at' => now(),
             ]);
@@ -903,6 +901,9 @@ class OrderController extends Controller
             'store_shipping_methods' => ['nullable', 'array'],
             'store_shipping_methods.*' => ['integer'],
             'device_id' => ['nullable', 'string', 'regex:/^[a-f0-9]{16,64}$/i'],
+            'shipping_email' => ['sometimes', 'nullable', 'email', 'max:255'],
+            'shipping_area' => ['sometimes', 'nullable', 'string', 'max:150'],
+            'shipping_district' => ['sometimes', 'nullable', 'string', 'max:150'],
         ];
     }
 

@@ -227,8 +227,5 @@ class ProductVariationController extends Controller
             abort(403, 'Forbidden.');
         }
 
-        if ($actor instanceof Admin && $product->seller_id !== null && $actor->role !== 'super_admin') {
-            abort(403, 'Forbidden.');
-        }
     }
 }

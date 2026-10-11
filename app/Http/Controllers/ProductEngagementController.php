@@ -63,12 +63,13 @@ class ProductEngagementController extends Controller
 
     public function reviewsForAdmin(Request $request): JsonResponse
     {
-        return $this->moderationReviews($request, null);
+        $sellerId = $this->adminSellerFilter($request);
+        return $this->moderationReviews($request, $sellerId);
     }
 
     public function moderateReview(Review $review, Request $request): JsonResponse
     {
-        abort_if($review->product()->whereNotNull('seller_id')->exists(), 403, 'Seller product reviews must be moderated by the product owner.');
+        abort_unless($request->user() instanceof Admin, 403);
 
         return $this->applyReviewModeration($review, $request);
     }
@@ -83,7 +84,8 @@ class ProductEngagementController extends Controller
 
     public function questionsForAdmin(Request $request): JsonResponse
     {
-        return $this->moderationQuestions($request, null);
+        $sellerId = $this->adminSellerFilter($request);
+        return $this->moderationQuestions($request, $sellerId);
     }
 
     public function questionsForSeller(Request $request): JsonResponse
@@ -176,9 +178,9 @@ class ProductEngagementController extends Controller
         $reviews = Review::query()->withCount('likes')
             ->with(['customer:id,name,profile_picture', 'product:id,name,slug,thumbnail,seller_id', 'product.seller:id,store_name,store_slug', 'orderItem:id,variation_attributes'])
             ->when($status !== 'all', fn ($query) => $query->where('status', $status))
-            ->whereHas('product', fn ($query) => $sellerId === null
-                ? $query->whereNull('seller_id')
-                : $query->where('seller_id', $sellerId))
+            ->whereHas('product', fn ($query) => $sellerId === -1
+                ? $query
+                : ($sellerId === null ? $query->whereNull('seller_id') : $query->where('seller_id', $sellerId)))
             ->latest()
             ->paginate($perPage);
 
@@ -191,9 +193,9 @@ class ProductEngagementController extends Controller
         $perPage = max(1, min((int) $request->query('per_page', 25), 100));
         $questions = ProductQuestion::query()
             ->with(['customer:id,name', 'product:id,name,slug,thumbnail,gallery,seller_id'])
-            ->whereHas('product', fn ($query) => $sellerId === null
-                ? $query->whereNull('seller_id')
-                : $query->where('seller_id', $sellerId))
+            ->whereHas('product', fn ($query) => $sellerId === -1
+                ? $query
+                : ($sellerId === null ? $query->whereNull('seller_id') : $query->where('seller_id', $sellerId)))
             ->when($state === 'unanswered', fn ($query) => $query->whereNull('answer')->where('status', '!=', 'rejected'))
             ->when($state === 'answered', fn ($query) => $query->whereNotNull('answer')->where('status', '!=', 'rejected'))
             ->when($state === 'rejected', fn ($query) => $query->where('status', 'rejected'))
@@ -212,8 +214,16 @@ class ProductEngagementController extends Controller
     {
         $actor = $request->user();
         $sellerId = $question->product()->value('seller_id');
-        abort_unless(($actor instanceof Admin && $sellerId === null) ||
+        abort_unless(($actor instanceof Admin) ||
             ($actor instanceof Seller && (int) $sellerId === (int) $actor->id), 403);
+    }
+
+    private function adminSellerFilter(Request $request): ?int
+    {
+        abort_unless($request->user() instanceof Admin, 403);
+        $data = $request->validate(['seller_id' => ['sometimes', 'regex:/^(house|[1-9][0-9]*)$/']]);
+        if (!array_key_exists('seller_id', $data)) return -1;
+        return $data['seller_id'] === 'house' ? null : (int) $data['seller_id'];
     }
 
     public function editQuestion(Request $request, ProductQuestion $question): JsonResponse
@@ -248,14 +258,14 @@ class ProductEngagementController extends Controller
 
     public function editReview(Request $request, Review $review): JsonResponse
     {
-        abort_unless($request->user() instanceof Admin && $review->product()->value('seller_id') === null, 403);
+        abort_unless($request->user() instanceof Admin, 403);
         $data=$request->validate(['comment'=>['nullable','string','max:3000'],'images'=>['present','array','max:6'],'images.*'=>['url:http,https'],'videos'=>['present','array','max:2'],'videos.*'=>['url:http,https'],'seller_response'=>['nullable','string','max:2000'],'rating'=>['prohibited']]);
         $updated=DB::transaction(function()use($review,$data){$locked=Review::whereKey($review->id)->lockForUpdate()->firstOrFail();foreach(['images','videos'] as $field){if(array_diff($data[$field],$locked->$field??[]))throw ValidationException::withMessages([$field=>['Moderators may only remove existing review media.']]);}$locked->update($data);return $locked;});
         return response()->json(['message'=>'Review updated.','review'=>$updated]);
     }
     public function deleteReview(Request $request, Review $review): JsonResponse
     {
-        abort_unless($request->user() instanceof Admin && $review->product()->value('seller_id') === null,403);
+        abort_unless($request->user() instanceof Admin,403);
         $review->delete();return response()->json(['message'=>'Review deleted.']);
     }
     public function respondToReview(Request $request, Review $review): JsonResponse

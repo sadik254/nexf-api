@@ -488,11 +488,6 @@ class ProductController extends Controller
         if ($actor instanceof Seller && $product->seller_id !== $actor->id) {
             abort(403, 'Forbidden.');
         }
-        // Seller products are exposed to administrators only through the
-        // seller-scoped endpoints, which apply the selected-store boundary.
-        if ($actor instanceof Admin && $product->seller_id !== null) {
-            abort(403, 'Forbidden.');
-        }
     }
 
     private function authorizeProductWrite(Product $product, $actor): void
@@ -501,10 +496,6 @@ class ProductController extends Controller
             abort(403, 'Forbidden.');
         }
 
-        // Admin can only manage admin-store products (seller_id is null).
-        if ($actor instanceof Admin && $product->seller_id !== null) {
-            abort(403, 'Forbidden.');
-        }
     }
 
     private function paginateProductList($query, Request $request, int $perPage): array
