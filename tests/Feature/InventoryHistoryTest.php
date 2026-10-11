@@ -113,7 +113,7 @@ class InventoryHistoryTest extends TestCase
         $this->withToken($adminToken)->getJson('/api/admin/inventory/history?scope=all&reason=adjustment')->assertOk()
             ->assertJsonPath('total', 3);
         $this->withToken($adminToken)->getJson('/api/admin/inventory/history?scope=all&seller_id=house&group=loss')->assertOk()
-            ->assertJsonPath('total', 1)->assertJsonPath('data.0.meta.reason', 'damaged');
+            ->assertJsonPath('total', 1)->assertJsonPath('data.0.meta.reason', 'damaged')->assertJsonPath('data.0.available_after', 4);
         $this->withToken($adminToken)->getJson('/api/admin/inventory/history?scope=all&seller_id=house&group=adjust&search=Found%20during%20count')->assertOk()
             ->assertJsonPath('total', 0);
     }

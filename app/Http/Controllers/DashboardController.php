@@ -57,6 +57,10 @@ class DashboardController extends Controller
         $orderCount = (clone $orders)->count();
         $previousOrderCount = (clone $previousOrders)->count();
         $productQuery = Product::query()->when($seller, fn (Builder $q) => $q->where('seller_id', $seller->id));
+        $productsCreated = (clone $productQuery)->whereBetween('created_at', [$from, $to])->count();
+        $previousProductsCreated = (clone $productQuery)->whereBetween('created_at', [$previousFrom, $previousTo])->count();
+        $newCustomers = $seller ? null : Customer::whereBetween('created_at', [$from, $to])->count();
+        $previousNewCustomers = $seller ? null : Customer::whereBetween('created_at', [$previousFrom, $previousTo])->count();
         $reviewQuery = Review::query()->where('status', 'approved')->whereHas('product', fn (Builder $q) => $seller ? $q->where('seller_id', $seller->id) : $q->whereNull('seller_id'));
 
         return [
@@ -68,13 +72,15 @@ class DashboardController extends Controller
                 'orders_change' => $this->change($orderCount, $previousOrderCount),
                 'average_order_value' => $orderCount ? round($revenue / $orderCount, 2) : 0,
                 'products' => (clone $productQuery)->count(),
+                'products_change' => $this->change($productsCreated, $previousProductsCreated),
                 'customers' => $seller ? null : Customer::count(),
-                'new_customers' => $seller ? null : Customer::whereBetween('created_at', [$from, $to])->count(),
+                'customers_change' => $seller ? null : $this->change($newCustomers ?? 0, $previousNewCustomers ?? 0),
+                'new_customers' => $newCustomers,
                 'units_sold' => $this->items($seller)->whereHas('order', fn (Builder $q) => $q->whereBetween('created_at', [$from, $to])->where('status', '!=', 'cancelled'))->sum('quantity'),
                 'average_rating' => $seller ? round((float) $reviewQuery->avg('rating'), 1) : null,
                 'review_count' => $seller ? $reviewQuery->count() : null,
             ],
-            'sales_trend' => $this->trend($seller, $from, $to),
+            'sales_trend' => $this->trend($seller, $from->startOfMonth()->subMonths(7), $to),
             'metric_trends' => $this->metricTrends($seller, $from, $to),
             'order_pipeline' => $this->pipeline($seller, $from, $to),
             'top_products' => $this->topProducts($seller, $from, $to),

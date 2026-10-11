@@ -110,7 +110,12 @@ class ResellerController extends Controller
             'address_line' => ['sometimes', 'nullable', 'string', 'max:255'],
             'address_area' => ['sometimes', 'nullable', 'string', 'max:255'],
             'address_district' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'image' => ['sometimes', 'file', 'image', 'max:5120'],
+            'clear_image' => ['sometimes', 'boolean'],
         ]);
+        if (!empty($data['clear_image'])) $data['image'] = null;
+        if ($request->hasFile('image')) $data['image'] = app(\App\Services\MediaUploadService::class)->upload($request->file('image'));
+        unset($data['clear_image']);
         $reseller->fill($data)->save();
         return response()->json($reseller->fresh());
     }

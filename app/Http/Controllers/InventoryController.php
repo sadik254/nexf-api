@@ -56,7 +56,7 @@ class InventoryController extends Controller
                 })->when(isset($filters['variation_id']), fn ($q) => $q->where('variation_id', $filters['variation_id']));
             })
             ->when(isset($filters['reason']), fn ($q) => $q->where('reason', $filters['reason']))
-            ->when(($filters['group'] ?? null) === 'orders', fn ($q) => $q->where('reason', 'order_sale'))
+            ->when(($filters['group'] ?? null) === 'orders', fn ($q) => $q->whereIn('reason', ['order_sale', 'order_cancellation']))
             ->when(($filters['group'] ?? null) === 'in', fn ($q) => $q->whereIn('reason', ['received', 'return_restock']))
             ->when(($filters['group'] ?? null) === 'adjust', fn ($q) => $q->where('reason', 'adjustment')->whereNotIn('meta->reason', ['damaged', 'lost', 'promotion']))
             ->when(($filters['group'] ?? null) === 'loss', fn ($q) => $q->where('reason', 'adjustment')->whereIn('meta->reason', ['damaged', 'lost', 'promotion']))
@@ -66,6 +66,7 @@ class InventoryController extends Controller
                     $match->where('reason', 'like', "%{$search}%")
                         ->orWhere('meta->note', 'like', "%{$search}%")
                         ->orWhere('meta->order_id', 'like', "%{$search}%")
+                        ->orWhere('meta->return_request_id', 'like', "%{$search}%")
                         ->orWhereHas('lot', fn ($lot) => $lot->where('lot_number', 'like', "%{$search}%")
                             ->orWhereHas('product', fn ($product) => $product->where('name', 'like', "%{$search}%"))
                             ->orWhereHas('variation', fn ($variation) => $variation->where('sku', 'like', "%{$search}%")->orWhereHas('product', fn ($product) => $product->where('name', 'like', "%{$search}%"))));
@@ -74,23 +75,26 @@ class InventoryController extends Controller
             ->with(['lot.product:id,name,seller_id', 'lot.product.seller:id,store_name', 'lot.variation:id,product_id,sku,attributes', 'lot.variation.product:id,name,seller_id', 'lot.variation.product.seller:id,store_name'])
             ->latest()->paginate($filters['per_page'] ?? 25);
 
-        $productIds = $movements->getCollection()->map(fn ($movement) => $movement->lot?->product_id ?? $movement->lot?->variation?->product_id)->filter()->unique();
-        $variationIds = $movements->getCollection()->map(fn ($movement) => $movement->lot?->variation_id)->filter()->unique();
-        $lotIds = $movements->getCollection()->map(fn ($movement) => $movement->product_lot_id)->unique();
-        $allLotIds = ProductLot::query()->where(function ($query) use ($productIds, $variationIds) {
-            $query->when($productIds->isNotEmpty(), fn ($q) => $q->whereIn('product_id', $productIds)->whereNull('variation_id'))
-                ->when($variationIds->isNotEmpty(), fn ($q) => $q->orWhereIn('variation_id', $variationIds));
-        })->pluck('id');
-        $balances = ProductLot::query()->whereIn('id', $allLotIds)->selectRaw('COALESCE(product_id, 0) as product_id, COALESCE(variation_id, 0) as variation_id, SUM(quantity_remaining) as available')->groupBy('product_id', 'variation_id')->get()->keyBy(fn ($row) => $row->product_id . ':' . $row->variation_id);
-        $deltas = ProductLotMovement::query()->whereIn('product_lot_id', $allLotIds)->whereNotIn('product_lot_id', $lotIds)->selectRaw('product_lot_id, SUM(quantity_change) as quantity_change')->groupBy('product_lot_id')->pluck('quantity_change', 'product_lot_id');
-        $movements->getCollection()->each(function (ProductLotMovement $movement) use ($balances, $deltas, $allLotIds) {
+        $skuLots = [];
+        $balances = [];
+        $movements->getCollection()->each(function (ProductLotMovement $movement) use (&$skuLots, &$balances) {
             $lot = $movement->lot;
             if (!$lot) return;
             $productId = $lot->product_id ?? $lot->variation?->product_id;
             $key = ($productId ?? 0) . ':' . ($lot->variation_id ?? 0);
-            $current = (int) ($balances->get($key)?->available ?? 0);
-            $laterOnSameLot = (int) $deltas->get($lot->id, 0);
-            $movement->setAttribute('available_after', $current - $laterOnSameLot - (int) $movement->quantity_change);
+            if (!isset($skuLots[$key])) {
+                $lots = ProductLot::query()->where(function ($query) use ($productId, $lot) {
+                    if ($lot->variation_id) $query->where('variation_id', $lot->variation_id);
+                    else $query->where('product_id', $productId)->whereNull('variation_id');
+                })->get(['id', 'quantity_remaining']);
+                $skuLots[$key] = $lots->pluck('id');
+                $balances[$key] = (int) $lots->sum('quantity_remaining');
+            }
+            $later = (int) ProductLotMovement::query()->whereIn('product_lot_id', $skuLots[$key])
+                ->where(fn ($query) => $query->where('created_at', '>', $movement->created_at)
+                    ->orWhere(fn ($sameTime) => $sameTime->where('created_at', $movement->created_at)->where('id', '>', $movement->id)))
+                ->sum('quantity_change');
+            $movement->setAttribute('available_after', $balances[$key] - $later);
         });
         return $movements;
     }

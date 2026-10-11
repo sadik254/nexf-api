@@ -42,12 +42,13 @@ class DashboardTest extends TestCase
         $from = now()->startOfMonth()->toDateString();
         $to = now()->endOfMonth()->toDateString();
         $adminToken = $admin->createToken('test', ['admin:basic'])->plainTextToken;
-        $this->withToken($adminToken)->getJson("/api/admin/dashboard?from={$from}&to={$to}")
+        $adminDashboard = $this->withToken($adminToken)->getJson("/api/admin/dashboard?from={$from}&to={$to}")
             ->assertOk()->assertJsonPath('stats.revenue', 380)->assertJsonPath('stats.orders', 1)
             ->assertJsonPath('stats.units_sold', 3)->assertJsonPath('top_products.0.name', 'Seller Product')
             ->assertJsonPath('sales_breakdown.gross_sales', 300)->assertJsonPath('sales_breakdown.shipping', 80)
             ->assertJsonPath('top_categories.0.name', 'Clothing')
             ->assertJsonFragment(['product_id' => $house->id, 'available_quantity' => 12]);
+        $this->assertCount(8, $adminDashboard->json('sales_trend'));
 
         $adminSeries = $this->withToken($adminToken)->getJson("/api/admin/dashboard?from={$from}&to={$to}")
             ->assertOk()->json('metric_trends');
