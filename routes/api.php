@@ -49,6 +49,7 @@ Route::prefix('resellers')->group(function () {
     Route::post('/reset-password', [ResellerController::class, 'resetPassword']);
     Route::middleware('sanctum.type:reseller,reseller:basic')->group(function () {
         Route::get('/me', [ResellerController::class, 'me']);
+        Route::post('/me', [ResellerController::class, 'updateMe']);
         Route::get('/me/commission-period', [ResellerController::class, 'commissionPeriod']);
         Route::post('/me/password', [ResellerController::class, 'updatePassword']);
         Route::post('/logout', [ResellerController::class, 'logout']);

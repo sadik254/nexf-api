@@ -99,6 +99,22 @@ class ResellerController extends Controller
         return response()->json(['message' => 'Password updated successfully.']);
     }
 
+    public function updateMe(Request $request): JsonResponse
+    {
+        $reseller = $request->user();
+        abort_unless($reseller instanceof Reseller && $reseller->is_active, 403);
+        $data = $request->validate([
+            'name' => ['sometimes', 'string', 'max:255'],
+            'email' => ['sometimes', 'email', 'max:255', Rule::unique('resellers', 'email')->ignore($reseller->id)],
+            'phone' => ['sometimes', 'nullable', 'string', 'max:32', Rule::unique('resellers', 'phone')->ignore($reseller->id)],
+            'address_line' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'address_area' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'address_district' => ['sometimes', 'nullable', 'string', 'max:255'],
+        ]);
+        $reseller->fill($data)->save();
+        return response()->json($reseller->fresh());
+    }
+
     public function logout(Request $request): JsonResponse
     {
         $request->user()->currentAccessToken()?->delete();
