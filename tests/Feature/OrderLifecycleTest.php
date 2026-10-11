@@ -149,11 +149,20 @@ class OrderLifecycleTest extends TestCase
 
     public function test_buy_x_get_y_discount_only_rewards_the_configured_quantity(): void
     {
-        [$customer, $product] = $this->checkoutFixtures(2);
-        Coupon::create(['code' => 'BUYGET', 'discount_kind' => 'bxgy', 'discount_type' => 'percentage', 'discount_value' => 100, 'buy_product_ids' => [$product->id], 'eligible_product_ids' => [$product->id], 'buy_quantity' => 1, 'get_quantity' => 1, 'reward_type' => 'free', 'is_active' => true]);
+        [$customer, $product] = $this->checkoutFixtures(4);
+        $coupon = Coupon::create(['code' => 'BUYGET', 'discount_kind' => 'bxgy', 'discount_type' => 'percentage', 'discount_value' => 100, 'buy_product_ids' => [$product->id], 'eligible_product_ids' => [$product->id], 'buy_quantity' => 1, 'get_quantity' => 1, 'uses_per_order' => 1, 'reward_type' => 'free', 'is_active' => true]);
         $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
-        $this->withToken($token)->postJson('/api/customers/orders/preview', ['items' => [['product_id' => $product->id, 'quantity' => 2]], 'payment_method_id' => PaymentMethod::firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'BUYGET', 'shipping_phone' => '01700000000'])
-            ->assertOk()->assertJsonPath('subtotal', 200)->assertJsonPath('discount_total', 100)->assertJsonPath('total', 120);
+        $payload = ['items' => [['product_id' => $product->id, 'quantity' => 4]], 'payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'BUYGET', 'shipping_phone' => '01700000000'];
+        $this->withToken($token)->postJson('/api/customers/orders/preview', $payload)
+            ->assertOk()->assertJsonPath('subtotal', 400)->assertJsonPath('discount_total', 100)->assertJsonPath('total', 320);
+        $coupon->update(['uses_per_order' => 2]);
+        $this->withToken($token)->postJson('/api/customers/orders/preview', $payload)
+            ->assertOk()->assertJsonPath('discount_total', 200)->assertJsonPath('total', 220);
+
+        $coupon->update(['code' => 'BUYGETONE']);
+        $payload['items'][0]['quantity'] = 1;
+        $this->withToken($token)->postJson('/api/customers/orders/preview', $payload)
+            ->assertUnprocessable()->assertJsonValidationErrors('coupon_code');
     }
 
     public function test_product_discount_can_target_a_collection(): void

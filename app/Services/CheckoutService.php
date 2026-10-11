@@ -117,9 +117,7 @@ class CheckoutService
         $products = array_map(fn ($item) => $item['product'], $items);
         if ($coupon->seller_id && !collect($products)->contains(fn ($product) => (int) $product->seller_id === (int) $coupon->seller_id)) return false;
         if ($coupon->discount_kind === 'bxgy') {
-            $buyItems = $this->selectedItems($items, $coupon->buy_product_ids, $coupon->buy_category_ids, $coupon->buy_collection_ids);
-            $getItems = $this->selectedItems($items, $coupon->eligible_product_ids, $coupon->eligible_category_ids, $coupon->eligible_collection_ids);
-            return array_sum(array_column($buyItems, 'quantity')) >= ($coupon->buy_quantity ?? 1) && count($getItems) > 0;
+            return $this->bxgyDiscount($coupon, $items) > 0;
         }
         if (in_array($coupon->discount_kind, ['products', 'order'], true) || $coupon->applies_to === 'product') return count($this->selectedItems($items, $coupon->eligible_product_ids, $coupon->eligible_category_ids, $coupon->eligible_collection_ids)) > 0;
         return true;
@@ -129,11 +127,7 @@ class CheckoutService
     {
         if ($coupon->discount_kind === 'shipping' || $coupon->applies_to === 'shipping') return min($shipping, $coupon->discountForSubtotal($shipping));
         if ($coupon->discount_kind === 'bxgy') {
-            $selected = $this->selectedItems($items, $coupon->eligible_product_ids, $coupon->eligible_category_ids, $coupon->eligible_collection_ids);
-            $quantity = min(array_sum(array_column($selected, 'quantity')), $coupon->get_quantity ?? PHP_INT_MAX);
-            $available = collect($selected)->sortBy(fn ($item) => $item['quote']['subtotal'] / $item['quantity'])->reduce(function (float $sum, $item) use (&$quantity) { $used=min($quantity,$item['quantity']); $quantity-=$used; return $sum + (($item['quote']['subtotal'] / $item['quantity']) * $used); }, 0.0);
-            if ($coupon->reward_type === 'free') return round($available, 2);
-            return min($available, $coupon->discountForSubtotal($available));
+            return min($subtotal, $this->bxgyDiscount($coupon, $items));
         }
         $base = $coupon->discount_kind === 'products' || $coupon->applies_to === 'product' ? array_sum(array_map(fn ($item) => $item['quote']['subtotal'], $this->selectedItems($items, $coupon->eligible_product_ids, $coupon->eligible_category_ids, $coupon->eligible_collection_ids))) : $subtotal;
         return $coupon->discountForSubtotal((float) $base);
@@ -146,5 +140,53 @@ class CheckoutService
             $product = $item['product'];
             return ($productIds && in_array($product->id, $productIds, true)) || ($categoryIds && in_array($product->category_id, $categoryIds, true)) || ($collectionIds && $product->collections->contains(fn ($collection) => in_array($collection->id, $collectionIds, true)));
         }));
+    }
+
+    /** Match the console's Buy X Get Y rules without using one cart unit twice. */
+    private function bxgyDiscount(Coupon $coupon, array $items): float
+    {
+        $buyIds = array_fill_keys(array_map(fn ($item) => (string) $item['product']->id, $this->selectedItems($items, $coupon->buy_product_ids, $coupon->buy_category_ids, $coupon->buy_collection_ids)), true);
+        $getIds = array_fill_keys(array_map(fn ($item) => (string) $item['product']->id, $this->selectedItems($items, $coupon->eligible_product_ids, $coupon->eligible_category_ids, $coupon->eligible_collection_ids)), true);
+        $units = [];
+        foreach ($items as $item) {
+            $quantity = max(0, (int) $item['quantity']);
+            if ($quantity === 0) continue;
+            $productId = (string) $item['product']->id;
+            $price = (float) $item['quote']['subtotal'] / $quantity;
+            for ($i = 0; $i < $quantity; $i++) {
+                $units[] = ['price' => $price, 'buy' => isset($buyIds[$productId]), 'get' => isset($getIds[$productId]), 'used' => false];
+            }
+        }
+
+        $buyQuantity = max(1, (int) ($coupon->buy_quantity ?? 1));
+        $getQuantity = max(1, (int) ($coupon->get_quantity ?? 1));
+        $limit = $coupon->uses_per_order === null ? PHP_INT_MAX : max(1, (int) $coupon->uses_per_order);
+        $discount = 0.0;
+        $uses = 0;
+
+        while ($uses < $limit) {
+            $buyIndexes = array_keys(array_filter($units, fn ($unit) => $unit['buy'] && !$unit['used']));
+            usort($buyIndexes, fn ($a, $b) => $units[$b]['price'] <=> $units[$a]['price']);
+            $buyIndexes = array_slice($buyIndexes, 0, $buyQuantity);
+            if (count($buyIndexes) < $buyQuantity) break;
+            foreach ($buyIndexes as $index) $units[$index]['used'] = true;
+
+            $getIndexes = array_keys(array_filter($units, fn ($unit) => $unit['get'] && !$unit['used']));
+            usort($getIndexes, fn ($a, $b) => $units[$a]['price'] <=> $units[$b]['price']);
+            $getIndexes = array_slice($getIndexes, 0, $getQuantity);
+            if ($getIndexes === []) break;
+            foreach ($getIndexes as $index) {
+                $units[$index]['used'] = true;
+                $price = $units[$index]['price'];
+                $discount += match ($coupon->reward_type) {
+                    'free' => $price,
+                    'fixed' => min($price, (float) $coupon->discount_value),
+                    default => min($price, $price * ((float) $coupon->discount_value / 100)),
+                };
+            }
+            $uses++;
+        }
+
+        return round($discount, 2);
     }
 }
