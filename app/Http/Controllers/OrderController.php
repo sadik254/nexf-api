@@ -1038,9 +1038,13 @@ class OrderController extends Controller
             'page' => ['sometimes', 'integer', 'min:1'],
             'status' => ['sometimes', 'in:pending,confirmed,shipped,delivered,completed,cancelled,return_pending'],
             'payment_status' => ['sometimes', 'in:unpaid,paid,failed,refunded'],
+            'guest' => ['sometimes', 'boolean'],
+            'exchange' => ['sometimes', 'boolean'],
             'search' => ['sometimes', 'string', 'max:100'],
         ]);
         if (isset($filters['payment_status'])) $query->where('payment_status', $filters['payment_status']);
+        if (($filters['guest'] ?? false) === true || ($filters['guest'] ?? null) === '1') $query->where('is_guest', true);
+        if (($filters['exchange'] ?? false) === true || ($filters['exchange'] ?? null) === '1') $query->whereNotNull('exchange_for');
         if (!empty($filters['search'])) {
             $search = trim($filters['search']);
             $query->where(fn ($q) => $q->where('order_number', 'like', "%{$search}%")
