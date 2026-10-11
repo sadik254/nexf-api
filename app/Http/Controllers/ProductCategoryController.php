@@ -63,6 +63,10 @@ class ProductCategoryController extends Controller
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
+            'image' => ['nullable', 'url', 'starts_with:https://'],
+            'menu_heading' => ['nullable', 'string', 'max:120'],
+            'promo_image' => ['nullable', 'url', 'starts_with:https://'],
+            'promo_href' => ['nullable', 'url', 'starts_with:https://'],
             'is_active' => ['nullable', 'boolean'],
             'parent_id' => ['nullable', 'integer', 'exists:product_categories,id'],
         ]);
@@ -76,6 +80,10 @@ class ProductCategoryController extends Controller
             'parent_id' => $data['parent_id'] ?? null,
             'slug' => $slug,
             'description' => $data['description'] ?? null,
+            'image' => $data['image'] ?? null,
+            'menu_heading' => $data['menu_heading'] ?? null,
+            'promo_image' => $data['promo_image'] ?? null,
+            'promo_href' => $data['promo_href'] ?? null,
             'is_active' => array_key_exists('is_active', $data) ? (bool) $data['is_active'] : true,
         ]);
 
@@ -95,6 +103,10 @@ class ProductCategoryController extends Controller
         $data = $request->validate([
             'name' => ['sometimes', 'string', 'max:255'],
             'description' => ['sometimes', 'string'],
+            'image' => ['sometimes', 'nullable', 'url', 'starts_with:https://'],
+            'menu_heading' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'promo_image' => ['sometimes', 'nullable', 'url', 'starts_with:https://'],
+            'promo_href' => ['sometimes', 'nullable', 'url', 'starts_with:https://'],
             'is_active' => ['sometimes', 'boolean'],
             'parent_id' => ['sometimes', 'nullable', 'integer', 'exists:product_categories,id'],
         ]);
@@ -117,6 +129,10 @@ class ProductCategoryController extends Controller
             'name' => $data['name'] ?? $category->name,
             'parent_id' => array_key_exists('parent_id', $data) ? $data['parent_id'] : $category->parent_id,
             'description' => $data['description'] ?? $category->description,
+            'image' => $data['image'] ?? $category->image,
+            'menu_heading' => $data['menu_heading'] ?? $category->menu_heading,
+            'promo_image' => $data['promo_image'] ?? $category->promo_image,
+            'promo_href' => $data['promo_href'] ?? $category->promo_href,
             'is_active' => array_key_exists('is_active', $data) ? (bool) $data['is_active'] : $category->is_active,
         ])->save();
 

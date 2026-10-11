@@ -34,7 +34,7 @@ class StoreProductController extends Controller
 
     public function stores(): JsonResponse
     {
-        return response()->json(Seller::where('status', 'approved')->where('is_active', true)->orderBy('store_name')->get()->map(fn ($seller) => $this->transformSellerStore($seller)));
+        return response()->json(Seller::where('status', 'approved')->where('is_active', true)->orderByDesc('is_featured')->orderBy('store_name')->get()->map(fn ($seller) => $this->transformSellerStore($seller)));
     }
 
     public function storeProfile(string $slug): JsonResponse
@@ -50,6 +50,7 @@ class StoreProductController extends Controller
         return [
             'type' => 'seller', 'id' => $seller->id, 'name' => $seller->store_name,
             'slug' => $seller->store_slug, 'logo' => $seller->store_logo, 'image' => $seller->store_image,
+            'is_featured' => (bool) $seller->is_featured,
             'location' => $seller->city ? trim($seller->city.($seller->country ? ', '.$seller->country : '')) : null,
             'joined_at' => $seller->created_at?->toDateString(),
             'rating_summary' => ['average' => $count ? round((float) (clone $reviews)->avg('rating'), 2) : null, 'review_count' => $count,

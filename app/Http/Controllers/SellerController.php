@@ -111,6 +111,7 @@ class SellerController extends Controller
             'address_area' => ['required', 'string', 'max:255'],
             'address_district' => ['required', 'string', 'max:255'],
             'commission_rate' => ['required', 'numeric', 'between:0,100'],
+            'is_featured' => ['sometimes', 'boolean'],
         ]);
         $data['store_address'] = implode(', ', [$data['address_line'], $data['address_area'], $data['address_district']]);
         $data['city'] = $data['address_district'];

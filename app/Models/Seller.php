@@ -42,7 +42,7 @@ class Seller extends Authenticatable
         'login_ip',
         'last_login_at',
         'is_active',
-        'on_time_shipping_percentage', 'positive_rating_percentage', 'chat_response_percentage',
+        'on_time_shipping_percentage', 'positive_rating_percentage', 'chat_response_percentage', 'is_featured',
     ];
 
     protected $hidden = [
@@ -61,6 +61,7 @@ class Seller extends Authenticatable
             'last_login_at' => 'datetime',
             'email_verified_at' => 'datetime',
             'is_active' => 'boolean',
+            'is_featured' => 'boolean',
             'on_time_shipping_percentage' => 'integer', 'positive_rating_percentage' => 'integer', 'chat_response_percentage' => 'integer',
         ];
     }

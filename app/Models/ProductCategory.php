@@ -13,6 +13,10 @@ class ProductCategory extends Model
         'name',
         'slug',
         'description',
+        'image',
+        'menu_heading',
+        'promo_image',
+        'promo_href',
         'is_active',
     ];
 
