@@ -56,7 +56,8 @@ class InventoryHistoryTest extends TestCase
         }
 
         $this->withToken($adminToken)->getJson('/api/admin/inventory?per_page=1')->assertOk()
-            ->assertJsonPath('total', 2)->assertJsonPath('summary.available_units', 7);
+            ->assertJsonPath('total', 2)->assertJsonPath('summary.available_units', 7)
+            ->assertJsonPath('summary.low_stock', 2);
         $this->withToken($adminToken)->getJson('/api/admin/products?per_page=1')->assertOk()
             ->assertJsonPath('total', 2)->assertJsonPath('status_counts.active', 2);
         $this->withToken($adminToken)->getJson('/api/admin/products?search=House')->assertOk()

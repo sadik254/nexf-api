@@ -37,8 +37,8 @@ class InventoryController extends Controller
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
         return ProductLotMovement::query()
-            ->whereHas('lot', function ($lots) use ($sellerId, $filters) {
-                $lots->where(function ($query) use ($sellerId, $filters) {
+            ->whereHas('lot', function ($lots) use ($sellerId, $filters, $allStores) {
+                $lots->where(function ($query) use ($sellerId, $filters, $allStores) {
                     $query->whereHas('product', fn ($product) => $product
                         ->when(!$allStores, fn ($q) => $q->where('seller_id', $sellerId))
                         ->when(isset($filters['product_id']), fn ($q) => $q->whereKey($filters['product_id'])))
@@ -103,7 +103,7 @@ class InventoryController extends Controller
                 $paginator = new LengthAwarePaginator($rows->forPage($page, $perPage)->values(), $rows->count(), $perPage, $page, ['path' => $request->url(), 'query' => $request->query()]);
                 return array_merge($paginator->toArray(), ['summary' => [
                     'available_units' => $rows->sum('available_quantity'),
-                    'low_stock' => $rows->filter(fn ($row) => $row['available_quantity'] > 0 && $row['available_quantity'] <= 3)->count(),
+                    'low_stock' => $rows->filter(fn ($row) => $row['available_quantity'] > 0 && $row['available_quantity'] <= 5)->count(),
                     'out_of_stock' => $rows->filter(fn ($row) => $row['available_quantity'] === 0)->count(),
                 ]]);
             });

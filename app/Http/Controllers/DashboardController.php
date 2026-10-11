@@ -234,6 +234,6 @@ class DashboardController extends Controller
     {
         return $productQuery->withSum('lots as direct_stock', 'quantity_remaining')->with(['variations' => fn ($q) => $q->withSum('lots as stock', 'quantity_remaining')])->get()
             ->map(fn (Product $product) => ['product_id' => $product->id, 'name' => $product->name, 'slug' => $product->slug, 'thumbnail' => $product->image_variants['thumbnail']['thumb'] ?? $product->thumbnail, 'available_quantity' => $product->product_type === 'simple' ? (int) ($product->direct_stock ?? 0) : (int) $product->variations->sum('stock')])
-            ->filter(fn ($row) => $row['available_quantity'] <= 3)->sortBy('available_quantity')->take(8)->values()->all();
+            ->filter(fn ($row) => $row['available_quantity'] <= 20)->sortBy('available_quantity')->values()->all();
     }
 }

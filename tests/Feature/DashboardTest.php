@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Models\ProductLot;
 use App\Models\Seller;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -29,6 +30,7 @@ class DashboardTest extends TestCase
         $admin = Admin::create(['name' => 'Admin', 'email' => 'admin-dashboard@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);
         $house = Product::create(['category_id' => $category->id, 'name' => 'House Product', 'slug' => 'house-product', 'product_type' => 'simple', 'status' => 'active']);
         $sellerProduct = Product::create(['seller_id' => $seller->id, 'category_id' => $category->id, 'name' => 'Seller Product', 'slug' => 'seller-product', 'product_type' => 'simple', 'status' => 'active']);
+        ProductLot::create(['product_id' => $house->id, 'lot_number' => 'HOUSE-LOT', 'buying_price' => 10, 'selling_price' => 20, 'quantity' => 12, 'quantity_remaining' => 12]);
         $order = Order::create([
             'order_number' => 'DASH-1', 'customer_id' => $customer->id, 'status' => 'confirmed',
             'payment_status' => 'paid', 'subtotal' => 300, 'total' => 380, 'shipping_charge' => 80,
@@ -44,7 +46,8 @@ class DashboardTest extends TestCase
             ->assertOk()->assertJsonPath('stats.revenue', 380)->assertJsonPath('stats.orders', 1)
             ->assertJsonPath('stats.units_sold', 3)->assertJsonPath('top_products.0.name', 'Seller Product')
             ->assertJsonPath('sales_breakdown.gross_sales', 300)->assertJsonPath('sales_breakdown.shipping', 80)
-            ->assertJsonPath('top_categories.0.name', 'Clothing');
+            ->assertJsonPath('top_categories.0.name', 'Clothing')
+            ->assertJsonFragment(['product_id' => $house->id, 'available_quantity' => 12]);
 
         $adminSeries = $this->withToken($adminToken)->getJson("/api/admin/dashboard?from={$from}&to={$to}")
             ->assertOk()->json('metric_trends');
