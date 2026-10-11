@@ -120,6 +120,7 @@ Route::prefix('customers')->group(function () {
         Route::post('/chats/{chat}/messages', [StoreChatController::class, 'reply']);
         Route::get('/return-requests', [ReturnRequestController::class, 'index']);
         Route::post('/return-requests', [ReturnRequestController::class, 'store']);
+        Route::post('/return-requests/batch', [ReturnRequestController::class, 'storeBatch']);
         Route::get('/return-requests/{returnRequest}', [ReturnRequestController::class, 'show']);
         Route::get('/wallet', [WithdrawalController::class, 'wallet']);
         Route::get('/payout-accounts', [\App\Http\Controllers\CustomerPayoutController::class, 'index']);

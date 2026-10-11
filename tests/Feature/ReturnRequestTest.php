@@ -6,6 +6,7 @@ use App\Models\Admin;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\ReturnRequest;
 use App\Models\Seller;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -54,5 +55,20 @@ class ReturnRequestTest extends TestCase
         $this->withToken($customerToken)->postJson('/api/customers/withdrawals', ['amount' => 1, 'method' => 'bKash', 'account_details' => '01700000000'])->assertUnprocessable();
         $this->withToken($admin->createToken('basic', ['admin:basic'])->plainTextToken)->postJson("/api/admin/withdrawals/{$withdrawal}", ['status' => 'rejected'])->assertOk();
         $this->withToken($customerToken)->getJson('/api/customers/withdrawals')->assertOk()->assertJsonPath('balance', 100);
+    }
+
+    public function test_batch_return_creates_one_persistent_reference_and_is_atomic(): void
+    {
+        $customer = Customer::create(['name' => 'Batch Buyer', 'email' => 'batch-return@example.test', 'password' => 'password123']);
+        $order = Order::create(['order_number' => 'RMA-BATCH', 'customer_id' => $customer->id, 'status' => 'delivered', 'payment_status' => 'paid', 'subtotal' => 200, 'total' => 200, 'shipping_charge' => 0, 'shipping_name' => 'Buyer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka']);
+        $items = collect(['Coat', 'Shirt'])->map(fn ($name) => OrderItem::create(['order_id' => $order->id, 'product_name' => $name, 'quantity' => 2, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 200, 'line_cost' => 100, 'line_profit' => 100, 'fulfillment_status' => 'delivered']));
+        $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+        $payload = ['order_id' => $order->id, 'type' => 'refund', 'reason' => 'Damaged: stitching failed', 'refund_to' => 'balance', 'items' => $items->map(fn ($item) => ['order_item_id' => $item->id, 'quantity' => 1])->all()];
+        $response = $this->withToken($token)->postJson('/api/customers/return-requests/batch', $payload)->assertCreated()->assertJsonCount(2, 'data');
+        $this->assertNotEmpty($response->json('reference'));
+        $this->assertSame(2, ReturnRequest::query()->where('submission_reference', $response->json('reference'))->count());
+        $payload['items'][1]['quantity'] = 3;
+        $this->withToken($token)->postJson('/api/customers/return-requests/batch', $payload)->assertUnprocessable();
+        $this->assertSame(2, ReturnRequest::query()->count(), 'Failed batch must not create a partial request.');
     }
 }

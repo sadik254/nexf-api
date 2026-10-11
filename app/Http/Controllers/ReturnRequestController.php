@@ -13,6 +13,7 @@ use App\Services\InventoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -56,11 +57,14 @@ class ReturnRequestController extends Controller
         abort_unless($customer instanceof Customer, 403);
         $data = $request->validate([
             'order_item_id' => ['required', 'integer', 'exists:order_items,id'],
+            'submission_reference' => ['nullable', 'string', 'max:80'],
             'support_ticket_id' => ['nullable', 'integer', 'exists:support_tickets,id'],
             'type' => ['required', Rule::in(['refund', 'exchange'])],
             'quantity' => ['required', 'integer', 'min:1'],
             'reason' => ['required', 'string', 'max:3000'],
             'refund_to' => ['sometimes', Rule::in(['original', 'balance'])],
+            'attachments' => ['sometimes', 'array', 'max:6'],
+            'attachments.*' => ['required', 'url', 'max:1000', 'regex:/^https:\\/\\//'],
         ]);
         $item = OrderItem::with('order:id,customer_id')->findOrFail($data['order_item_id']);
         abort_unless($item->order->customer_id === $customer->id, 404);
@@ -76,12 +80,55 @@ class ReturnRequestController extends Controller
             $claimed = ReturnRequest::where('order_item_id', $lockedItem->id)->whereNotIn('status', ['rejected', 'cancelled'])->sum('quantity');
             if ($claimed + $data['quantity'] > $lockedItem->quantity) throw ValidationException::withMessages(['quantity' => 'This item quantity is already in a return request.']);
             $order = $lockedItem->order;
-            $return = ReturnRequest::create(['order_item_id' => $lockedItem->id, 'order_id' => $lockedItem->order_id, 'customer_id' => $customer->id, 'seller_id' => $lockedItem->seller_id, 'support_ticket_id' => $data['support_ticket_id'] ?? null, 'type' => $data['type'], 'status' => 'requested', 'quantity' => $data['quantity'], 'reason' => trim($data['reason']), 'refund_to' => $data['refund_to'] ?? 'balance', 'return_address_name' => $order->shipping_name, 'return_address_phone' => $order->shipping_phone, 'return_address_email' => $order->shipping_email, 'return_address' => $order->shipping_address, 'return_address_area' => $order->shipping_area, 'return_address_district' => $order->shipping_district]);
+            $return = ReturnRequest::create(['order_item_id' => $lockedItem->id, 'order_id' => $lockedItem->order_id, 'customer_id' => $customer->id, 'seller_id' => $lockedItem->seller_id, 'support_ticket_id' => $data['support_ticket_id'] ?? null, 'submission_reference' => $data['submission_reference'] ?? null, 'type' => $data['type'], 'status' => 'requested', 'quantity' => $data['quantity'], 'reason' => trim($data['reason']), 'refund_to' => $data['refund_to'] ?? 'balance', 'attachments' => $data['attachments'] ?? [], 'return_address_name' => $order->shipping_name, 'return_address_phone' => $order->shipping_phone, 'return_address_email' => $order->shipping_email, 'return_address' => $order->shipping_address, 'return_address_area' => $order->shipping_area, 'return_address_district' => $order->shipping_district]);
             $return->update(['reference' => 'RET-' . str_pad((string) $return->id, 5, '0', STR_PAD_LEFT)]);
             return $return;
         });
         $return->load(['item', 'order:id,order_number', 'seller:id,store_name'])->makeHidden('staff_note');
         return response()->json($return, 201);
+    }
+
+    public function storeBatch(Request $request): JsonResponse
+    {
+        $customer = $this->actor($request);
+        abort_unless($customer instanceof Customer, 403);
+        $data = $request->validate([
+            'order_id' => ['required', 'integer', 'exists:orders,id'],
+            'type' => ['required', Rule::in(['refund', 'exchange'])],
+            'reason' => ['required', 'string', 'max:3000'],
+            'refund_to' => ['sometimes', Rule::in(['original', 'balance'])],
+            'attachments' => ['sometimes', 'array', 'max:6'],
+            'attachments.*' => ['required', 'url', 'max:1000', 'regex:/^https:\\/\\//'],
+            'items' => ['required', 'array', 'min:1', 'max:50'],
+            'items.*.order_item_id' => ['required', 'integer', 'distinct', 'exists:order_items,id'],
+            'items.*.quantity' => ['required', 'integer', 'min:1'],
+        ]);
+        $order = \App\Models\Order::query()->where('customer_id', $customer->id)->findOrFail($data['order_id']);
+        $submissionReference = 'RET-' . strtoupper(Str::random(10));
+        $returns = DB::transaction(function () use ($customer, $data, $order, $submissionReference) {
+            $created = [];
+            foreach ($data['items'] as $line) {
+                $item = OrderItem::query()->where('order_id', $order->id)->whereKey($line['order_item_id'])->lockForUpdate()->firstOrFail();
+                if ($item->fulfillment_status !== 'delivered') throw ValidationException::withMessages(['items' => ['Only delivered items can be returned.']]);
+                $claimed = ReturnRequest::query()->where('order_item_id', $item->id)->whereNotIn('status', ['rejected', 'cancelled'])->sum('quantity');
+                if ($claimed + $line['quantity'] > $item->quantity) throw ValidationException::withMessages(['items' => ["The quantity requested for {$item->product_name} exceeds its eligible quantity."]]);
+                $return = ReturnRequest::query()->create([
+                    'order_item_id' => $item->id, 'order_id' => $order->id, 'customer_id' => $customer->id,
+                    'seller_id' => $item->seller_id, 'submission_reference' => $submissionReference,
+                    'type' => $data['type'], 'status' => 'requested', 'quantity' => $line['quantity'],
+                    'reason' => trim($data['reason']), 'refund_to' => $data['refund_to'] ?? 'balance',
+                    'attachments' => $data['attachments'] ?? [], 'return_address_name' => $order->shipping_name,
+                    'return_address_phone' => $order->shipping_phone, 'return_address_email' => $order->shipping_email,
+                    'return_address' => $order->shipping_address, 'return_address_area' => $order->shipping_area,
+                    'return_address_district' => $order->shipping_district,
+                ]);
+                $return->update(['reference' => $submissionReference . '-' . str_pad((string) $return->id, 3, '0', STR_PAD_LEFT)]);
+                $created[] = $return;
+            }
+            return $created;
+        });
+        foreach ($returns as $return) $return->load(['item', 'order:id,order_number', 'seller:id,store_name'])->makeHidden('staff_note');
+        return response()->json(['reference' => $submissionReference, 'data' => $returns], 201);
     }
 
     public function update(Request $request, ReturnRequest $returnRequest): JsonResponse
