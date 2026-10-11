@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\DB;
 use Uploadcare\Api;
 use Uploadcare\Configuration;
 use App\Mail\AdminCreatedMail;
@@ -34,6 +35,55 @@ class AdminController extends Controller
         }
 
         return response()->json($query->paginate($perPage));
+    }
+
+    /** A single, searchable roster of the admin, seller and reseller actors shown in the console. */
+    public function userRoster(Request $request): JsonResponse
+    {
+        $filters = $request->validate([
+            'role' => ['nullable', 'in:admin,seller,reseller'],
+            'search' => ['nullable', 'string', 'max:100'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+        $search = trim((string) ($filters['search'] ?? ''));
+        $role = $filters['role'] ?? null;
+        $admins = DB::table('admins')->whereNull('deleted_at')
+            ->when($role !== null && $role !== 'admin', fn ($q) => $q->whereRaw('1 = 0'))
+            ->whereIn('role', ['super_admin', 'admin'])
+            ->when($search !== '', fn ($q) => $q->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('email', 'like', "%{$search}%")))
+            ->selectRaw("id as actor_id, 'admin' as actor_type, name, email, CASE WHEN role = 'super_admin' THEN 'superadmin' ELSE 'admin' END as role, CASE WHEN is_active = 1 THEN 'active' ELSE 'suspended' END as status, NULL as linked_to, created_at");
+        $sellers = DB::table('sellers')->whereNull('roster_archived_at')
+            ->when($role !== null && $role !== 'seller', fn ($q) => $q->whereRaw('1 = 0'))
+            ->when($search !== '', fn ($q) => $q->where(fn ($q) => $q->where('seller_name', 'like', "%{$search}%")->orWhere('store_name', 'like', "%{$search}%")->orWhere('email', 'like', "%{$search}%")))
+            ->selectRaw("id as actor_id, 'seller' as actor_type, COALESCE(NULLIF(seller_name, ''), store_name) as name, email, 'seller' as role, CASE WHEN status = 'approved' AND is_active = 1 THEN 'active' WHEN status IN ('rejected', 'suspended') THEN 'suspended' ELSE 'invited' END as status, store_name as linked_to, created_at");
+        $resellers = DB::table('resellers')
+            ->when($role !== null && $role !== 'reseller', fn ($q) => $q->whereRaw('1 = 0'))
+            ->when($search !== '', fn ($q) => $q->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('email', 'like', "%{$search}%")))
+            ->selectRaw("id as actor_id, 'reseller' as actor_type, name, email, 'reseller' as role, CASE WHEN is_active = 1 THEN 'active' ELSE 'suspended' END as status, NULL as linked_to, created_at");
+
+        $union = $admins->unionAll($sellers)->unionAll($resellers);
+        $perPage = (int) ($filters['per_page'] ?? 25);
+        $page = max(1, (int) $request->query('page', 1));
+        $base = DB::query()->fromSub($union, 'actors');
+        $total = (clone $base)->count();
+        $adminCount = DB::table('admins')->whereNull('deleted_at')->whereIn('role', ['super_admin', 'admin'])
+            ->when($search !== '', fn ($q) => $q->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('email', 'like', "%{$search}%")))->count();
+        $sellerCount = DB::table('sellers')->whereNull('roster_archived_at')
+            ->when($search !== '', fn ($q) => $q->where(fn ($q) => $q->where('seller_name', 'like', "%{$search}%")->orWhere('store_name', 'like', "%{$search}%")->orWhere('email', 'like', "%{$search}%")))->count();
+        $resellerCount = DB::table('resellers')
+            ->when($search !== '', fn ($q) => $q->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('email', 'like', "%{$search}%")))->count();
+        $counts = ['all' => $adminCount + $sellerCount + $resellerCount, 'admin' => $adminCount, 'seller' => $sellerCount, 'reseller' => $resellerCount];
+        $rows = $base->orderByDesc('created_at')->orderBy('actor_type')->orderBy('actor_id')
+            ->offset(($page - 1) * $perPage)->limit($perPage)->get()
+            ->map(function ($row) {
+                $row->id = (int) $row->actor_id;
+                $row->joined = \Carbon\Carbon::parse($row->created_at)->diffForHumans();
+                return $row;
+            });
+        return response()->json([
+            'current_page' => $page, 'data' => $rows, 'from' => $total ? (($page - 1) * $perPage + 1) : null,
+            'last_page' => max(1, (int) ceil($total / $perPage)), 'per_page' => $perPage, 'to' => $total ? min($page * $perPage, $total) : null, 'total' => $total, 'counts' => $counts,
+        ]);
     }
 
     public function show(Admin $admin): JsonResponse

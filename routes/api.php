@@ -178,6 +178,7 @@ Route::prefix('admin')->group(function () {
     Route::middleware('sanctum.type:admin,admin:basic')->post('/me', [AdminController::class, 'updateProfile']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/me/password', [AdminController::class, 'updatePassword']);
     Route::middleware('sanctum.type:admin,admin:manage-admins')->get('/admins', [AdminController::class, 'index']);
+    Route::middleware('sanctum.type:admin,admin:manage-admins')->get('/user-roster', [AdminController::class, 'userRoster']);
     Route::middleware('sanctum.type:admin,admin:manage-admins')->get('/admins/{admin}', [AdminController::class, 'show']);
     Route::middleware('sanctum.type:admin,admin:manage-admins')->post('/admins/{admin}', [AdminController::class, 'updateAdmin']);
     Route::middleware('sanctum.type:admin,admin:manage-admins')->post('/admins/{admin}/delete', [AdminController::class, 'destroy']);
