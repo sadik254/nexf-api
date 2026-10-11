@@ -11,7 +11,7 @@ class UserRosterTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_user_roster_combines_real_admin_seller_and_reseller_accounts_and_filters_roles(): void
+    public function test_user_roster_includes_only_admin_seller_and_reseller_accounts_and_filters_roles(): void
     {
         $admin = Admin::create(['name' => 'Roster admin', 'email' => 'roster-admin@example.test', 'password' => 'password123', 'role' => 'super_admin']);
         $token = $admin->createToken('test', ['admin:manage-admins'])->plainTextToken;
@@ -27,13 +27,16 @@ class UserRosterTest extends TestCase
         ]);
         Customer::create(['name' => 'Cory Customer', 'email' => 'customer@example.test', 'password' => 'password123']);
 
-        $this->getJson('/api/admin/user-roster?per_page=10')->assertOk()->assertJsonPath('total', 4)->assertJsonPath('counts.all', 4)
+        $this->getJson('/api/admin/user-roster?per_page=10')->assertOk()->assertJsonPath('total', 3)->assertJsonPath('counts.all', 3)
             ->assertJsonFragment(['actor_type' => 'admin', 'role' => 'superadmin', 'status' => 'active'])
             ->assertJsonFragment(['actor_type' => 'seller', 'actor_id' => $sellerId, 'linked_to' => 'Sam Store'])
             ->assertJsonFragment(['actor_type' => 'reseller', 'actor_id' => $resellerId])
-            ->assertJsonFragment(['actor_type' => 'customer', 'role' => 'customer']);
+            ->assertJsonMissing(['actor_type' => 'customer', 'role' => 'customer']);
+        $this->getJson('/api/admin/user-roster?per_page=2&page=2')->assertOk()->assertJsonPath('total', 3)->assertJsonPath('last_page', 2)
+            ->assertJsonMissing(['actor_type' => 'customer']);
         $this->getJson('/api/admin/user-roster?role=seller')->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.role', 'seller');
         $this->getJson('/api/admin/user-roster?search=Rae')->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.actor_type', 'reseller');
+        $this->getJson('/api/admin/user-roster?search=Cory')->assertOk()->assertJsonPath('total', 0)->assertJsonPath('counts.all', 0);
     }
 
     public function test_user_roster_requires_manage_admins_ability(): void
