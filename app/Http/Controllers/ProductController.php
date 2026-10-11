@@ -6,6 +6,7 @@ use App\Models\Admin;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\ProductLot;
+use App\Models\ProductLotMovement;
 use App\Models\Seller;
 use App\Models\SizeChart;
 use App\Models\MediaAsset;
@@ -13,6 +14,7 @@ use App\Services\ProductHtmlSanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Uploadcare\Api;
@@ -187,6 +189,8 @@ class ProductController extends Controller
             'videos' => ['nullable', 'array', 'max:20'],
             'videos.*' => ['required', 'url', 'starts_with:https://'],
             'default_selling_price' => ['nullable', 'numeric', 'min:0'],
+            'initial_quantity' => ['sometimes', 'integer', 'min:1'],
+            'initial_buying_price' => ['required_with:initial_quantity', 'prohibited_without:initial_quantity', 'numeric', 'min:0'],
             'compare_at_price' => ['nullable', 'numeric', 'min:0'],
             'weight_kg' => ['nullable', 'numeric', 'min:0.1', 'max:999999'],
             'size_chart_id' => ['nullable', 'integer', 'exists:size_charts,id'],
@@ -197,6 +201,9 @@ class ProductController extends Controller
         ]);
 
         $data = $this->normalizeSpecifications($data);
+        if (($data['product_type'] ?? null) !== 'simple' && isset($data['initial_quantity'])) {
+            throw ValidationException::withMessages(['initial_quantity' => ['Initial stock can only be supplied for a simple product.']]);
+        }
         if (array_key_exists('option_groups', $data)) $this->validateOptionGroups($data['option_groups'] ?? []);
         if (array_key_exists('description', $data)) $data['description'] = app(ProductHtmlSanitizer::class)->clean($data['description']);
 
@@ -238,34 +245,59 @@ class ProductController extends Controller
 
         $this->authorizeSizeChart($data['size_chart_id'] ?? null, $actor, $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null));
 
-        $product = Product::create([
-            'seller_id' => $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null),
-            'created_by_admin_id' => $actor instanceof Admin ? $actor->id : null,
-            'category_id' => $data['category_id'],
-            'brand_id' => $data['brand_id'] ?? null,
-            'name' => $data['name'],
-            'slug' => $slug,
-            'sku' => isset($data['sku']) ? trim($data['sku']) : null,
-            'seo_title' => $data['seo_title'] ?? null,
-            'seo_description' => $data['seo_description'] ?? null,
-            'description' => $data['description'] ?? null,
-            'specifications' => $data['specifications'] ?? null,
-            'specification_tables' => $data['specification_tables'] ?? null,
-            'product_type' => $data['product_type'],
-            'option_groups' => $data['option_groups'] ?? null,
-            'status' => $data['status'] ?? 'draft',
-            'thumbnail' => $thumbnailUrl,
-            'gallery' => $galleryUrls,
-            'videos' => $data['videos'] ?? null,
-            'default_selling_price' => $data['default_selling_price'] ?? null,
-            'compare_at_price' => $data['compare_at_price'] ?? null,
-            'weight_kg' => $data['weight_kg'] ?? 0.5,
-            'size_chart_id' => $data['size_chart_id'] ?? null,
-            'homepage_trending' => (bool) ($data['homepage_trending'] ?? false),
-            'homepage_new_arrival' => (bool) ($data['homepage_new_arrival'] ?? false),
-            'homepage_featured' => (bool) ($data['homepage_featured'] ?? false),
-            'homepage_sort_order' => $data['homepage_sort_order'] ?? 0,
-        ]);
+        $product = DB::transaction(function () use ($actor, $data, $slug, $thumbnailUrl, $galleryUrls): Product {
+            $product = Product::create([
+                'seller_id' => $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null),
+                'created_by_admin_id' => $actor instanceof Admin ? $actor->id : null,
+                'category_id' => $data['category_id'],
+                'brand_id' => $data['brand_id'] ?? null,
+                'name' => $data['name'],
+                'slug' => $slug,
+                'sku' => isset($data['sku']) ? trim($data['sku']) : null,
+                'seo_title' => $data['seo_title'] ?? null,
+                'seo_description' => $data['seo_description'] ?? null,
+                'description' => $data['description'] ?? null,
+                'specifications' => $data['specifications'] ?? null,
+                'specification_tables' => $data['specification_tables'] ?? null,
+                'product_type' => $data['product_type'],
+                'option_groups' => $data['option_groups'] ?? null,
+                'status' => $data['status'] ?? 'draft',
+                'thumbnail' => $thumbnailUrl,
+                'gallery' => $galleryUrls,
+                'videos' => $data['videos'] ?? null,
+                'default_selling_price' => $data['default_selling_price'] ?? null,
+                'compare_at_price' => $data['compare_at_price'] ?? null,
+                'weight_kg' => $data['weight_kg'] ?? 0.5,
+                'size_chart_id' => $data['size_chart_id'] ?? null,
+                'homepage_trending' => (bool) ($data['homepage_trending'] ?? false),
+                'homepage_new_arrival' => (bool) ($data['homepage_new_arrival'] ?? false),
+                'homepage_featured' => (bool) ($data['homepage_featured'] ?? false),
+                'homepage_sort_order' => $data['homepage_sort_order'] ?? 0,
+            ]);
+
+            if (isset($data['initial_quantity'])) {
+                $lot = ProductLot::create([
+                    'product_id' => $product->id,
+                    'variation_id' => null,
+                    'lot_number' => 'INITIAL-' . $product->id,
+                    'buying_price' => $data['initial_buying_price'],
+                    'selling_price' => $product->default_selling_price ?? 0,
+                    'quantity' => $data['initial_quantity'],
+                    'quantity_remaining' => $data['initial_quantity'],
+                    'received_at' => now(),
+                ]);
+                ProductLotMovement::create([
+                    'product_lot_id' => $lot->id,
+                    'quantity_change' => $data['initial_quantity'],
+                    'reason' => 'received',
+                    'actor_type' => $actor::class,
+                    'actor_id' => $actor->id,
+                    'meta' => ['lot_number' => $lot->lot_number, 'source' => 'product_create'],
+                ]);
+            }
+
+            return $product;
+        });
 
         if (!empty($data['tag_ids'])) $product->tags()->sync($data['tag_ids']);
 
