@@ -297,6 +297,8 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/homepage/offer-sets', [HomepageOfferBlockController::class, 'storeSet']);
     Route::post('/homepage/offer-sets/{offerSet}', [HomepageOfferBlockController::class, 'updateSet']);
     Route::post('/homepage/offer-sets/{offerSet}/delete', [HomepageOfferBlockController::class, 'destroySet']);
+    Route::post('/homepage/offer-sets/{offerSet}/blocks', [HomepageOfferBlockController::class, 'storeBlock']);
+    Route::post('/homepage/offer-sets/{offerSet}/blocks/{block}/delete', [HomepageOfferBlockController::class, 'destroyBlock']);
     Route::post('/homepage/offer-blocks/{block}', [HomepageOfferBlockController::class, 'update']);
     Route::get('/homepage/layout', [HomepageLayoutController::class, 'show']);
     Route::post('/homepage/layout', [HomepageLayoutController::class, 'update']);

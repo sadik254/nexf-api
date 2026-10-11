@@ -27,7 +27,7 @@ class Customer extends Authenticatable
         'password',
         'profile_picture',
         'reseller_id',
-        'crm_status', 'contact_street', 'contact_area', 'contact_district', 'roster_archived_at',
+        'crm_status', 'is_risky', 'contact_street', 'contact_area', 'contact_district', 'roster_archived_at',
     ];
 
     /**
@@ -49,6 +49,7 @@ class Customer extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
+            'is_risky' => 'boolean',
             'password' => 'hashed',
         ];
     }

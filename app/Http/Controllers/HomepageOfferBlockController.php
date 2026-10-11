@@ -56,6 +56,35 @@ class HomepageOfferBlockController extends Controller
         return response()->json($set->load('blocks'),201);
     }
     public function updateSet(Request $request, HomepageOfferSet $offerSet): JsonResponse { $this->authorizeManager($request); $offerSet->update($request->validate(['name'=>['required','string','max:120']])); return response()->json($offerSet->load('blocks')); }
+    public function storeBlock(Request $request, HomepageOfferSet $offerSet): JsonResponse
+    {
+        $this->authorizeManager($request);
+        $data = $request->validate([
+            'title' => ['required', 'string', 'max:160'], 'body' => ['nullable', 'string', 'max:1000'],
+            'cta' => ['required', 'string', 'max:80'], 'href' => ['required', 'string', 'max:500', 'regex:/^(\/|https:\/\/)/'],
+            'image' => ['required', 'string', 'max:1000', 'regex:/^(\/|https:\/\/)/'],
+            'mobile_image' => ['nullable', 'string', 'max:1000', 'regex:/^(\/|https:\/\/)/'],
+            'theme' => ['required', Rule::in(['slate','gray','zinc','neutral','stone','red','orange','amber','yellow','lime','green','emerald','teal','cyan','sky','blue','indigo','violet','purple','fuchsia','pink','rose'])],
+            'hidden' => ['sometimes', 'boolean'],
+        ]);
+        $block = \Illuminate\Support\Facades\DB::transaction(function () use ($offerSet, $data) {
+            $locked = HomepageOfferSet::query()->lockForUpdate()->findOrFail($offerSet->id);
+            $slot = ((int) $locked->blocks()->max('slot')) + 1;
+            if ($slot > 255) abort(422, 'This offer set cannot contain more blocks.');
+            return $locked->blocks()->create($data + [
+                'row_type' => $locked->row_type, 'slot' => $slot, 'hidden' => true,
+            ]);
+        });
+        return response()->json(['block' => $block], 201);
+    }
+
+    public function destroyBlock(Request $request, HomepageOfferSet $offerSet, HomepageOfferBlock $block): JsonResponse
+    {
+        $this->authorizeManager($request);
+        abort_unless((int) $block->offer_set_id === (int) $offerSet->id, 404);
+        $block->delete();
+        return response()->json(['message' => 'Offer block deleted.']);
+    }
     public function destroySet(Request $request, HomepageOfferSet $offerSet): JsonResponse
     {
         $this->authorizeManager($request);

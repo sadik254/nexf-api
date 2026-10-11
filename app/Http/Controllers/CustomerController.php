@@ -58,6 +58,7 @@ class CustomerController extends Controller
             'area' => ['nullable', 'string', 'max:150'],
             'district' => ['nullable', 'string', 'max:100'],
             'crm_status' => ['required', Rule::in(['new', 'active', 'vip'])],
+            'is_risky' => ['sometimes', 'boolean'],
         ]);
         $created = $customer === null;
         $result = DB::transaction(function () use ($customer, $data) {
@@ -70,7 +71,8 @@ class CustomerController extends Controller
             }
             $record->fill(['name' => trim($data['name']), 'phone' => $data['phone'], 'email' => $email,
                 'contact_street' => $data['street'] ?? null, 'contact_area' => $data['area'] ?? null,
-                'contact_district' => $data['district'] ?? null, 'crm_status' => $data['crm_status']]);
+                'contact_district' => $data['district'] ?? null, 'crm_status' => $data['crm_status'],
+                'is_risky' => $data['is_risky'] ?? $record->is_risky ?? false]);
             // A contact record grants no verified account or known login password.
             if (!$record->exists) $record->password = Str::random(64);
             $record->save();
