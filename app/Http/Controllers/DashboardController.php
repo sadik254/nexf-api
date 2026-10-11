@@ -77,6 +77,7 @@ class DashboardController extends Controller
             'sales_trend' => $this->trend($seller, $from, $to),
             'metric_trends' => $this->metricTrends($seller, $from, $to),
             'order_pipeline' => $this->pipeline($seller, $from, $to),
+            'packed_orders' => (clone $orders)->whereBetween('orders.packed_at', [$from, $to])->count(),
             'top_products' => $this->topProducts($seller, $from, $to),
             'top_sellers' => $seller ? [] : $this->topSellers($from, $to),
             'sales_breakdown' => $this->salesBreakdown($seller, $from, $to),
