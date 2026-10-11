@@ -234,6 +234,7 @@ class OrderController extends Controller
             'is_guest' => ['sometimes', 'boolean'],
             'manual_ship' => ['sometimes', 'boolean'],
             'exchange_for' => ['sometimes', 'nullable', 'string', 'max:80'],
+            'status' => ['sometimes', 'in:pending'],
             'packed' => ['sometimes', 'boolean'],
             'shipping_name' => ['sometimes', 'string', 'max:255'],
             'shipping_phone' => ['sometimes', 'string', 'max:32'],
@@ -241,6 +242,30 @@ class OrderController extends Controller
             'shipping_address' => ['sometimes', 'string'],
             'notes' => ['sometimes', 'nullable', 'string'],
         ]);
+        if (array_key_exists('status', $data)) {
+            if (!empty($data['packed'])) {
+                throw ValidationException::withMessages(['status' => ['A processing order cannot be packed.']]);
+            }
+            unset($data['status']);
+            DB::transaction(function () use ($order): void {
+                $locked = Order::query()->lockForUpdate()->findOrFail($order->id);
+                if ($locked->status === 'pending') return;
+
+                $items = $locked->items()->lockForUpdate()->get();
+                if ($locked->status !== 'confirmed' || $items->isEmpty() || $items->contains(fn (OrderItem $item) =>
+                    $item->fulfillment_status !== 'confirmed'
+                    || $item->courier_consignment_id !== null
+                    || $item->shipped_at !== null
+                    || $item->delivered_at !== null
+                )) {
+                    throw ValidationException::withMessages(['status' => ['Only an unshipped, fully confirmed order can return to processing.']]);
+                }
+
+                $locked->items()->update(['fulfillment_status' => 'pending', 'confirmed_at' => null]);
+                $locked->update(['packed_at' => null]);
+                $this->refreshOrderStatus($locked);
+            });
+        }
         if (array_key_exists('packed', $data)) {
             if ($data['packed'] && $order->status !== 'confirmed') {
                 throw ValidationException::withMessages(['packed' => ['An order must be confirmed before it can be packed.']]);

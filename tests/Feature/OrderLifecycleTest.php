@@ -446,6 +446,46 @@ class OrderLifecycleTest extends TestCase
             ->assertJsonPath('order.packed_at', fn ($value) => is_string($value) && $value !== '');
     }
 
+    public function test_admin_can_return_an_unshipped_confirmed_order_to_processing(): void
+    {
+        [$customer, $product] = $this->checkoutFixtures(1);
+        $order = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
+        $admin = Admin::create(['name' => 'Reopen Admin', 'email' => 'reopen-admin@example.test', 'password' => 'password123', 'role' => 'super_admin']);
+        $token = $admin->createToken('test', ['admin:orders'])->plainTextToken;
+
+        $this->withToken($token)
+            ->postJson("/api/admin/orders/{$order['id']}/items/{$order['items'][0]['id']}/fulfillment", ['status' => 'confirmed'])
+            ->assertOk();
+
+        $this->withToken($token)
+            ->postJson("/api/admin/orders/{$order['id']}", ['packed' => true])
+            ->assertOk();
+
+        $this->withToken($token)
+            ->postJson("/api/admin/orders/{$order['id']}", ['status' => 'pending'])
+            ->assertOk()
+            ->assertJsonPath('order.status', 'pending')
+            ->assertJsonPath('order.packed_at', null)
+            ->assertJsonPath('order.items.0.fulfillment_status', 'pending')
+            ->assertJsonPath('order.items.0.confirmed_at', null);
+    }
+
+    public function test_admin_cannot_return_a_shipped_order_to_processing(): void
+    {
+        [$customer, $product] = $this->checkoutFixtures(1);
+        $order = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
+        $admin = Admin::create(['name' => 'No Reopen Admin', 'email' => 'no-reopen-admin@example.test', 'password' => 'password123', 'role' => 'super_admin']);
+        $token = $admin->createToken('test', ['admin:orders'])->plainTextToken;
+        $item = OrderItem::findOrFail($order['items'][0]['id']);
+        $item->update(['fulfillment_status' => 'shipped', 'tracking_number' => 'TRACK-1', 'shipped_at' => now()]);
+        \App\Models\Order::findOrFail($order['id'])->update(['status' => 'shipped']);
+
+        $this->withToken($token)
+            ->postJson("/api/admin/orders/{$order['id']}", ['status' => 'pending'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('status');
+    }
+
     public function test_admin_can_create_a_guest_order_through_the_checkout_contract(): void
     {
         [$customer, $product] = $this->checkoutFixtures(1);
@@ -596,7 +636,7 @@ class OrderLifecycleTest extends TestCase
 
         return $this->withToken($token)->postJson('/api/customers/orders', [
             'items' => [['product_id' => $product->id, 'quantity' => $quantity]],
-            'payment_method_id' => PaymentMethod::firstOrFail()->id,
+            'payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id,
             'shipping_method_id' => ShippingMethod::firstOrFail()->id,
             'coupon_code' => $couponCode,
             'shipping_name' => 'Customer',
