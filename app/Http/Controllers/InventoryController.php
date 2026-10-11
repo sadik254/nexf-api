@@ -17,8 +17,9 @@ class InventoryController extends Controller
     public function historyAdmin(Request $request): JsonResponse
     {
         abort_unless($request->user() instanceof Admin, 403);
-        $scope = $request->validate(['scope' => ['sometimes', 'in:house,all']])['scope'] ?? 'house';
-        return response()->json($this->history($request, null, $scope === 'all'));
+        $filters = $request->validate(['scope' => ['sometimes', 'in:house,all'], 'seller_id' => ['sometimes', 'regex:/^(house|[1-9][0-9]*)$/']]);
+        $scope = $filters['scope'] ?? 'house';
+        return response()->json($this->history($request, null, $scope === 'all', $filters['seller_id'] ?? null));
     }
 
     public function historySeller(Request $request): JsonResponse
@@ -28,29 +29,70 @@ class InventoryController extends Controller
         return response()->json($this->history($request, $seller->id));
     }
 
-    private function history(Request $request, ?int $sellerId, bool $allStores = false): LengthAwarePaginator
+    private function history(Request $request, ?int $sellerId, bool $allStores = false, ?string $storeFilter = null): LengthAwarePaginator
     {
         $filters = $request->validate([
             'product_id' => ['sometimes', 'integer', 'min:1'],
             'variation_id' => ['sometimes', 'integer', 'min:1'],
             'reason' => ['sometimes', 'string', 'max:80'],
+            'group' => ['sometimes', 'in:orders,in,adjust,loss'],
+            'search' => ['sometimes', 'string', 'max:100'],
             'page' => ['sometimes', 'integer', 'min:1'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
-        return ProductLotMovement::query()
-            ->whereHas('lot', function ($lots) use ($sellerId, $filters, $allStores) {
-                $lots->where(function ($query) use ($sellerId, $filters, $allStores) {
+        $movements = ProductLotMovement::query()
+            ->whereHas('lot', function ($lots) use ($sellerId, $filters, $allStores, $storeFilter) {
+                $lots->where(function ($query) use ($sellerId, $filters, $allStores, $storeFilter) {
                     $query->whereHas('product', fn ($product) => $product
                         ->when(!$allStores, fn ($q) => $q->where('seller_id', $sellerId))
+                        ->when($allStores && $storeFilter === 'house', fn ($q) => $q->whereNull('seller_id'))
+                        ->when($allStores && $storeFilter !== null && $storeFilter !== 'house', fn ($q) => $q->where('seller_id', $storeFilter))
                         ->when(isset($filters['product_id']), fn ($q) => $q->whereKey($filters['product_id'])))
                         ->orWhereHas('variation.product', fn ($product) => $product
                             ->when(!$allStores, fn ($q) => $q->where('seller_id', $sellerId))
+                            ->when($allStores && $storeFilter === 'house', fn ($q) => $q->whereNull('seller_id'))
+                            ->when($allStores && $storeFilter !== null && $storeFilter !== 'house', fn ($q) => $q->where('seller_id', $storeFilter))
                             ->when(isset($filters['product_id']), fn ($q) => $q->whereKey($filters['product_id'])));
                 })->when(isset($filters['variation_id']), fn ($q) => $q->where('variation_id', $filters['variation_id']));
             })
             ->when(isset($filters['reason']), fn ($q) => $q->where('reason', $filters['reason']))
-            ->with(['lot.product:id,name', 'lot.variation:id,product_id,sku,attributes', 'lot.variation.product:id,name'])
+            ->when(($filters['group'] ?? null) === 'orders', fn ($q) => $q->where('reason', 'order_sale'))
+            ->when(($filters['group'] ?? null) === 'in', fn ($q) => $q->whereIn('reason', ['received', 'return_restock']))
+            ->when(($filters['group'] ?? null) === 'adjust', fn ($q) => $q->where('reason', 'adjustment')->whereNotIn('meta->reason', ['damaged', 'lost', 'promotion']))
+            ->when(($filters['group'] ?? null) === 'loss', fn ($q) => $q->where('reason', 'adjustment')->whereIn('meta->reason', ['damaged', 'lost', 'promotion']))
+            ->when(!empty($filters['search']), function ($q) use ($filters) {
+                $search = trim($filters['search']);
+                $q->where(function ($match) use ($search) {
+                    $match->where('reason', 'like', "%{$search}%")
+                        ->orWhere('meta->note', 'like', "%{$search}%")
+                        ->orWhere('meta->order_id', 'like', "%{$search}%")
+                        ->orWhereHas('lot', fn ($lot) => $lot->where('lot_number', 'like', "%{$search}%")
+                            ->orWhereHas('product', fn ($product) => $product->where('name', 'like', "%{$search}%"))
+                            ->orWhereHas('variation', fn ($variation) => $variation->where('sku', 'like', "%{$search}%")->orWhereHas('product', fn ($product) => $product->where('name', 'like', "%{$search}%"))));
+                });
+            })
+            ->with(['lot.product:id,name,seller_id', 'lot.product.seller:id,store_name', 'lot.variation:id,product_id,sku,attributes', 'lot.variation.product:id,name,seller_id', 'lot.variation.product.seller:id,store_name'])
             ->latest()->paginate($filters['per_page'] ?? 25);
+
+        $productIds = $movements->getCollection()->map(fn ($movement) => $movement->lot?->product_id ?? $movement->lot?->variation?->product_id)->filter()->unique();
+        $variationIds = $movements->getCollection()->map(fn ($movement) => $movement->lot?->variation_id)->filter()->unique();
+        $lotIds = $movements->getCollection()->map(fn ($movement) => $movement->product_lot_id)->unique();
+        $allLotIds = ProductLot::query()->where(function ($query) use ($productIds, $variationIds) {
+            $query->when($productIds->isNotEmpty(), fn ($q) => $q->whereIn('product_id', $productIds)->whereNull('variation_id'))
+                ->when($variationIds->isNotEmpty(), fn ($q) => $q->orWhereIn('variation_id', $variationIds));
+        })->pluck('id');
+        $balances = ProductLot::query()->whereIn('id', $allLotIds)->selectRaw('COALESCE(product_id, 0) as product_id, COALESCE(variation_id, 0) as variation_id, SUM(quantity_remaining) as available')->groupBy('product_id', 'variation_id')->get()->keyBy(fn ($row) => $row->product_id . ':' . $row->variation_id);
+        $deltas = ProductLotMovement::query()->whereIn('product_lot_id', $allLotIds)->whereNotIn('product_lot_id', $lotIds)->selectRaw('product_lot_id, SUM(quantity_change) as quantity_change')->groupBy('product_lot_id')->pluck('quantity_change', 'product_lot_id');
+        $movements->getCollection()->each(function (ProductLotMovement $movement) use ($balances, $deltas, $allLotIds) {
+            $lot = $movement->lot;
+            if (!$lot) return;
+            $productId = $lot->product_id ?? $lot->variation?->product_id;
+            $key = ($productId ?? 0) . ':' . ($lot->variation_id ?? 0);
+            $current = (int) ($balances->get($key)?->available ?? 0);
+            $laterOnSameLot = (int) $deltas->get($lot->id, 0);
+            $movement->setAttribute('available_after', $current - $laterOnSameLot - (int) $movement->quantity_change);
+        });
+        return $movements;
     }
     public function indexAdmin(Request $request): JsonResponse
     {

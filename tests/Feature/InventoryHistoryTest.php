@@ -76,6 +76,8 @@ class InventoryHistoryTest extends TestCase
             ->assertJsonPath('total', 2)->assertJsonPath('data.0.reason', 'received');
         $this->withToken($adminToken)->getJson('/api/admin/inventory/history?scope=all&product_id=' . $sellerProduct->id)->assertOk()
             ->assertJsonPath('total', 1)->assertJsonPath('data.0.lot.lot_number', "LOT-{$sellerProduct->id}");
+        $this->withToken($adminToken)->getJson('/api/admin/inventory/history?scope=all&seller_id=' . $seller->id . '&group=in')->assertOk()
+            ->assertJsonPath('total', 1)->assertJsonPath('data.0.lot.lot_number', "LOT-{$sellerProduct->id}");
         $this->withToken($sellerToken)->getJson('/api/seller/inventory/history')->assertOk()
             ->assertJsonPath('total', 1)->assertJsonPath('data.0.lot.lot_number', "LOT-{$sellerProduct->id}");
         $this->withToken($sellerToken)->getJson('/api/seller/inventory?per_page=1')->assertOk()
@@ -110,5 +112,9 @@ class InventoryHistoryTest extends TestCase
             ->assertJsonPath('data.0.lots.0.quantity', 0);
         $this->withToken($adminToken)->getJson('/api/admin/inventory/history?scope=all&reason=adjustment')->assertOk()
             ->assertJsonPath('total', 3);
+        $this->withToken($adminToken)->getJson('/api/admin/inventory/history?scope=all&seller_id=house&group=loss')->assertOk()
+            ->assertJsonPath('total', 1)->assertJsonPath('data.0.meta.reason', 'damaged');
+        $this->withToken($adminToken)->getJson('/api/admin/inventory/history?scope=all&seller_id=house&group=adjust&search=Found%20during%20count')->assertOk()
+            ->assertJsonPath('total', 0);
     }
 }
