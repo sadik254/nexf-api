@@ -22,13 +22,13 @@ class WithdrawalController extends Controller
     public function wallet(Request $request): JsonResponse
     {
         $customer = $request->user(); abort_unless($customer instanceof Customer, 403);
-        $transactions = CustomerWalletTransaction::where('customer_id', $customer->id)->with(['order:id,order_number', 'returnRequest.order:id,order_number'])->latest()->get();
+        $transactions = CustomerWalletTransaction::where('customer_id', $customer->id)->with(['order:id,order_number', 'returnRequest.order:id,order_number', 'withdrawalRequest:id,status'])->latest()->get();
         $transactions->each(function (CustomerWalletTransaction $transaction): void {
             $transaction->setAttribute('order_number', $transaction->order?->order_number ?? $transaction->returnRequest?->order?->order_number);
         });
         $withdrawals = WithdrawalRequest::where('customer_id', $customer->id)->latest()->get();
-        $earned = $transactions->where('type', 'credit')->sum('amount');
-        $spent = $transactions->where('type', 'debit')->sum('amount');
+        $earned = $transactions->where('type', 'credit')->reject(fn (CustomerWalletTransaction $transaction) => $transaction->kind === 'withdrawal_reversal')->sum('amount');
+        $spent = $transactions->where('type', 'debit')->reject(fn (CustomerWalletTransaction $transaction) => $transaction->kind === 'withdrawal' && $transaction->withdrawalRequest?->status === 'rejected')->sum('amount');
         return response()->json(['balance' => $earned - $spent, 'earned' => $earned, 'spent' => $spent,
             'transactions' => $transactions, 'withdrawals' => $withdrawals]);
     }
