@@ -43,7 +43,7 @@ class InventoryHistoryTest extends TestCase
             'kyc_document_url' => 'https://example.test/kyc', 'product_category' => 'Clothing',
             'status' => 'approved', 'is_active' => true, 'password' => 'password123',
         ]);
-        $house = Product::create(['category_id' => $category->id, 'name' => 'House', 'slug' => 'house', 'product_type' => 'simple', 'status' => 'active']);
+        $house = Product::create(['category_id' => $category->id, 'name' => 'House', 'slug' => 'house', 'sku' => 'HOUSE-001', 'product_type' => 'simple', 'status' => 'active']);
         $second = Product::create(['category_id' => $category->id, 'name' => 'Second', 'slug' => 'second', 'product_type' => 'simple', 'status' => 'active']);
         $sellerProduct = Product::create(['seller_id' => $seller->id, 'category_id' => $category->id, 'name' => 'Seller', 'slug' => 'seller', 'product_type' => 'simple', 'status' => 'active']);
 
@@ -56,8 +56,16 @@ class InventoryHistoryTest extends TestCase
         }
 
         $this->withToken($adminToken)->getJson('/api/admin/inventory?per_page=1')->assertOk()
-            ->assertJsonPath('total', 2)->assertJsonPath('summary.available_units', 7)
-            ->assertJsonPath('summary.low_stock', 2);
+            ->assertJsonPath('total', 3)->assertJsonPath('summary.available_units', 16)
+            ->assertJsonPath('summary.units_on_hand', 16)->assertJsonPath('summary.committed_units', 0)
+            ->assertJsonPath('summary.stock_value_at_cost', 160)->assertJsonPath('summary.low_stock', 2)
+            ->assertJsonPath('stock_counts.low', 2)->assertJsonPath('stock_counts.ok', 1);
+        $this->withToken($adminToken)->getJson('/api/admin/inventory?stock=low&search=Second')->assertOk()
+            ->assertJsonPath('total', 1)->assertJsonPath('data.0.product_name', 'Second');
+        $this->withToken($adminToken)->getJson('/api/admin/inventory?stock=untracked')->assertOk()
+            ->assertJsonPath('total', 0);
+        $this->withToken($adminToken)->getJson('/api/admin/inventory?seller_id=house')->assertOk()
+            ->assertJsonPath('total', 2)->assertJsonPath('data.0.sku', 'HOUSE-001');
         $this->withToken($adminToken)->getJson('/api/admin/products?per_page=1')->assertOk()
             ->assertJsonPath('total', 2)->assertJsonPath('status_counts.active', 2);
         $this->withToken($adminToken)->getJson('/api/admin/products?search=House')->assertOk()
@@ -66,6 +74,8 @@ class InventoryHistoryTest extends TestCase
             ->assertJsonPath('total', 0)->assertJsonPath('status_counts.active', 2);
         $this->withToken($adminToken)->getJson('/api/admin/inventory/history')->assertOk()
             ->assertJsonPath('total', 2)->assertJsonPath('data.0.reason', 'received');
+        $this->withToken($adminToken)->getJson('/api/admin/inventory/history?scope=all&product_id=' . $sellerProduct->id)->assertOk()
+            ->assertJsonPath('total', 1)->assertJsonPath('data.0.lot.lot_number', "LOT-{$sellerProduct->id}");
         $this->withToken($sellerToken)->getJson('/api/seller/inventory/history')->assertOk()
             ->assertJsonPath('total', 1)->assertJsonPath('data.0.lot.lot_number', "LOT-{$sellerProduct->id}");
         $this->withToken($sellerToken)->getJson('/api/seller/inventory?per_page=1')->assertOk()
