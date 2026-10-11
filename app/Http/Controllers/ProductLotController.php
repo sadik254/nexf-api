@@ -49,6 +49,81 @@ class ProductLotController extends Controller
         return response()->json(['message' => 'Stock adjusted.', 'lot' => $updated]);
     }
 
+    public function setAvailable(Request $request): JsonResponse
+    {
+        $actor = $request->user();
+        abort_unless($actor instanceof Admin || $actor instanceof Seller, 403);
+        $data = $request->validate([
+            'items' => ['required', 'array', 'min:1', 'max:100'],
+            'items.*.product_id' => ['required', 'integer', 'min:1'],
+            'items.*.variation_id' => ['nullable', 'integer', 'min:1'],
+            'items.*.available_quantity' => ['required', 'integer', 'min:0'],
+            'reason' => ['required', 'string', 'max:100'],
+            'note' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $updated = DB::transaction(function () use ($actor, $data, $request) {
+            $result = [];
+            foreach ($data['items'] as $item) {
+                $product = Product::query()->with('variations')->lockForUpdate()->findOrFail($item['product_id']);
+                $this->authorizeProduct($product, $actor);
+                $variationId = $item['variation_id'] ?? null;
+                if ($variationId !== null && !$product->variations->contains('id', $variationId)) {
+                    throw ValidationException::withMessages(['items' => ['The variation does not belong to this product.']]);
+                }
+                $target = $variationId
+                    ? ProductLot::query()->where('variation_id', $variationId)
+                    : ProductLot::query()->where('product_id', $product->id)->whereNull('variation_id');
+                $lots = $target->orderBy('received_at')->orderBy('id')->lockForUpdate()->get();
+                if (!$lots->count()) {
+                    $targetLot = ProductLot::create([
+                        'product_id' => $variationId ? null : $product->id,
+                        'variation_id' => $variationId,
+                        'lot_number' => 'COUNT-' . now()->format('YmdHis') . '-' . $product->id . '-' . ($variationId ?? 'simple'),
+                        'buying_price' => $variationId
+                            ? (float) ($product->variations->firstWhere('id', $variationId)?->default_buying_price ?? $product->default_buying_price ?? 0)
+                            : (float) ($product->default_buying_price ?? 0),
+                        'selling_price' => $variationId
+                            ? (float) ($product->variations->firstWhere('id', $variationId)?->default_selling_price ?? $product->default_selling_price ?? 0)
+                            : (float) ($product->default_selling_price ?? 0),
+                        'quantity' => $item['available_quantity'],
+                        'quantity_remaining' => $item['available_quantity'],
+                    ]);
+                    $lots = collect([$targetLot]);
+                    $old = 0;
+                } else {
+                    $old = (int) $lots->sum('quantity_remaining');
+                    $remaining = $item['available_quantity'];
+                    foreach ($lots as $lot) {
+                        $next = min((int) $lot->quantity_remaining, $remaining);
+                        $lot->update(['quantity_remaining' => $next]);
+                        $remaining -= $next;
+                    }
+                    if ($remaining > 0) {
+                        $lot = $lots->last();
+                        $lot->update(['quantity' => $lot->quantity + $remaining, 'quantity_remaining' => $lot->quantity_remaining + $remaining]);
+                        $lots->push($lot);
+                    }
+                }
+                $change = $item['available_quantity'] - $old;
+                if ($change !== 0) {
+                    ProductLotMovement::create([
+                        'product_lot_id' => $lots->last()->id,
+                        'quantity_change' => $change,
+                        'reason' => 'adjustment',
+                        'actor_type' => $actor::class,
+                        'actor_id' => $actor->id,
+                        'meta' => ['reason' => $data['reason'], 'note' => $data['note'] ?? null, 'set_available' => true],
+                    ]);
+                }
+                $result[] = ['product_id' => $product->id, 'variation_id' => $variationId, 'available_quantity' => $item['available_quantity']];
+            }
+            return $result;
+        });
+
+        return response()->json(['message' => 'Inventory counts saved.', 'items' => $updated]);
+    }
+
     public function storeForProduct(Product $product, Request $request): JsonResponse
     {
         $this->authorizeProduct($product, $request->user());

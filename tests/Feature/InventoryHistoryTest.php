@@ -91,8 +91,24 @@ class InventoryHistoryTest extends TestCase
         $this->withToken($adminToken)->postJson("/api/admin/inventory/lots/{$houseLotId}/adjust", [
             'quantity_change' => -1, 'reason' => 'damaged', 'note' => 'Found during count',
         ])->assertOk();
-        $this->withToken($adminToken)->getJson('/api/admin/inventory/history?reason=adjustment')->assertOk()
-            ->assertJsonPath('total', 1)->assertJsonPath('data.0.quantity_change', -1)
-            ->assertJsonPath('data.0.meta.reason', 'damaged');
+        $this->withToken($adminToken)->postJson('/api/admin/inventory/counts', [
+            'items' => [['product_id' => $house->id, 'available_quantity' => 7]], 'reason' => 'count_correction',
+        ])->assertOk()->assertJsonPath('items.0.available_quantity', 7);
+        $this->withToken($sellerToken)->postJson('/api/seller/inventory/counts', [
+            'items' => [['product_id' => $sellerProduct->id, 'available_quantity' => 8]], 'reason' => 'count_correction',
+        ])->assertOk()->assertJsonPath('items.0.available_quantity', 8);
+        $this->withToken($sellerToken)->postJson('/api/seller/inventory/counts', [
+            'items' => [['product_id' => $house->id, 'available_quantity' => 1]], 'reason' => 'count_correction',
+        ])->assertForbidden();
+        $untracked = Product::create(['category_id' => $category->id, 'name' => 'Untracked', 'slug' => 'untracked', 'product_type' => 'simple', 'status' => 'active']);
+        $this->withToken($adminToken)->postJson('/api/admin/inventory/counts', [
+            'items' => [['product_id' => $untracked->id, 'available_quantity' => 0]], 'reason' => 'count_correction',
+        ])->assertOk();
+        $this->withToken($adminToken)->getJson('/api/admin/inventory?stock=untracked')->assertOk()
+            ->assertJsonPath('total', 0);
+        $this->withToken($adminToken)->getJson('/api/admin/inventory?search=Untracked')->assertOk()
+            ->assertJsonPath('data.0.lots.0.quantity', 0);
+        $this->withToken($adminToken)->getJson('/api/admin/inventory/history?scope=all&reason=adjustment')->assertOk()
+            ->assertJsonPath('total', 3);
     }
 }

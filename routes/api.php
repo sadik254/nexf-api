@@ -334,6 +334,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/product-questions/{question}/delete', [ProductEngagementController::class, 'deleteQuestion']);
     Route::get('/inventory', [InventoryController::class, 'indexAdmin']);
     Route::get('/inventory/history', [InventoryController::class, 'historyAdmin']);
+    Route::post('/inventory/counts', [ProductLotController::class, 'setAvailable']);
     Route::post('/inventory/lots/{lot}/adjust', [ProductLotController::class, 'adjust']);
     Route::get('/size-charts', [SizeChartController::class, 'indexAdmin']);
     Route::post('/size-charts', [SizeChartController::class, 'storeAdmin']);
@@ -412,6 +413,7 @@ Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(f
     Route::post('/product-questions/{question}/delete', [ProductEngagementController::class, 'deleteQuestion']);
     Route::get('/inventory', [InventoryController::class, 'indexSeller']);
     Route::get('/inventory/history', [InventoryController::class, 'historySeller']);
+    Route::post('/inventory/counts', [ProductLotController::class, 'setAvailable']);
     Route::post('/inventory/lots/{lot}/adjust', [ProductLotController::class, 'adjust']);
     Route::get('/size-charts', [SizeChartController::class, 'indexSeller']);
     Route::post('/size-charts', [SizeChartController::class, 'storeSeller']);
