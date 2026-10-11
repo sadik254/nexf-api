@@ -98,6 +98,7 @@ Route::prefix('customers')->group(function () {
         Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show']);
         Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);
         Route::post('/support-attachments', [SupportTicketController::class, 'upload']);
+        Route::post('/chat-attachments', [SupportTicketController::class, 'upload']);
         Route::get('/chats', [StoreChatController::class, 'index']);
         Route::get('/chats/stores', [StoreChatController::class, 'stores']);
         Route::post('/chats', [StoreChatController::class, 'start']);
@@ -248,6 +249,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);
     Route::post('/support-tickets/{ticket}/resolve', [SupportTicketController::class, 'resolve']);
     Route::post('/support-attachments', [SupportTicketController::class, 'upload']);
+    Route::post('/chat-attachments', [SupportTicketController::class, 'upload']);
     Route::get('/chats', [StoreChatController::class, 'index']);
     Route::get('/chats/{chat}', [StoreChatController::class, 'show']);
     Route::post('/chats/{chat}/messages', [StoreChatController::class, 'reply']);
@@ -361,6 +363,7 @@ Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(f
     Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);
     Route::post('/support-tickets/{ticket}/resolve', [SupportTicketController::class, 'resolve']);
     Route::post('/support-attachments', [SupportTicketController::class, 'upload']);
+    Route::post('/chat-attachments', [SupportTicketController::class, 'upload']);
     Route::get('/chats', [StoreChatController::class, 'index']);
     Route::get('/chats/{chat}', [StoreChatController::class, 'show']);
     Route::post('/chats/{chat}/messages', [StoreChatController::class, 'reply']);
