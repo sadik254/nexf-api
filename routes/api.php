@@ -370,6 +370,11 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 });
 
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
+    Route::get('/coupons', [CouponController::class, 'indexSeller']);
+    Route::post('/coupons', [CouponController::class, 'storeSeller']);
+    Route::get('/coupons/{coupon}', [CouponController::class, 'showSeller']);
+    Route::post('/coupons/{coupon}', [CouponController::class, 'updateSeller']);
+    Route::post('/coupons/{coupon}/delete', [CouponController::class, 'destroySeller']);
     Route::get('/promotions', [SellerPromotionController::class, 'sellerIndex']);
     Route::post('/promotions', [SellerPromotionController::class, 'sellerStore']);
     Route::post('/promotions/{promotion}', [SellerPromotionController::class, 'sellerUpdate']);

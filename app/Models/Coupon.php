@@ -11,6 +11,7 @@ class Coupon extends Model
 {
     protected $fillable = [
         'created_by_admin_id',
+        'created_by_seller_id',
         'seller_id',
         'code',
         'is_automatic',
@@ -57,6 +58,11 @@ class Coupon extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(Admin::class, 'created_by_admin_id');
+    }
+
+    public function sellerCreator(): BelongsTo
+    {
+        return $this->belongsTo(Seller::class, 'created_by_seller_id');
     }
 
     public function redemptions(): HasMany

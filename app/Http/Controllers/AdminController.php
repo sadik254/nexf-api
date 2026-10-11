@@ -423,6 +423,7 @@ class AdminController extends Controller
                 'admin:customers',
                 'admin:orders',
                 'admin:products',
+                'admin:coupons',
             ]);
         }
 

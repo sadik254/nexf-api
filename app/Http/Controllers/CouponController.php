@@ -5,17 +5,21 @@ namespace App\Http\Controllers;
 use App\Models\Admin;
 use App\Models\Coupon;
 use App\Models\Customer;
+use App\Models\Product;
+use App\Models\ProductCollection;
+use App\Models\Seller;
 use App\Services\CheckoutService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Rule;
 
 class CouponController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        if (!$this->isSuperAdmin($request->user())) {
+        if (!$this->canManageCoupons($request->user())) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -50,7 +54,7 @@ class CouponController extends Controller
 
     public function show(Request $request, Coupon $coupon): JsonResponse
     {
-        if (!$this->isSuperAdmin($request->user())) {
+        if (!$this->canManageCoupons($request->user())) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -61,7 +65,7 @@ class CouponController extends Controller
     {
         /** @var Admin|null $actor */
         $actor = $request->user();
-        if (!$this->isSuperAdmin($actor)) {
+        if (!$this->canManageCoupons($actor)) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -115,7 +119,7 @@ class CouponController extends Controller
 
     public function update(Request $request, Coupon $coupon): JsonResponse
     {
-        if (!$this->isSuperAdmin($request->user())) {
+        if (!$this->canManageCoupons($request->user())) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -175,13 +179,99 @@ class CouponController extends Controller
 
     public function destroy(Request $request, Coupon $coupon): JsonResponse
     {
-        if (!$this->isSuperAdmin($request->user())) {
+        if (!$this->canManageCoupons($request->user())) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
         $coupon->delete();
 
         return response()->json(['message' => 'Coupon deleted successfully.']);
+    }
+
+    public function indexSeller(Request $request): JsonResponse
+    {
+        $seller = $request->user();
+        abort_unless($seller instanceof Seller, 403);
+        $filters = $request->validate(['status' => ['nullable', 'in:active,scheduled,expired,inactive']]);
+        $query = Coupon::query()->where('seller_id', $seller->id)->latest();
+        $search = trim((string) $request->query('search', ''));
+        if ($search !== '') $query->where(fn ($q) => $q->where('code', 'like', "%{$search}%")->orWhere('name', 'like', "%{$search}%"));
+        $now = now();
+        match ($filters['status'] ?? null) {
+            'inactive' => $query->where('is_active', false),
+            'expired' => $query->where('is_active', true)->where('expires_at', '<', $now),
+            'scheduled' => $query->where('is_active', true)->where('starts_at', '>', $now)->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>=', $now)),
+            'active' => $query->where('is_active', true)->where(fn ($q) => $q->whereNull('starts_at')->orWhere('starts_at', '<=', $now))->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>=', $now)),
+            default => null,
+        };
+        $perPage = max(1, min((int) $request->query('per_page', 25), 100));
+        return response()->json($query->paginate($perPage));
+    }
+
+    public function showSeller(Request $request, Coupon $coupon): JsonResponse
+    {
+        $seller = $request->user();
+        abort_unless($seller instanceof Seller && (int) $coupon->seller_id === $seller->id, 404);
+        return response()->json($coupon->load('sellerCreator'));
+    }
+
+    public function storeSeller(Request $request): JsonResponse
+    {
+        $seller = $request->user();
+        abort_unless($seller instanceof Seller, 403);
+        $data = $this->validateSellerCoupon($request, $seller);
+        $data['code'] = !empty($data['is_automatic']) && (empty($data['code']) || Str::upper((string) $data['code']) === 'AUTO')
+            ? 'AUTO-'.Str::upper(Str::random(10)) : $this->normalizeCode($data['code'] ?? '');
+        if (!$this->dateWindowIsValid($data['starts_at'] ?? null, $data['expires_at'] ?? null)) return response()->json(['message' => 'Coupon expiry must be after start date.'], 422);
+        if ($data['code'] === '') return response()->json(['message' => 'Coupon code is invalid.'], 422);
+        if (Coupon::where('code', $data['code'])->exists()) return response()->json(['message' => 'Coupon code already taken.'], 422);
+        $coupon = Coupon::create($data + ['created_by_seller_id' => $seller->id, 'used_count' => 0]);
+        return response()->json(['message' => 'Coupon created successfully.', 'coupon' => $coupon], 201);
+    }
+
+    public function updateSeller(Request $request, Coupon $coupon): JsonResponse
+    {
+        $seller = $request->user();
+        abort_unless($seller instanceof Seller && (int) $coupon->seller_id === $seller->id, 404);
+        $data = $this->validateSellerCoupon($request, $seller, false);
+        $startsAt = array_key_exists('starts_at', $data) ? $data['starts_at'] : $coupon->starts_at?->toDateTimeString();
+        $expiresAt = array_key_exists('expires_at', $data) ? $data['expires_at'] : $coupon->expires_at?->toDateTimeString();
+        if (!$this->dateWindowIsValid($startsAt, $expiresAt)) return response()->json(['message' => 'Coupon expiry must be after start date.'], 422);
+        if (array_key_exists('code', $data)) {
+            $data['code'] = $this->normalizeCode((string) $data['code']);
+            if ($data['code'] === '' || Coupon::where('code', $data['code'])->where('id', '!=', $coupon->id)->exists()) return response()->json(['message' => 'Coupon code is invalid or already taken.'], 422);
+        }
+        $data['seller_id'] = $seller->id;
+        $coupon->fill($data)->save();
+        return response()->json(['message' => 'Coupon updated successfully.', 'coupon' => $coupon->fresh()]);
+    }
+
+    public function destroySeller(Request $request, Coupon $coupon): JsonResponse
+    {
+        $seller = $request->user();
+        abort_unless($seller instanceof Seller && (int) $coupon->seller_id === $seller->id, 404);
+        $coupon->delete();
+        return response()->json(['message' => 'Coupon deleted successfully.']);
+    }
+
+    private function validateSellerCoupon(Request $request, Seller $seller, bool $creating = true): array
+    {
+        $data = $this->validateCoupon($request, $creating);
+        if (isset($data['seller_id']) && (int) $data['seller_id'] !== $seller->id) abort(403, 'A seller discount can only apply to its own store.');
+        foreach (['eligible_product_ids', 'buy_product_ids'] as $key) {
+            $ids = $data[$key] ?? [];
+            if ($ids && Product::whereIn('id', $ids)->where(fn ($query) => $query->where('seller_id', '!=', $seller->id)->orWhereNull('seller_id'))->exists()) {
+                throw ValidationException::withMessages([$key => ['Choose products owned by your store.']]);
+            }
+        }
+        foreach (['eligible_collection_ids', 'buy_collection_ids'] as $key) {
+            $ids = $data[$key] ?? [];
+            if ($ids && ProductCollection::whereIn('id', $ids)->where('seller_id', '!=', $seller->id)->exists()) {
+                throw ValidationException::withMessages([$key => ['Choose collections owned by your store.']]);
+            }
+        }
+        $data['seller_id'] = $seller->id;
+        return $data;
     }
 
     public function validateCode(Request $request, CheckoutService $checkout): JsonResponse
@@ -276,8 +366,8 @@ class CouponController extends Controller
         return strtotime($expiresAt) > strtotime($startsAt);
     }
 
-    private function isSuperAdmin($actor): bool
+    private function canManageCoupons($actor): bool
     {
-        return $actor instanceof Admin && $actor->role === 'super_admin';
+        return $actor instanceof Admin && in_array($actor->role, ['super_admin', 'admin'], true);
     }
 }
