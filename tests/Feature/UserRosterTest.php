@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Admin;
+use App\Models\Customer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -24,11 +25,13 @@ class UserRosterTest extends TestCase
             'name' => 'Rae Reseller', 'email' => 'reseller@example.test', 'commission_rate' => 10, 'monthly_target' => 20,
             'is_active' => true, 'created_at' => now()->subDay(), 'updated_at' => now(),
         ]);
+        Customer::create(['name' => 'Cory Customer', 'email' => 'customer@example.test', 'password' => 'password123']);
 
-        $this->getJson('/api/admin/user-roster?per_page=10')->assertOk()->assertJsonPath('total', 3)
+        $this->getJson('/api/admin/user-roster?per_page=10')->assertOk()->assertJsonPath('total', 4)->assertJsonPath('counts.all', 4)
             ->assertJsonFragment(['actor_type' => 'admin', 'role' => 'superadmin', 'status' => 'active'])
             ->assertJsonFragment(['actor_type' => 'seller', 'actor_id' => $sellerId, 'linked_to' => 'Sam Store'])
-            ->assertJsonFragment(['actor_type' => 'reseller', 'actor_id' => $resellerId]);
+            ->assertJsonFragment(['actor_type' => 'reseller', 'actor_id' => $resellerId])
+            ->assertJsonFragment(['actor_type' => 'customer', 'role' => 'customer']);
         $this->getJson('/api/admin/user-roster?role=seller')->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.role', 'seller');
         $this->getJson('/api/admin/user-roster?search=Rae')->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.actor_type', 'reseller');
     }

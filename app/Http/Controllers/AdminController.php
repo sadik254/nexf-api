@@ -60,8 +60,13 @@ class AdminController extends Controller
             ->when($role !== null && $role !== 'reseller', fn ($q) => $q->whereRaw('1 = 0'))
             ->when($search !== '', fn ($q) => $q->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('email', 'like', "%{$search}%")))
             ->selectRaw("id as actor_id, 'reseller' as actor_type, name, email, 'reseller' as role, CASE WHEN is_active = 1 THEN 'active' ELSE 'suspended' END as status, NULL as linked_to, created_at");
+        $customers = DB::table('customers')->leftJoin('resellers', 'customers.reseller_id', '=', 'resellers.id')
+            ->whereNull('customers.roster_archived_at')
+            ->when($role !== null, fn ($q) => $q->whereRaw('1 = 0'))
+            ->when($search !== '', fn ($q) => $q->where(fn ($q) => $q->where('customers.name', 'like', "%{$search}%")->orWhere('customers.email', 'like', "%{$search}%")))
+            ->selectRaw("customers.id as actor_id, 'customer' as actor_type, customers.name, customers.email, 'customer' as role, CASE WHEN customers.email_verified_at IS NULL THEN 'invited' ELSE 'active' END as status, resellers.name as linked_to, customers.created_at");
 
-        $union = $admins->unionAll($sellers)->unionAll($resellers);
+        $union = $admins->unionAll($sellers)->unionAll($resellers)->unionAll($customers);
         $perPage = (int) ($filters['per_page'] ?? 25);
         $page = max(1, (int) $request->query('page', 1));
         $base = DB::query()->fromSub($union, 'actors');
@@ -72,7 +77,9 @@ class AdminController extends Controller
             ->when($search !== '', fn ($q) => $q->where(fn ($q) => $q->where('seller_name', 'like', "%{$search}%")->orWhere('store_name', 'like', "%{$search}%")->orWhere('email', 'like', "%{$search}%")))->count();
         $resellerCount = DB::table('resellers')
             ->when($search !== '', fn ($q) => $q->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('email', 'like', "%{$search}%")))->count();
-        $counts = ['all' => $adminCount + $sellerCount + $resellerCount, 'admin' => $adminCount, 'seller' => $sellerCount, 'reseller' => $resellerCount];
+        $customerCount = DB::table('customers')->whereNull('roster_archived_at')
+            ->when($search !== '', fn ($q) => $q->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('email', 'like', "%{$search}%")))->count();
+        $counts = ['all' => $adminCount + $sellerCount + $resellerCount + $customerCount, 'admin' => $adminCount, 'seller' => $sellerCount, 'reseller' => $resellerCount];
         $rows = $base->orderByDesc('created_at')->orderBy('actor_type')->orderBy('actor_id')
             ->offset(($page - 1) * $perPage)->limit($perPage)->get()
             ->map(function ($row) {
