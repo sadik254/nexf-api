@@ -32,10 +32,11 @@ class SupportTicketController extends Controller
                 'guest_name' => trim($data['name']), 'guest_email' => strtolower(trim($data['email'])),
                 'category' => 'Contact', 'subject' => trim($data['subject']),
             ]);
+            $ticket->update(['reference' => 'SUP-' . str_pad((string) $ticket->id, 5, '0', STR_PAD_LEFT)]);
             $ticket->messages()->create(['author_type' => 'guest', 'author_id' => 0, 'body' => trim($data['message']), 'attachments' => []]);
             return $ticket;
         });
-        return response()->json(['message' => 'Message received.', 'id' => $ticket->id], 201);
+        return response()->json(['message' => 'Message received.', 'id' => $ticket->id, 'reference' => $ticket->reference], 201);
     }
 
     public function upload(Request $request): JsonResponse
@@ -96,6 +97,7 @@ class SupportTicketController extends Controller
                 'order_id' => $orderId, 'seller_id' => $sellerId,
                 'category' => trim($data['category']), 'subject' => trim($data['subject']),
             ]);
+            $ticket->update(['reference' => 'SUP-' . str_pad((string) $ticket->id, 5, '0', STR_PAD_LEFT)]);
             $ticket->messages()->create(['author_type' => $customer instanceof Customer ? 'customer' : 'reseller', 'author_id' => $customer->id, 'body' => trim($data['body']), 'attachments' => $data['attachments'] ?? []]);
             return $ticket;
         });

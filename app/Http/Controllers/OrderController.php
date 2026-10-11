@@ -20,6 +20,8 @@ use App\Services\OrderNotificationService;
 use App\Services\SteadfastService;
 use App\Services\StoreShippingService;
 use App\Services\TurnstileService;
+use App\Services\WalletBalanceService;
+use App\Models\CustomerWalletTransaction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -83,6 +85,28 @@ class OrderController extends Controller
         $preview = $this->checkout->preview($customer, $data + ['ip_address' => $request->ip()]);
 
         return $this->checkoutPreviewResponse($preview);
+    }
+
+    public function previewGuest(Request $request): JsonResponse
+    {
+        $data = $request->validate($this->checkoutRules() + [
+            'shipping_name' => ['required', 'string', 'max:255'],
+            'shipping_phone' => ['required', 'string', 'max:32'],
+            'shipping_email' => ['nullable', 'email', 'max:255'],
+            'shipping_address' => ['required', 'string'],
+            'notes' => ['nullable', 'string'],
+            'turnstile_token' => ['required', 'string', 'max:2048'],
+        ]);
+        $this->assertGuestPhone($data['shipping_phone']);
+        $this->turnstile->assertHuman($request, true);
+        $preview = $this->checkout->preview(null, $data + ['ip_address' => $request->ip()]);
+        return $this->checkoutPreviewResponse($preview);
+    }
+
+    public function storeGuest(Request $request): JsonResponse
+    {
+        $request->attributes->set('guest_checkout', true);
+        return $this->store($request);
     }
 
     private function checkoutPreviewResponse(array $preview): JsonResponse
@@ -601,11 +625,12 @@ class OrderController extends Controller
     {
         /** @var Customer $customer */
         $customer = $request->user();
-        $isAdminOrder = $request->user() instanceof Admin || $request->attributes->has('order_actor');
+        $isGuestCheckout = (bool) $request->attributes->get('guest_checkout', false);
+        $isAdminOrder = !$isGuestCheckout && ($request->user() instanceof Admin || $request->attributes->has('order_actor'));
         $actor = $request->attributes->get('order_actor') ?? $customer;
-        $isGuestOrder = $isAdminOrder ? (bool) $request->attributes->get('admin_guest', false) : false;
+        $isGuestOrder = $isGuestCheckout || ($isAdminOrder && (bool) $request->attributes->get('admin_guest', false));
 
-        if (!$isAdminOrder && !$customer instanceof Customer) {
+        if (!$isAdminOrder && !$isGuestCheckout && !$customer instanceof Customer) {
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
 
@@ -623,9 +648,10 @@ class OrderController extends Controller
             // Cloudflare Turnstile token - required once TURNSTILE_SECRET_KEY is set.
             'turnstile_token' => ['nullable', 'string', 'max:2048'],
         ]);
+        if ($isGuestCheckout) $this->assertGuestPhone($data['shipping_phone']);
 
         if (!$isAdminOrder) {
-            $this->turnstile->assertHuman($request);
+            $this->turnstile->assertHuman($request, $isGuestCheckout);
         }
 
         $exchangeReturn = null;
@@ -661,14 +687,22 @@ class OrderController extends Controller
                 ]);
             }
 
+            if ($paymentMethod->code === 'wallet') {
+                if (!$customer) throw ValidationException::withMessages(['payment_method_id' => ['NEXF Balance is available only to signed-in customers.']]);
+                Customer::whereKey($customer->id)->lockForUpdate()->firstOrFail();
+                if (app(WalletBalanceService::class)->balance($customer->id, true) < (float) $preview['total']) {
+                    throw ValidationException::withMessages(['payment_method_id' => ['Your NEXF Balance is not enough for this order.']]);
+                }
+            }
+
             $order = Order::create([
-                'order_number' => $this->generateOrderNumber(),
+                'order_number' => $this->generateOrderNumber($exchangeReturn ? 'EXC' : $this->orderPrefixForCart($data['items'])),
                 'customer_id' => $customer?->id,
                 'reseller_id' => $customer?->reseller_id,
                 'payment_method_id' => $paymentMethod->id,
                 'shipping_method_id' => $shippingMethod->id,
                 'status' => $exchangeReturn ? 'confirmed' : 'pending',
-                'payment_status' => $exchangeReturn ? 'paid' : 'unpaid',
+                'payment_status' => ($exchangeReturn || $paymentMethod->code === 'wallet') ? 'paid' : 'unpaid',
                 'payment_method_code' => $exchangeReturn ? 'exchange' : $paymentMethod->code,
                 'payment_method_name' => $exchangeReturn ? 'Exchange - no charge' : $paymentMethod->name,
                 'shipping_method_code' => $exchangeReturn ? 'manual' : $shippingMethod->code,
@@ -699,6 +733,10 @@ class OrderController extends Controller
 
             $subtotal = 0.0;
             $shippingLines = [];
+
+            if ($paymentMethod->code === 'wallet') {
+                CustomerWalletTransaction::create(['customer_id' => $customer->id, 'order_id' => $order->id, 'type' => 'debit', 'kind' => 'spend', 'amount' => $preview['total'], 'description' => "Payment for order {$order->order_number}"]);
+            }
 
             foreach ($data['items'] as $itemData) {
                 $product = Product::query()
@@ -907,6 +945,13 @@ class OrderController extends Controller
         ];
     }
 
+    private function assertGuestPhone(string $phone): void
+    {
+        if (!preg_match('/^01[3-9][0-9]{8}$/', $phone)) {
+            throw ValidationException::withMessages(['shipping_phone' => ['Enter a valid Bangladesh mobile number.']]);
+        }
+    }
+
     private function manualDiscountAmount(float $subtotal, ?string $kind, float $value): float
     {
         if ($value <= 0 || !in_array($kind, ['flat', 'percent'], true)) return 0.0;
@@ -959,13 +1004,24 @@ class OrderController extends Controller
         return $coupon;
     }
 
-    private function generateOrderNumber(): string
+    private function orderPrefixForCart(array $items): string
     {
-        do {
-            $orderNumber = 'ORD-' . now()->format('Ymd') . '-' . Str::upper(Str::random(8));
-        } while (Order::where('order_number', $orderNumber)->exists());
+        $products = Product::query()->with('seller:id,sku_prefix')->whereIn('id', collect($items)->pluck('product_id')->unique())->get();
+        $sellerIds = $products->pluck('seller_id')->unique()->values();
+        if ($sellerIds->count() !== 1 || $sellerIds->first() === null) return 'NEXF';
+        $prefix = $products->first()?->seller?->sku_prefix;
+        return is_string($prefix) && preg_match('/^[A-Z0-9]{4}$/', $prefix) ? $prefix : 'NEXF';
+    }
 
-        return $orderNumber;
+    private function generateOrderNumber(string $prefix = 'NEXF'): string
+    {
+        $prefix = strtoupper($prefix);
+        DB::table('order_number_sequences')->insertOrIgnore(['prefix' => $prefix, 'next_value' => 1]);
+        $sequence = DB::table('order_number_sequences')->where('prefix', $prefix)->lockForUpdate()->first();
+        $number = (int) $sequence->next_value;
+        DB::table('order_number_sequences')->where('prefix', $prefix)->update(['next_value' => $number + 1]);
+
+        return $prefix . '-' . str_pad((string) $number, 5, '0', STR_PAD_LEFT);
     }
 
     private function paginateOrderList($query, Request $request): array

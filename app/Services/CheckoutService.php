@@ -53,6 +53,12 @@ class CheckoutService
         $coupon = $this->resolveCoupon($data['coupon_code'] ?? null, $subtotal, $customer, $items, isset($data['exclude_order_id']) ? (int) $data['exclude_order_id'] : null);
         $discount = $coupon ? $this->discountForCart($coupon, $items, $subtotal, (float) $shipping['total']) : 0.0;
         $total = round($subtotal + $shipping['total'] - $discount, 2);
+        if ($paymentMethod->code === 'wallet') {
+            if (!$customer) throw ValidationException::withMessages(['payment_method_id' => ['NEXF Balance is available only to signed-in customers.']]);
+            if (app(WalletBalanceService::class)->balance($customer->id) < $total) {
+                throw ValidationException::withMessages(['payment_method_id' => ['Your NEXF Balance is not enough for this order.']]);
+            }
+        }
         $this->fraudGuard->assertAllowed($customer, $data + ['payment_method_code' => $paymentMethod->code], $total);
 
         return compact('paymentMethod', 'shippingMethod', 'items', 'coupon', 'subtotal') + [

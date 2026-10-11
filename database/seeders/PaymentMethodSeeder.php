@@ -28,6 +28,12 @@ class PaymentMethodSeeder extends Seeder
                 'description' => 'Pay through an online payment gateway.',
                 'sort_order' => 3,
             ],
+            [
+                'name' => 'NEXF Balance',
+                'code' => 'wallet',
+                'description' => 'Pay using your available NEXF balance.',
+                'sort_order' => 4,
+            ],
         ];
 
         foreach ($methods as $method) {

@@ -23,18 +23,20 @@ class ReturnRequestController extends Controller
     public function index(Request $request): JsonResponse
     {
         $actor = $this->actor($request);
-        $data = $request->validate(['status' => ['sometimes', Rule::in(['requested', 'approved', 'rejected', 'in_transit', 'received', 'refunded', 'exchanged', 'cancelled'])], 'per_page' => ['sometimes', 'integer', 'min:1', 'max:100']]);
+        $data = $request->validate(['status' => ['sometimes', Rule::in(['requested', 'approved', 'rejected', 'returning', 'in_transit', 'received', 'refunded', 'exchanged', 'cancelled'])], 'per_page' => ['sometimes', 'integer', 'min:1', 'max:100']]);
         $query = ReturnRequest::query()->with(['item:id,order_id,product_name,product_thumbnail,quantity,unit_selling_price', 'order:id,order_number', 'customer:id,name,email', 'seller:id,store_name'])->latest();
         if ($actor instanceof Customer) $query->where('customer_id', $actor->id);
         if ($actor instanceof Seller) $query->where('seller_id', $actor->id);
         if (isset($data['status'])) $query->where('status', $data['status']);
-        return response()->json($query->paginate($data['per_page'] ?? 20));
+        $rows = $query->paginate($data['per_page'] ?? 20);
+        if (!($actor instanceof Admin)) $rows->getCollection()->each(fn (ReturnRequest $return) => $return->makeHidden('staff_note'));
+        return response()->json($rows);
     }
 
     public function show(Request $request, ReturnRequest $returnRequest): JsonResponse
     {
         $this->authorizeRequest($this->actor($request), $returnRequest);
-        return response()->json($returnRequest->load([
+        $return = $returnRequest->load([
             'item',
             'order:id,order_number,customer_id,payment_method_id,payment_method_name,payment_status,total,shipping_name,shipping_phone,shipping_email,shipping_address,status,created_at',
             'order.paymentMethod:id,name,code',
@@ -42,7 +44,9 @@ class ReturnRequestController extends Controller
             'customer:id,name,email,phone',
             'seller:id,store_name',
             'ticket:id,subject',
-        ]));
+        ]);
+        if (!($actor instanceof Admin)) $return->makeHidden('staff_note');
+        return response()->json($return);
     }
 
     public function store(Request $request): JsonResponse
@@ -55,6 +59,7 @@ class ReturnRequestController extends Controller
             'type' => ['required', Rule::in(['refund', 'exchange'])],
             'quantity' => ['required', 'integer', 'min:1'],
             'reason' => ['required', 'string', 'max:3000'],
+            'refund_to' => ['sometimes', Rule::in(['original', 'balance'])],
         ]);
         $item = OrderItem::with('order:id,customer_id')->findOrFail($data['order_item_id']);
         abort_unless($item->order->customer_id === $customer->id, 404);
@@ -69,9 +74,13 @@ class ReturnRequestController extends Controller
             if ($lockedItem->fulfillment_status !== 'delivered') throw ValidationException::withMessages(['order_item_id' => 'Only delivered items can be returned.']);
             $claimed = ReturnRequest::where('order_item_id', $lockedItem->id)->whereNotIn('status', ['rejected', 'cancelled'])->sum('quantity');
             if ($claimed + $data['quantity'] > $lockedItem->quantity) throw ValidationException::withMessages(['quantity' => 'This item quantity is already in a return request.']);
-            return ReturnRequest::create(['order_item_id' => $lockedItem->id, 'order_id' => $lockedItem->order_id, 'customer_id' => $customer->id, 'seller_id' => $lockedItem->seller_id, 'support_ticket_id' => $data['support_ticket_id'] ?? null, 'type' => $data['type'], 'status' => 'requested', 'quantity' => $data['quantity'], 'reason' => trim($data['reason'])]);
+            $order = $lockedItem->order;
+            $return = ReturnRequest::create(['order_item_id' => $lockedItem->id, 'order_id' => $lockedItem->order_id, 'customer_id' => $customer->id, 'seller_id' => $lockedItem->seller_id, 'support_ticket_id' => $data['support_ticket_id'] ?? null, 'type' => $data['type'], 'status' => 'requested', 'quantity' => $data['quantity'], 'reason' => trim($data['reason']), 'refund_to' => $data['refund_to'] ?? 'balance', 'return_address_name' => $order->shipping_name, 'return_address_phone' => $order->shipping_phone, 'return_address_email' => $order->shipping_email, 'return_address' => $order->shipping_address, 'return_address_area' => $order->shipping_area, 'return_address_district' => $order->shipping_district]);
+            $return->update(['reference' => 'RET-' . str_pad((string) $return->id, 5, '0', STR_PAD_LEFT)]);
+            return $return;
         });
-        return response()->json($return->load(['item', 'order:id,order_number', 'seller:id,store_name']), 201);
+        $return->load(['item', 'order:id,order_number', 'seller:id,store_name'])->makeHidden('staff_note');
+        return response()->json($return, 201);
     }
 
     public function update(Request $request, ReturnRequest $returnRequest): JsonResponse
@@ -80,24 +89,31 @@ class ReturnRequestController extends Controller
         $this->authorizeRequest($actor, $returnRequest);
         abort_if($actor instanceof Customer, 403);
         $data = $request->validate([
-            'status' => ['sometimes', Rule::in(['approved', 'rejected', 'in_transit', 'received', 'refunded', 'exchanged', 'cancelled'])],
+            'status' => ['sometimes', Rule::in(['approved', 'rejected', 'returning', 'in_transit', 'received', 'refunded', 'exchanged', 'cancelled'])],
             'decision_note' => ['nullable', 'string', 'max:3000'],
+            'staff_note' => ['nullable', 'string', 'max:3000'],
             'return_tracking' => ['nullable', 'string', 'max:255'],
+            'return_courier' => ['nullable', 'string', 'max:150'],
             'outcome_reference' => ['nullable', 'string', 'max:255'],
             'refund_amount' => ['nullable', 'numeric', 'min:0'],
             'exchange_order_id' => ['sometimes', 'nullable', 'integer', 'exists:orders,id'],
         ]);
+        if (array_key_exists('staff_note', $data) && !($actor instanceof Admin)) {
+            throw ValidationException::withMessages(['staff_note' => ['Only staff may add an internal note.']]);
+        }
         if (!isset($data['status'])) {
-            if (!array_key_exists('decision_note', $data) && !array_key_exists('return_tracking', $data)) {
+            if (!array_key_exists('decision_note', $data) && !array_key_exists('staff_note', $data) && !array_key_exists('return_tracking', $data) && !array_key_exists('return_courier', $data)) {
                 throw ValidationException::withMessages(['return_request' => ['Provide an internal note or tracking update.']]);
             }
             $returnRequest->update([
                 'decision_note' => $data['decision_note'] ?? $returnRequest->decision_note,
+                'staff_note' => $data['staff_note'] ?? $returnRequest->staff_note,
                 'return_tracking' => $data['return_tracking'] ?? $returnRequest->return_tracking,
+                'return_courier' => $data['return_courier'] ?? $returnRequest->return_courier,
             ]);
             return $this->show($request, $returnRequest);
         }
-        $allowed = ['requested' => ['approved', 'rejected', 'cancelled'], 'approved' => ['in_transit', 'received', 'cancelled'], 'in_transit' => ['received', 'cancelled'], 'received' => [$returnRequest->type === 'refund' ? 'refunded' : 'exchanged']];
+        $allowed = ['requested' => ['approved', 'rejected', 'cancelled'], 'approved' => ['returning', 'in_transit', 'received', 'cancelled'], 'returning' => ['in_transit', 'received', 'cancelled'], 'in_transit' => ['received', 'cancelled'], 'received' => [$returnRequest->type === 'refund' ? 'refunded' : 'exchanged']];
         $next = $data['status'];
         if ($actor instanceof Seller && $next === 'refunded') abort(403, 'Only an administrator can record a completed refund.');
         if (!in_array($next, $allowed[$returnRequest->status] ?? [], true)) throw ValidationException::withMessages(['status' => 'Invalid return transition.']);
@@ -121,17 +137,17 @@ class ReturnRequestController extends Controller
             $maximum = (float) $returnRequest->item->unit_selling_price * $returnRequest->quantity;
             if (!isset($data['refund_amount']) || $data['refund_amount'] > $maximum) throw ValidationException::withMessages(['refund_amount' => 'A valid refund amount up to the item value is required.']);
         }
-        $updates = ['status' => $next, 'decision_note' => $data['decision_note'] ?? $returnRequest->decision_note, 'return_tracking' => $data['return_tracking'] ?? $returnRequest->return_tracking];
+        $updates = ['status' => $next, 'decision_note' => $data['decision_note'] ?? $returnRequest->decision_note, 'staff_note' => $data['staff_note'] ?? $returnRequest->staff_note, 'return_tracking' => $data['return_tracking'] ?? $returnRequest->return_tracking, 'return_courier' => $data['return_courier'] ?? $returnRequest->return_courier];
         if (array_key_exists('exchange_order_id', $data)) $updates['exchange_order_id'] = $data['exchange_order_id'];
         if (in_array($next, ['approved', 'rejected'], true)) $updates['reviewed_at'] = now();
         if ($next === 'received') $updates['received_at'] = now();
         if (in_array($next, ['refunded', 'exchanged'], true)) { $updates['completed_at'] = now(); $updates['outcome_reference'] = $data['outcome_reference']; $updates['refund_amount'] = $data['refund_amount'] ?? null; }
         DB::transaction(function () use ($returnRequest, $updates, $next) {
             $returnRequest->update($updates);
-            if ($next === 'refunded') {
+            if ($next === 'refunded' && $returnRequest->refund_to === 'balance') {
                 CustomerWalletTransaction::firstOrCreate(
                     ['return_request_id' => $returnRequest->id],
-                    ['customer_id' => $returnRequest->customer_id, 'type' => 'credit', 'amount' => $updates['refund_amount'], 'description' => "Refund for return #{$returnRequest->id}"],
+                    ['customer_id' => $returnRequest->customer_id, 'type' => 'credit', 'kind' => 'refund', 'amount' => $updates['refund_amount'], 'description' => "Refund for return {$returnRequest->reference}", 'order_id' => $returnRequest->order_id],
                 );
             }
         });

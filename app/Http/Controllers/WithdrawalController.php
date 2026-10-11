@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use App\Services\WalletBalanceService;
 
 class WithdrawalController extends Controller
 {
@@ -21,11 +22,13 @@ class WithdrawalController extends Controller
     public function wallet(Request $request): JsonResponse
     {
         $customer = $request->user(); abort_unless($customer instanceof Customer, 403);
-        $transactions = CustomerWalletTransaction::where('customer_id', $customer->id)->latest()->get();
+        $transactions = CustomerWalletTransaction::where('customer_id', $customer->id)->with(['order:id,order_number', 'returnRequest.order:id,order_number'])->latest()->get();
+        $transactions->each(function (CustomerWalletTransaction $transaction): void {
+            $transaction->setAttribute('order_number', $transaction->order?->order_number ?? $transaction->returnRequest?->order?->order_number);
+        });
         $withdrawals = WithdrawalRequest::where('customer_id', $customer->id)->latest()->get();
-        $reversed = $withdrawals->where('status', 'rejected')->sum('amount');
-        $earned = $transactions->where('type', 'credit')->sum('amount') - $reversed;
-        $spent = $transactions->where('type', 'debit')->sum('amount') - $reversed;
+        $earned = $transactions->where('type', 'credit')->sum('amount');
+        $spent = $transactions->where('type', 'debit')->sum('amount');
         return response()->json(['balance' => $earned - $spent, 'earned' => $earned, 'spent' => $spent,
             'transactions' => $transactions, 'withdrawals' => $withdrawals]);
     }
@@ -41,9 +44,10 @@ class WithdrawalController extends Controller
                 $data['account_details'] = json_encode($payout->only(['provider','account','holder','bank','branch']), JSON_UNESCAPED_UNICODE);
                 unset($data['payout_account_id']);
             }
-            if ((float) $data['amount'] > $this->balance($customer->id, true)) throw ValidationException::withMessages(['amount' => ['Amount exceeds your available balance.']]);
+            if ((float) $data['amount'] > app(WalletBalanceService::class)->balance($customer->id, true)) throw ValidationException::withMessages(['amount' => ['Amount exceeds your available balance.']]);
             $request = WithdrawalRequest::create(['customer_id' => $customer->id] + $data);
-            CustomerWalletTransaction::create(['customer_id' => $customer->id, 'type' => 'debit', 'amount' => $data['amount'], 'withdrawal_request_id' => $request->id, 'description' => "Withdrawal request #{$request->id}"]);
+            $request->update(['reference' => 'WDR-' . str_pad((string) $request->id, 5, '0', STR_PAD_LEFT)]);
+            CustomerWalletTransaction::create(['customer_id' => $customer->id, 'type' => 'debit', 'kind' => 'withdrawal', 'amount' => $data['amount'], 'withdrawal_request_id' => $request->id, 'description' => "Withdrawal request {$request->reference}"]);
             return $request;
         });
         return response()->json($withdrawal, 201);
@@ -52,19 +56,18 @@ class WithdrawalController extends Controller
     public function update(Request $request, WithdrawalRequest $withdrawal): JsonResponse
     {
         $admin = $request->user(); abort_unless($admin instanceof Admin, 403);
-        $data = $request->validate(['status' => ['required', 'in:paid,rejected'], 'admin_note' => ['nullable', 'string', 'max:2000']]);
+        $data = $request->validate(['status' => ['required', 'in:paid,rejected'], 'admin_note' => ['nullable', 'string', 'max:2000'], 'transaction_id' => ['nullable', 'string', 'max:255']]);
         DB::transaction(function () use ($withdrawal, $admin, $data) {
             Customer::whereKey($withdrawal->customer_id)->lockForUpdate()->firstOrFail();
             $locked = WithdrawalRequest::whereKey($withdrawal->id)->lockForUpdate()->firstOrFail();
             if ($locked->status !== 'requested') throw ValidationException::withMessages(['status' => ['Only pending requests may be processed.']]);
-            if ($data['status'] === 'rejected') CustomerWalletTransaction::create(['customer_id' => $locked->customer_id, 'type' => 'credit', 'amount' => $locked->amount, 'withdrawal_request_id' => $locked->id, 'description' => "Rejected withdrawal #{$locked->id}"]);
-            $locked->update(['status' => $data['status'], 'admin_note' => $data['admin_note'] ?? null, 'processed_by_admin_id' => $admin->id, 'processed_at' => now()]);
+            if ($data['status'] === 'rejected') CustomerWalletTransaction::create(['customer_id' => $locked->customer_id, 'type' => 'credit', 'kind' => 'withdrawal_reversal', 'amount' => $locked->amount, 'withdrawal_request_id' => $locked->id, 'description' => "Rejected withdrawal {$locked->reference}"]);
+            $locked->update(['status' => $data['status'], 'admin_note' => $data['admin_note'] ?? null, 'transaction_id' => $data['transaction_id'] ?? null, 'processed_by_admin_id' => $admin->id, 'processed_at' => now()]);
         });
         return response()->json($withdrawal->refresh());
     }
     private function balance(int $customerId, bool $lock = false): float
     {
-        $query = CustomerWalletTransaction::where('customer_id', $customerId); if ($lock) $query->lockForUpdate();
-        return (float) $query->selectRaw("COALESCE(SUM(CASE WHEN type = 'credit' THEN amount ELSE -amount END), 0) total")->value('total');
+        return app(WalletBalanceService::class)->balance($customerId, $lock);
     }
 }

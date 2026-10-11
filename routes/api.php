@@ -149,6 +149,8 @@ Route::get('/site-info', [SiteInfoController::class, 'show']);
 Route::get('/store/brands', [CatalogTermController::class, 'brands']);
 Route::get('/store/tags', [CatalogTermController::class, 'tags']);
 Route::post('/coupons/validate', [CouponController::class, 'validateCode']);
+Route::post('/guest/orders/preview', [OrderController::class, 'previewGuest'])->middleware('throttle:5,1');
+Route::post('/guest/orders', [OrderController::class, 'storeGuest'])->middleware('throttle:5,1');
 
 Route::prefix('admin')->group(function () {
     Route::post('/login', [AdminController::class, 'login']);

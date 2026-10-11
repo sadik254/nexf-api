@@ -13,10 +13,11 @@ use Illuminate\Validation\ValidationException;
  */
 class TurnstileService
 {
-    public function assertHuman(Request $request): void
+    public function assertHuman(Request $request, bool $required = false): void
     {
         $secret = config('services.turnstile.secret_key');
         if (!$secret) {
+            if ($required) throw ValidationException::withMessages(['turnstile_token' => ['Guest checkout is temporarily unavailable until the security check is configured.']]);
             return;
         }
 
@@ -34,9 +35,8 @@ class TurnstileService
                 'remoteip' => $request->ip(),
             ])->json();
         } catch (\Throwable $e) {
-            // Cloudflare unreachable: let the order through rather than lose a sale.
             Log::warning('Turnstile verification unavailable', ['error' => $e->getMessage()]);
-            return;
+            throw ValidationException::withMessages(['turnstile_token' => ['The security check is temporarily unavailable. Please try again.']]);
         }
 
         if (!($result['success'] ?? false)) {
