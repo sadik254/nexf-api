@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Admin;
 use App\Models\Coupon;
+use App\Models\Customer;
+use App\Services\CheckoutService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -182,11 +184,16 @@ class CouponController extends Controller
         return response()->json(['message' => 'Coupon deleted successfully.']);
     }
 
-    public function validateCode(Request $request): JsonResponse
+    public function validateCode(Request $request, CheckoutService $checkout): JsonResponse
     {
         $data = $request->validate([
             'code' => ['required', 'string', 'max:64'],
-            'subtotal' => ['required', 'numeric', 'min:0'],
+            'subtotal' => ['required_without:items', 'numeric', 'min:0'],
+            'items' => ['sometimes', 'array', 'min:1'],
+            'items.*.product_id' => ['required_with:items', 'integer', 'exists:products,id'],
+            'items.*.variation_id' => ['nullable', 'integer', 'exists:product_variations,id'],
+            'items.*.quantity' => ['required_with:items', 'integer', 'min:1'],
+            'shipping_amount' => ['sometimes', 'numeric', 'min:0'],
         ]);
 
         $code = $this->normalizeCode($data['code']);
@@ -198,6 +205,17 @@ class CouponController extends Controller
 
         if ($reason = $coupon->unusableReason()) {
             return response()->json(['message' => $reason], 422);
+        }
+
+        if (!empty($data['items'])) {
+            $customer = $request->user() instanceof Customer ? $request->user() : null;
+            $quote = $checkout->quoteCouponForCart($customer, $code, $data['items'], (float) ($data['shipping_amount'] ?? 0));
+            return response()->json([
+                'message' => 'Coupon is valid.',
+                'coupon' => $quote['coupon'],
+                'subtotal' => $quote['subtotal'],
+                'discount_amount' => $quote['discount_amount'],
+            ]);
         }
 
         $subtotal = (float) $data['subtotal'];

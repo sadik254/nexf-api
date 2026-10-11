@@ -34,19 +34,50 @@ class StoreProductController extends Controller
 
     public function stores(): JsonResponse
     {
-        return response()->json(Seller::where('status', 'approved')->where('is_active', true)->orderByDesc('is_featured')->orderBy('store_name')->get()->map(fn ($seller) => $this->transformSellerStore($seller)));
+        $sellers = Seller::where('status', 'approved')->where('is_active', true)->orderByDesc('is_featured')->orderBy('store_name')->get()
+            ->map(fn ($seller) => $this->transformSellerStore($seller));
+        return response()->json($sellers->prepend($this->transformHouseStore())->values());
     }
 
     public function storeProfile(string $slug): JsonResponse
     {
+        if ($slug === 'admin') return response()->json($this->transformHouseStore());
         $seller = Seller::where('store_slug', $slug)->where('status', 'approved')->where('is_active', true)->firstOrFail();
         return response()->json($this->transformSellerStore($seller));
+    }
+
+    private function transformHouseStore(): array
+    {
+        $reviews = Review::query()->where('status', 'approved')->whereHas('product', fn ($products) => $products->whereNull('seller_id')->where('owner_unassigned', false)->where('status', 'active'));
+        $reviewCount = (clone $reviews)->count();
+        $positiveCount = (clone $reviews)->where('rating', '>=', 4)->count();
+        $store = Store::primary();
+
+        return [
+            'type' => 'admin', 'name' => $store?->name ?? config('app.name'), 'slug' => 'admin',
+            'logo' => $store?->logo, 'image' => null, 'location' => null, 'joined_at' => null,
+            'rating_summary' => [
+                'average' => $reviewCount ? round((float) (clone $reviews)->avg('rating'), 2) : null,
+                'review_count' => $reviewCount,
+                'sold_count' => (int) \App\Models\OrderItem::query()->whereNull('seller_id')->where('fulfillment_status', 'delivered')
+                    ->whereHas('order', fn ($orders) => $orders->whereIn('status', ['delivered', 'completed']))->sum('quantity'),
+            ],
+            'performance' => [
+                'positive_rating_percentage' => $reviewCount ? round($positiveCount / $reviewCount * 100, 1) : null,
+                'on_time_shipping_percentage' => null,
+                'chat_response_percentage' => null,
+            ],
+        ];
     }
 
     private function transformSellerStore(Seller $seller): array
     {
         $reviews = Review::where('status', 'approved')->whereHas('product', fn ($products) => $products->where('seller_id', $seller->id)->where('status', 'active'));
         $count = (clone $reviews)->count();
+        $positiveCount = (clone $reviews)->where('rating', '>=', 4)->count();
+        $customerChats = $seller->storeChats()->whereHas('messages', fn ($messages) => $messages->where('author_type', 'customer'));
+        $chatCount = (clone $customerChats)->count();
+        $repliedChats = (clone $customerChats)->whereHas('messages', fn ($messages) => $messages->where('author_type', 'seller')->where('author_id', $seller->id))->count();
         return [
             'type' => 'seller', 'id' => $seller->id, 'name' => $seller->store_name,
             'slug' => $seller->store_slug, 'logo' => $seller->store_logo, 'image' => $seller->store_image,
@@ -55,8 +86,9 @@ class StoreProductController extends Controller
             'joined_at' => $seller->created_at?->toDateString(),
             'rating_summary' => ['average' => $count ? round((float) (clone $reviews)->avg('rating'), 2) : null, 'review_count' => $count,
                 'sold_count' => (int) $seller->orderItems()->where('fulfillment_status', 'delivered')->whereHas('order', fn ($orders) => $orders->whereIn('status', ['delivered', 'completed']))->sum('quantity')],
-            'performance' => ['positive_rating_percentage' => $seller->positive_rating_percentage,
-                'on_time_shipping_percentage' => $seller->on_time_shipping_percentage, 'chat_response_percentage' => $seller->chat_response_percentage],
+            'performance' => ['positive_rating_percentage' => $count ? round($positiveCount / $count * 100, 1) : null,
+                'on_time_shipping_percentage' => $seller->on_time_shipping_percentage,
+                'chat_response_percentage' => $chatCount ? round($repliedChats / $chatCount * 100, 1) : null],
         ];
     }
 

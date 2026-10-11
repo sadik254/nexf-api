@@ -69,6 +69,35 @@ class CheckoutService
         ];
     }
 
+    public function quoteCouponForCart(?Customer $customer, string $code, array $cartItems, float $shippingAmount = 0): array
+    {
+        $items = [];
+        $subtotal = 0.0;
+        foreach ($cartItems as $item) {
+            $product = Product::query()->with(['seller', 'collections:id'])->availableForSale()->find($item['product_id']);
+            if (!$product || ($product->seller_id && (!$product->seller || !$product->seller->is_active || $product->seller->status !== 'approved'))) {
+                throw ValidationException::withMessages(['items' => ['One or more products are unavailable.']]);
+            }
+            $variationId = $item['variation_id'] ?? null;
+            if ($product->product_type === 'variable' && !$variationId) throw ValidationException::withMessages(['items' => ["Select a variation for {$product->name}."]]);
+            if ($product->product_type === 'simple' && $variationId) throw ValidationException::withMessages(['items' => ["{$product->name} does not have variations."]]);
+            $variation = $variationId ? ProductVariation::query()->where('product_id', $product->id)->where('is_active', true)->find($variationId) : null;
+            if ($variationId && !$variation) throw ValidationException::withMessages(['items' => ['A selected variation is unavailable.']]);
+            $quantity = (int) $item['quantity'];
+            $quote = $variation ? $this->inventory->previewVariation($variation, $quantity) : $this->inventory->previewProduct($product, $quantity);
+            $subtotal = round($subtotal + $quote['subtotal'], 2);
+            $items[] = compact('product', 'variation', 'quantity', 'quote');
+        }
+        $coupon = $this->resolveCoupon($code, $subtotal, $customer, $items);
+        $discount = $this->discountForCart($coupon, $items, $subtotal, $shippingAmount);
+        return [
+            'coupon' => $coupon,
+            'subtotal' => $subtotal,
+            'shipping_amount' => $shippingAmount,
+            'discount_amount' => $discount,
+        ];
+    }
+
     private function resolveCoupon(?string $couponCode, float $subtotal, ?Customer $customer, array $items, ?int $excludeOrderId = null): ?Coupon
     {
         $coupon = $couponCode ? Coupon::where('code', preg_replace('/[^A-Z0-9_-]/', '', Str::upper($couponCode)))->first() : Coupon::query()->where('is_automatic', true)->get()->first(fn (Coupon $candidate) => !$candidate->unusableReason() && $this->couponMatches($candidate, $items));

@@ -135,6 +135,8 @@ class ResellerController extends Controller
     public function store(Request $request): JsonResponse
     {
         $reseller = Reseller::create($this->validated($request));
+        $this->passwordResets->send($reseller, 'reseller');
+        $reseller->setAttribute('invite_sent', true);
         return response()->json($this->withMonth($reseller, now()->startOfMonth(), now()->endOfMonth()), 201);
     }
 
