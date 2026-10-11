@@ -35,7 +35,8 @@ class ReturnRequestController extends Controller
 
     public function show(Request $request, ReturnRequest $returnRequest): JsonResponse
     {
-        $this->authorizeRequest($this->actor($request), $returnRequest);
+        $actor = $this->actor($request);
+        $this->authorizeRequest($actor, $returnRequest);
         $return = $returnRequest->load([
             'item',
             'order:id,order_number,customer_id,payment_method_id,payment_method_name,payment_status,total,shipping_name,shipping_phone,shipping_email,shipping_address,status,created_at',

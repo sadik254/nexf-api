@@ -120,6 +120,13 @@ class OrderController extends Controller
             'payment_method' => $preview['paymentMethod'], 'shipping_method' => $preview['shippingMethod'],
             'coupon' => $preview['coupon'], 'subtotal' => $preview['subtotal'],
             'discount_total' => $preview['discount_total'],
+            'applied_discounts' => $preview['coupon'] ? [[
+                'id' => $preview['coupon']->id,
+                'name' => $preview['coupon']->name ?: $preview['coupon']->code,
+                'code' => $preview['coupon']->code,
+                'kind' => $preview['coupon']->is_automatic ? 'automatic' : 'coupon',
+                'amount' => $preview['discount_total'],
+            ]] : [],
             'shipping_groups' => $preview['shipping_groups'],
             'shipping_charge' => $preview['shipping_charge'], 'total' => $preview['total'],
         ]);
@@ -161,7 +168,7 @@ class OrderController extends Controller
     public function indexSellerOrdersForSuperAdmin(Request $request, Seller $seller): JsonResponse
     {
         if (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
-        return response()->json($this->paginateOrderList(Order::whereHas('items', fn ($q) => $q->where('seller_id', $seller->id))->with(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => fn ($q) => $q->where('seller_id', $seller->id)])->latest(), $request));
+        return response()->json($this->paginateOrderList(Order::whereHas('items', fn ($q) => $q->where('seller_id', $seller->id))->with(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => fn ($q) => $q->where('seller_id', $seller->id)])->latest(), $request, $seller->id));
     }
 
     public function showSellerOrderForSuperAdmin(Request $request, Seller $seller, Order $order): JsonResponse
@@ -193,7 +200,7 @@ class OrderController extends Controller
                     'storeGroups' => fn ($query) => $query->where('seller_id', $seller->id),
                     'shippingMethod',
                 ])
-                ->latest(), $request
+            ->latest(), $request, $seller->id
         ));
     }
 
@@ -1024,7 +1031,7 @@ class OrderController extends Controller
         return $prefix . '-' . str_pad((string) $number, 5, '0', STR_PAD_LEFT);
     }
 
-    private function paginateOrderList($query, Request $request): array
+    private function paginateOrderList($query, Request $request, ?int $sellerId = null): array
     {
         $filters = $request->validate([
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
@@ -1043,6 +1050,21 @@ class OrderController extends Controller
         $counts = (clone $query)->reorder()->selectRaw('status, count(*) as count')->groupBy('status')->pluck('count', 'status')->map(fn ($count) => (int) $count)->all();
         if (isset($filters['status'])) $query->where('status', $filters['status']);
         $page = $query->paginate($filters['per_page'] ?? 25);
-        return array_merge($page->toArray(), ['status_counts' => $counts]);
+        $result = $page->toArray();
+        if ($sellerId !== null) {
+            $result['data'] = array_map(function (array $order) use ($sellerId): array {
+                $sellerSubtotal = round(collect($order['items'] ?? [])->sum(fn (array $item) => (float) $item['line_subtotal']), 2);
+                $storeGroup = collect($order['store_groups'] ?? [])->first(fn (array $group) => (int) ($group['seller_id'] ?? 0) === $sellerId);
+                $shippingCharge = (float) ($storeGroup['shipping_charge'] ?? 0);
+                $orderSubtotal = (float) ($order['subtotal'] ?? 0);
+                $discountShare = $orderSubtotal > 0 ? round((float) ($order['discount_total'] ?? 0) * ($sellerSubtotal / $orderSubtotal), 2) : 0;
+                $order['seller_subtotal'] = $sellerSubtotal;
+                $order['seller_shipping_charge'] = $shippingCharge;
+                $order['seller_discount_share'] = $discountShare;
+                $order['seller_total'] = round($sellerSubtotal + $shippingCharge - $discountShare, 2);
+                return $order;
+            }, $result['data'] ?? []);
+        }
+        return array_merge($result, ['status_counts' => $counts]);
     }
 }
