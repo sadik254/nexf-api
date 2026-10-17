@@ -310,9 +310,6 @@ class OrderController extends Controller
                 throw ValidationException::withMessages(['order' => ['Only pending or fully confirmed orders can be edited before shipping.']]);
             }
             $itemFulfillmentState = $fulfillmentStates->first() ?? 'pending';
-            if ($locked->items()->whereNotNull('seller_id')->exists()) {
-                throw ValidationException::withMessages(['order' => ['Marketplace orders cannot be edited through the house order editor.']]);
-            }
             if ($locked->items()->whereHas('review')->exists() || DB::table('return_requests')->whereIn('order_item_id', $locked->items()->select('id'))->exists()) {
                 throw ValidationException::withMessages(['order' => ['This order has review or return history and cannot have its lines replaced.']]);
             }
@@ -438,7 +435,7 @@ class OrderController extends Controller
         if (!$request->user() instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
-        if ((int) $item->order_id !== (int) $order->id || $item->seller_id !== null) {
+        if ((int) $item->order_id !== (int) $order->id) {
             return response()->json(['message' => 'Order item does not belong to this order.'], 422);
         }
 
@@ -484,9 +481,6 @@ class OrderController extends Controller
         if (!$admin instanceof Admin) return response()->json(['message' => 'Forbidden.'], 403);
         $ids = $request->validate(['order_item_ids' => ['required', 'array', 'min:1', 'max:500'], 'order_item_ids.*' => ['integer', 'distinct', 'exists:order_items,id']])['order_item_ids'];
         $items = OrderItem::query()->with(['order.customer'])->whereIn('id', $ids)->get();
-        if ($items->contains(fn ($item) => $item->seller_id !== null)) {
-            return response()->json(['message' => 'Seller parcels must be fulfilled manually through the seller order endpoint.'], 422);
-        }
         return $this->bulkShipItems($items, $ids);
     }
 

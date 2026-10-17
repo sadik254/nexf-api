@@ -196,7 +196,7 @@ class OrderLifecycleTest extends TestCase
             }
             return Http::response(['status' => 200, 'consignment' => ['consignment_id' => 1, 'invoice' => 'INV-1', 'tracking_code' => 'TRACK-API', 'status' => 'in_review']], 200);
         });
-        [$customer, $product] = $this->checkoutFixtures(1, true);
+        [$customer, $product] = $this->checkoutFixtures(2, true);
         $order = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
         $seller = $product->seller;
         $token = $seller->createToken('test', ['seller:basic'])->plainTextToken;
@@ -230,37 +230,50 @@ class OrderLifecycleTest extends TestCase
             ->assertJsonPath('order.status', 'delivered');
     }
 
-    public function test_super_admin_can_transition_seller_items_without_steadfast(): void
+    public function test_regular_admin_can_edit_and_ship_seller_items_through_standard_order_routes(): void
     {
-        Http::fake();
-        [$customer, $product] = $this->checkoutFixtures(1, true);
+        config(['services.steadfast.api_key' => 'test-key', 'services.steadfast.secret_key' => 'test-secret', 'services.steadfast.base_url' => 'https://steadfast.test/api/v1']);
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), 'bulk-order')) {
+                $items = json_decode($request['data'], true);
+                return Http::response(['data' => collect($items)->map(fn ($item) => ['invoice' => $item['invoice'], 'consignment_id' => 2, 'tracking_code' => 'BULK-TRACK', 'status' => 'success'])->all()], 200);
+            }
+            return Http::response(['status' => 200, 'consignment' => ['consignment_id' => 1, 'invoice' => 'INV-1', 'tracking_code' => 'DIRECT-TRACK', 'status' => 'in_review']], 200);
+        });
+        [$customer, $product] = $this->checkoutFixtures(2, true);
         $order = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
         $itemId = $order['items'][0]['id'];
-        $sellerId = $product->seller_id;
         $admin = Admin::create([
-            'name' => 'Super Admin',
+            'name' => 'Orders Admin',
             'email' => 'seller-order-admin@example.test',
             'password' => 'password123',
-            'role' => 'super_admin',
+            'role' => 'admin',
         ]);
         $token = $admin->createToken('test', ['admin:orders'])->plainTextToken;
-        $endpoint = "/api/admin/sellers/{$sellerId}/orders/{$order['id']}/items/{$itemId}/fulfillment";
 
-        $this->withToken($token)->postJson($endpoint, ['status' => 'confirmed'])
+        $edit = [
+            'customer_id' => $customer->id,
+            'items' => [['product_id' => $product->id, 'quantity' => 1]],
+            'payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id,
+            'shipping_method_id' => ShippingMethod::firstOrFail()->id,
+            'shipping_name' => 'Customer',
+            'shipping_phone' => '01700000000',
+            'shipping_address' => 'Dhaka',
+        ];
+        $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}", $edit)->assertOk();
+        $itemId = OrderItem::where('order_id', $order['id'])->sole()->id;
+        $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'confirmed'])
             ->assertOk()->assertJsonPath('order.items.0.fulfillment_status', 'confirmed');
         $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'shipped'])
-            ->assertUnprocessable();
-        $this->withToken($token)->postJson('/api/admin/orders/bulk-ship', ['order_item_ids' => [$itemId]])
-            ->assertUnprocessable();
-        $this->withToken($token)->postJson($endpoint, [
-            'status' => 'shipped',
-            'courier_provider' => 'Pathao Courier',
-            'tracking_number' => 'PATHAO-ADMIN-1',
-        ])->assertOk()
-            ->assertJsonPath('order.items.0.courier_provider', 'Pathao Courier')
-            ->assertJsonPath('order.items.0.courier_consignment_id', null);
+            ->assertOk()->assertJsonPath('order.items.0.courier_provider', 'steadfast')
+            ->assertJsonPath('order.items.0.tracking_number', 'DIRECT-TRACK');
 
-        Http::assertNothingSent();
+        $bulkOrder = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
+        $bulkItemId = $bulkOrder['items'][0]['id'];
+        $this->withToken($token)->postJson("/api/admin/orders/{$bulkOrder['id']}/items/{$bulkItemId}/fulfillment", ['status' => 'confirmed'])->assertOk();
+        $this->withToken($token)->postJson('/api/admin/orders/bulk-ship', ['order_item_ids' => [$bulkItemId]])
+            ->assertOk()->assertJsonPath('successful_item_ids.0', $bulkItemId);
+        $this->assertDatabaseHas('order_items', ['id' => $bulkItemId, 'fulfillment_status' => 'shipped', 'courier_provider' => 'steadfast']);
     }
 
     public function test_products_referenced_by_orders_cannot_be_deleted(): void
