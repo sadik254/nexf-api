@@ -41,6 +41,7 @@ use App\Http\Controllers\ContentReportController;
 use App\Http\Controllers\FraudGuardController;
 use App\Http\Controllers\SellerPromotionController;
 use App\Http\Controllers\StoreLayoutController;
+use App\Http\Controllers\ManualPaymentController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -168,6 +169,9 @@ Route::get('/store/tags', [CatalogTermController::class, 'tags']);
 Route::post('/coupons/validate', [CouponController::class, 'validateCode']);
 Route::post('/guest/orders/preview', [OrderController::class, 'previewGuest'])->middleware('throttle:5,1');
 Route::post('/guest/orders', [OrderController::class, 'storeGuest'])->middleware('throttle:5,1');
+Route::get('/payment-accounts', [ManualPaymentController::class, 'accounts']);
+Route::get('/orders/{order}/payment', [ManualPaymentController::class, 'show'])->middleware('throttle:60,1,order-payment-read');
+Route::post('/orders/{order}/payment', [ManualPaymentController::class, 'submit'])->middleware('throttle:10,1,order-payment-submit');
 
 Route::prefix('admin')->group(function () {
     Route::post('/login', [AdminController::class, 'login']);
@@ -187,6 +191,7 @@ Route::prefix('admin')->group(function () {
     Route::middleware('sanctum.type:admin,admin:payment-methods')->post('/payment-methods', [PaymentMethodController::class, 'store']);
     Route::middleware('sanctum.type:admin,admin:payment-methods')->post('/payment-methods/{paymentMethod}', [PaymentMethodController::class, 'update']);
     Route::middleware('sanctum.type:admin,admin:payment-methods')->post('/payment-methods/{paymentMethod}/delete', [PaymentMethodController::class, 'destroy']);
+    Route::middleware('sanctum.type:admin,admin:payment-methods')->post('/payment-accounts', [ManualPaymentController::class, 'saveAccounts']);
 
     Route::middleware('sanctum.type:admin,admin:shipping-methods')->post('/shipping-methods', [ShippingMethodController::class, 'store']);
     Route::middleware('sanctum.type:admin,admin:shipping-methods')->post('/shipping-methods/{shippingMethod}', [ShippingMethodController::class, 'update']);

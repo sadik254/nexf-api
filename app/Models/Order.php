@@ -32,6 +32,9 @@ class Order extends Model
         'manual_discount_value',
         'total',
         'paid_amount',
+        'payment_reference',
+        'payment_sender',
+        'payment_submitted_at',
         'shipping_name',
         'shipping_phone',
         'shipping_email',
@@ -65,6 +68,7 @@ class Order extends Model
             'placed_at' => 'datetime',
             'packed_at' => 'datetime',
             'payment_paid_at' => 'datetime',
+            'payment_submitted_at' => 'datetime',
             'cancelled_at' => 'datetime',
         ];
     }
