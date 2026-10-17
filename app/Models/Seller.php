@@ -48,12 +48,14 @@ class Seller extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'store_layout',
     ];
 
     protected function casts(): array
     {
         return [
             'delivery_options_customized' => 'boolean',
+            'store_layout' => 'array',
             'password' => 'hashed',
             'commission_rate' => 'decimal:2',
             'roster_archived_at' => 'datetime',

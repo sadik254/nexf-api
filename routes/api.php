@@ -40,6 +40,7 @@ use App\Http\Controllers\WithdrawalController;
 use App\Http\Controllers\ContentReportController;
 use App\Http\Controllers\FraudGuardController;
 use App\Http\Controllers\SellerPromotionController;
+use App\Http\Controllers\StoreLayoutController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -378,6 +379,9 @@ Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(f
     Route::get('/promotions', [SellerPromotionController::class, 'sellerIndex']);
     Route::post('/promotions', [SellerPromotionController::class, 'sellerStore']);
     Route::post('/promotions/{promotion}', [SellerPromotionController::class, 'sellerUpdate']);
+    Route::post('/promotions/{promotion}/submit', [SellerPromotionController::class, 'sellerSubmit']);
+    Route::get('/store-layout', [StoreLayoutController::class, 'sellerShow']);
+    Route::post('/store-layout', [StoreLayoutController::class, 'sellerSave']);
     Route::post('/promotions/{promotion}/delete', [SellerPromotionController::class, 'sellerDestroy']);
     Route::post('/product-tags', [CatalogTermController::class, 'storeProductTag']);
     Route::post('/product-brands', [CatalogTermController::class, 'storeProductBrand']);
@@ -458,6 +462,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 Route::prefix('store')->group(function () {
     Route::get('/stores', [StoreProductController::class, 'stores']);
     Route::get('/stores/{slug}', [StoreProductController::class, 'storeProfile']);
+    Route::get('/stores/{slug}/layout', [StoreLayoutController::class, 'publicShow']);
     Route::get('/products', [StoreProductController::class, 'indexAll']);
     Route::get('/testimonials', [StoreProductController::class, 'testimonials']);
     Route::get('/products/{product:slug}', [StoreProductController::class, 'show']);
