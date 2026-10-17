@@ -213,6 +213,11 @@ class OrderLifecycleTest extends TestCase
             ->assertJsonPath('order.items.0.fulfillment_status', 'confirmed');
 
         $this->withToken($token)
+            ->postJson("/api/seller/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'packed'])
+            ->assertOk()
+            ->assertJsonPath('order.status', 'packed');
+
+        $this->withToken($token)
             ->postJson("/api/seller/orders/{$order['id']}/items/{$itemId}/fulfillment", [
                 'status' => 'shipped',
                 'courier_provider' => 'Pathao Courier',
@@ -265,12 +270,18 @@ class OrderLifecycleTest extends TestCase
         $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'confirmed'])
             ->assertOk()->assertJsonPath('order.items.0.fulfillment_status', 'confirmed');
         $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'shipped'])
+            ->assertUnprocessable();
+        $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'packed'])
+            ->assertOk()->assertJsonPath('order.items.0.fulfillment_status', 'packed');
+        $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'shipped'])
             ->assertOk()->assertJsonPath('order.items.0.courier_provider', 'steadfast')
             ->assertJsonPath('order.items.0.tracking_number', 'DIRECT-TRACK');
 
         $bulkOrder = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
         $bulkItemId = $bulkOrder['items'][0]['id'];
         $this->withToken($token)->postJson("/api/admin/orders/{$bulkOrder['id']}/items/{$bulkItemId}/fulfillment", ['status' => 'confirmed'])->assertOk();
+        $this->withToken($token)->postJson('/api/admin/orders/bulk-ship', ['order_item_ids' => [$bulkItemId]])->assertUnprocessable();
+        $this->withToken($token)->postJson("/api/admin/orders/{$bulkOrder['id']}/items/{$bulkItemId}/fulfillment", ['status' => 'packed'])->assertOk();
         $this->withToken($token)->postJson('/api/admin/orders/bulk-ship', ['order_item_ids' => [$bulkItemId]])
             ->assertOk()->assertJsonPath('successful_item_ids.0', $bulkItemId);
         $this->assertDatabaseHas('order_items', ['id' => $bulkItemId, 'fulfillment_status' => 'shipped', 'courier_provider' => 'steadfast']);
@@ -455,7 +466,8 @@ class OrderLifecycleTest extends TestCase
         $this->withToken($token)
             ->postJson("/api/admin/orders/{$order['id']}", ['packed' => true])
             ->assertOk()
-            ->assertJsonPath('order.status', 'confirmed')
+            ->assertJsonPath('order.status', 'packed')
+            ->assertJsonPath('order.items.0.fulfillment_status', 'packed')
             ->assertJsonPath('order.packed_at', fn ($value) => is_string($value) && $value !== '');
     }
 

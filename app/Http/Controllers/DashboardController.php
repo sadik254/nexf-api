@@ -180,7 +180,7 @@ class DashboardController extends Controller
 
     private function pipeline(?Seller $seller, CarbonImmutable $from, CarbonImmutable $to): array
     {
-        $statuses = ['pending', 'confirmed', 'shipped', 'delivered', 'completed', 'cancelled'];
+        $statuses = ['pending', 'confirmed', 'packed', 'shipped', 'delivered', 'completed', 'cancelled'];
         $counts = $this->orders($seller)->whereBetween('orders.created_at', [$from, $to])->select('status')->get()->countBy('status');
         return collect($statuses)->map(fn ($status) => ['status' => $status, 'label' => ucfirst($status), 'value' => (int) ($counts[$status] ?? 0)])->values()->all();
     }

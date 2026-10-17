@@ -252,13 +252,13 @@ class OrderController extends Controller
                 if ($locked->status === 'pending') return;
 
                 $items = $locked->items()->lockForUpdate()->get();
-                if ($locked->status !== 'confirmed' || $items->isEmpty() || $items->contains(fn (OrderItem $item) =>
-                    $item->fulfillment_status !== 'confirmed'
+                if (!in_array($locked->status, ['confirmed', 'packed'], true) || $items->isEmpty() || $items->contains(fn (OrderItem $item) =>
+                    !in_array($item->fulfillment_status, ['confirmed', 'packed'], true)
                     || $item->courier_consignment_id !== null
                     || $item->shipped_at !== null
                     || $item->delivered_at !== null
                 )) {
-                    throw ValidationException::withMessages(['status' => ['Only an unshipped, fully confirmed order can return to processing.']]);
+                    throw ValidationException::withMessages(['status' => ['Only an unshipped, fully confirmed or packed order can return to processing.']]);
                 }
 
                 $locked->items()->update(['fulfillment_status' => 'pending', 'confirmed_at' => null]);
@@ -267,11 +267,23 @@ class OrderController extends Controller
             });
         }
         if (array_key_exists('packed', $data)) {
-            if ($data['packed'] && $order->status !== 'confirmed') {
-                throw ValidationException::withMessages(['packed' => ['An order must be confirmed before it can be packed.']]);
-            }
-            $data['packed_at'] = $data['packed'] ? now() : null;
+            $packed = (bool) $data['packed'];
             unset($data['packed']);
+            DB::transaction(function () use ($order, $packed): void {
+                $locked = Order::query()->lockForUpdate()->findOrFail($order->id);
+                $items = $locked->items()->lockForUpdate()->get();
+                if ($packed) {
+                    if ($locked->status !== 'confirmed' || $items->isEmpty() || $items->contains(fn (OrderItem $item) => $item->fulfillment_status !== 'confirmed')) {
+                        throw ValidationException::withMessages(['packed' => ['An order must be fully confirmed before it can be packed.']]);
+                    }
+                    $locked->items()->update(['fulfillment_status' => 'packed']);
+                } elseif ($locked->status === 'packed' && $items->every(fn (OrderItem $item) => $item->fulfillment_status === 'packed')) {
+                    $locked->items()->update(['fulfillment_status' => 'confirmed']);
+                } else {
+                    throw ValidationException::withMessages(['packed' => ['Only a fully packed, unshipped order can be unpacked.']]);
+                }
+                $this->refreshOrderStatus($locked);
+            });
         }
         $order->update($data);
         return response()->json([
@@ -487,8 +499,8 @@ class OrderController extends Controller
     private function bulkShipItems($items, array $requestedIds): JsonResponse
     {
         if ($items->count() !== count($requestedIds)) return response()->json(['message' => 'One or more items are outside your fulfilment scope.'], 403);
-        $invalid = $items->first(fn ($item) => $item->fulfillment_status !== 'confirmed' || $item->courier_consignment_id);
-        if ($invalid) return response()->json(['message' => 'All selected items must be confirmed and not already shipped.'], 422);
+        $invalid = $items->first(fn ($item) => $item->fulfillment_status !== 'packed' || $item->courier_consignment_id);
+        if ($invalid) return response()->json(['message' => 'All selected items must be packed and not already shipped.'], 422);
 
         $results = $this->steadfast->createBulkConsignments($items);
         $byInvoice = collect($results)->keyBy('invoice');
@@ -560,7 +572,7 @@ class OrderController extends Controller
     private function fulfillItem(Request $request, Order $order, OrderItem $item, ?int $sellerId = null): JsonResponse
     {
         $data = $request->validate([
-            'status' => ['required', 'in:confirmed,shipped,delivered'],
+            'status' => ['required', 'in:confirmed,packed,shipped,delivered'],
             'tracking_number' => ['nullable', 'string', 'max:255'],
             'courier_provider' => ['nullable', 'string', 'max:255'],
         ]);
@@ -580,7 +592,8 @@ class OrderController extends Controller
             $lockedItem = OrderItem::query()->lockForUpdate()->findOrFail($item->id);
             $allowedNextStatus = [
                 'pending' => 'confirmed',
-                'confirmed' => 'shipped',
+                'confirmed' => 'packed',
+                'packed' => 'shipped',
                 'shipped' => 'delivered',
             ][$lockedItem->fulfillment_status] ?? null;
 
@@ -641,10 +654,14 @@ class OrderController extends Controller
             return;
         }
 
-        $rank = ['pending' => 0, 'confirmed' => 1, 'shipped' => 2, 'delivered' => 3, 'return_pending' => 4, 'returned' => 5];
+        $rank = ['pending' => 0, 'confirmed' => 1, 'packed' => 2, 'shipped' => 3, 'delivered' => 4, 'return_pending' => 5, 'returned' => 6];
         $activeStatuses = $statuses->reject(fn (string $status) => $status === 'cancelled');
         $lowest = $activeStatuses->sortBy(fn (string $status) => $rank[$status] ?? 0)->first();
-        $order->update(['status' => $lowest]);
+        $allPackedOrFurther = $activeStatuses->every(fn (string $status) => ($rank[$status] ?? 0) >= $rank['packed']);
+        $order->update([
+            'status' => $lowest,
+            'packed_at' => $allPackedOrFurther ? ($order->packed_at ?? now()) : null,
+        ]);
     }
 
     public function store(Request $request): JsonResponse
@@ -1057,7 +1074,7 @@ class OrderController extends Controller
         $filters = $request->validate([
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
             'page' => ['sometimes', 'integer', 'min:1'],
-            'status' => ['sometimes', 'in:pending,confirmed,shipped,delivered,completed,cancelled,return_pending'],
+            'status' => ['sometimes', 'in:pending,confirmed,packed,shipped,delivered,completed,cancelled,return_pending'],
             'payment_status' => ['sometimes', 'in:unpaid,paid,failed,refunded'],
             'guest' => ['sometimes', 'boolean'],
             'exchange' => ['sometimes', 'boolean'],

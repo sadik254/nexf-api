@@ -128,8 +128,8 @@ class InventoryController extends Controller
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
         $committed = OrderItem::query()
-            ->whereIn('fulfillment_status', ['pending', 'confirmed'])
-            ->whereHas('order', fn ($orders) => $orders->whereIn('status', ['pending', 'confirmed']))
+            ->whereIn('fulfillment_status', ['pending', 'confirmed', 'packed'])
+            ->whereHas('order', fn ($orders) => $orders->whereIn('status', ['pending', 'confirmed', 'packed']))
             ->selectRaw('product_id, variation_id, SUM(quantity) as quantity, SUM(unit_buying_price * quantity) as cost_value')
             ->groupBy('product_id', 'variation_id')->get()
             ->keyBy(fn ($row) => $row->product_id . ':' . ($row->variation_id ?? 'simple'));
