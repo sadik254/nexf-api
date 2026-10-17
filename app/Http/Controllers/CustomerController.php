@@ -5,9 +5,11 @@ namespace App\Http\Controllers;
 use App\Mail\CustomerVerificationCodeMail;
 use App\Models\Customer;
 use App\Models\Admin;
+use App\Models\Order;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use App\Models\CustomerVerificationCode;
 use App\Services\PasswordResetCodeService;
 use Illuminate\Http\JsonResponse;
@@ -104,11 +106,15 @@ class CustomerController extends Controller
             'password' => ['required', 'string', 'min:8'],
             'profile_picture' => ['nullable', 'file', 'image', 'max:5120'],
         ]);
+        $phone = $this->normalizedPhone($data['phone'] ?? null);
+        if (($data['phone'] ?? null) !== null && $phone === null) {
+            throw ValidationException::withMessages(['phone' => ['Enter a valid Bangladesh mobile number.']]);
+        }
 
         if (Customer::where('email', $data['email'])->exists()) {
             return response()->json(['message' => 'Email already taken.'], 422);
         }
-        if (!empty($data['phone']) && Customer::where('phone', $data['phone'])->exists()) {
+        if ($phone !== null && Customer::where('phone', $phone)->exists()) {
             return response()->json(['message' => 'Phone already taken.'], 422);
         }
         $profileUrl = null;
@@ -129,7 +135,7 @@ class CustomerController extends Controller
         $customer = Customer::create([
             'name' => $data['name'],
             'email' => $data['email'],
-            'phone' => $data['phone'] ?? null,
+            'phone' => $phone,
             'password' => $data['password'],
             'profile_picture' => $profileUrl,
         ]);
@@ -184,10 +190,39 @@ class CustomerController extends Controller
             return response()->json(['message' => 'Invalid or expired code.'], 422);
         }
 
-        $customer->forceFill(['email_verified_at' => now()])->save();
-        $code->forceFill(['used_at' => now()])->save();
+        $claimed = DB::transaction(function () use ($customer, $code) {
+            $customer = Customer::query()->lockForUpdate()->findOrFail($customer->id);
+            $customer->forceFill(['email_verified_at' => now()])->save();
 
-        return response()->json(['message' => 'Email verified successfully.']);
+            $phone = $this->normalizedPhone($customer->phone);
+            $claimed = $phone === null ? 0 : Order::query()
+                ->whereNull('customer_id')
+                ->where('is_guest', true)
+                ->where('shipping_phone', $phone)
+                ->update(['customer_id' => $customer->id]);
+
+            $code->forceFill(['used_at' => now()])->save();
+
+            return $claimed;
+        });
+
+        return response()->json(['message' => 'Email verified successfully.', 'claimed_orders' => $claimed]);
+    }
+
+    /** Public signup hint. It exposes a count only, never order details. */
+    public function pendingGuestOrderCount(Request $request): JsonResponse
+    {
+        $data = $request->validate(['phone' => ['required', 'string', 'max:32']]);
+        $phone = $this->normalizedPhone($data['phone']);
+        if ($phone === null) {
+            throw ValidationException::withMessages(['phone' => ['Enter a valid Bangladesh mobile number.']]);
+        }
+
+        return response()->json(['count' => Order::query()
+            ->whereNull('customer_id')
+            ->where('is_guest', true)
+            ->where('shipping_phone', $phone)
+            ->count()]);
     }
 
     public function resendVerificationEmail(Request $request): JsonResponse
@@ -285,6 +320,15 @@ class CustomerController extends Controller
             ->where('expires_at', '>', now())
             ->latest()
             ->first();
+    }
+
+    private function normalizedPhone(?string $phone): ?string
+    {
+        $digits = preg_replace('/\D/', '', (string) $phone);
+        if (str_starts_with($digits, '880')) $digits = substr($digits, 2);
+        elseif (str_starts_with($digits, '1')) $digits = "0{$digits}";
+
+        return preg_match('/^01[3-9]\d{8}$/', $digits) ? $digits : null;
     }
 
     public function update(Request $request)

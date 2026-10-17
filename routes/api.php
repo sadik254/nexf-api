@@ -169,6 +169,7 @@ Route::get('/store/tags', [CatalogTermController::class, 'tags']);
 Route::post('/coupons/validate', [CouponController::class, 'validateCode']);
 Route::post('/guest/orders/preview', [OrderController::class, 'previewGuest'])->middleware('throttle:5,1');
 Route::post('/guest/orders', [OrderController::class, 'storeGuest'])->middleware('throttle:5,1');
+Route::get('/guest-orders/pending-count', [CustomerController::class, 'pendingGuestOrderCount'])->middleware('throttle:10,1,guest-order-count');
 Route::get('/payment-accounts', [ManualPaymentController::class, 'accounts']);
 Route::get('/orders/{order}/payment', [ManualPaymentController::class, 'show'])->middleware('throttle:60,1,order-payment-read');
 Route::post('/orders/{order}/payment', [ManualPaymentController::class, 'submit'])->middleware('throttle:10,1,order-payment-submit');
