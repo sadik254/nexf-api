@@ -11,6 +11,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use App\Models\CustomerVerificationCode;
+use App\Models\PendingCustomerRegistration;
 use App\Services\PasswordResetCodeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -106,46 +107,36 @@ class CustomerController extends Controller
             'password' => ['required', 'string', 'min:8'],
             'profile_picture' => ['nullable', 'file', 'image', 'max:5120'],
         ]);
+        $email = strtolower(trim($data['email']));
         $phone = $this->normalizedPhone($data['phone'] ?? null);
         if (($data['phone'] ?? null) !== null && $phone === null) {
             throw ValidationException::withMessages(['phone' => ['Enter a valid Bangladesh mobile number.']]);
         }
-
-        if (Customer::where('email', $data['email'])->exists()) {
+        if (Customer::where('email', $email)->exists()) {
             return response()->json(['message' => 'Email already taken.'], 422);
         }
         if ($phone !== null && Customer::where('phone', $phone)->exists()) {
             return response()->json(['message' => 'Phone already taken.'], 422);
         }
+
         $profileUrl = null;
         if ($request->hasFile('profile_picture')) {
-            $configuration = Configuration::create(
-                config('services.uploadcare.public_key'),
-                config('services.uploadcare.secret_key')
-            );
-            $api = new Api($configuration);
-
-            $file = $api->uploader()->fromPath(
-                $request->file('profile_picture')->getPathname()
-            );
-
-            $profileUrl = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
+            $configuration = Configuration::create(config('services.uploadcare.public_key'), config('services.uploadcare.secret_key'));
+            $profileUrl = 'https://ucarecdn.com/' . (new Api($configuration))->uploader()->fromPath($request->file('profile_picture')->getPathname())->getUuid() . '/-/preview/';
         }
 
-        $customer = Customer::create([
-            'name' => $data['name'],
-            'email' => $data['email'],
+        // A repeated sign-up replaces the waiting details and invalidates its old code.
+        PendingCustomerRegistration::updateOrCreate(['email' => $email], [
+            'name' => trim($data['name']),
             'phone' => $phone,
-            'password' => $data['password'],
+            'password' => Hash::make($data['password']),
             'profile_picture' => $profileUrl,
         ]);
-
-        $this->sendVerificationCode($customer, 'email_verification');
+        $this->sendVerificationCode($email, 'email_verification');
 
         return response()->json([
-            'message' => 'Customer created. Please verify your email.',
-            'customer' => $customer,
-        ], 201);
+            'message' => 'We emailed you a code. Your account is created once you verify it.',
+        ], 202);
     }
 
     public function login(Request $request): JsonResponse
@@ -175,34 +166,40 @@ class CustomerController extends Controller
 
     public function verifyEmail(Request $request): JsonResponse
     {
-        $data = $request->validate([
-            'email' => ['required', 'email'],
-            'code' => ['required', 'digits:6'],
-        ]);
+        $data = $request->validate(['email' => ['required', 'email'], 'code' => ['required', 'digits:6']]);
+        $email = strtolower(trim($data['email']));
+        $code = $this->getValidCode($email, 'email_verification', $data['code']);
+        if (!$code) return response()->json(['message' => 'Invalid or expired code.'], 422);
 
-        $customer = Customer::where('email', $data['email'])->first();
-        if (!$customer) {
-            return response()->json(['message' => 'Invalid code.'], 422);
-        }
+        $claimed = DB::transaction(function () use ($email, $code) {
+            $customer = Customer::query()->where('email', $email)->lockForUpdate()->first();
+            $pending = $customer ? null : PendingCustomerRegistration::query()->where('email', $email)->lockForUpdate()->first();
+            if (!$customer && !$pending) throw ValidationException::withMessages(['code' => ['Invalid or expired code.']]);
 
-        $code = $this->getValidCode($data['email'], 'email_verification', $data['code']);
-        if (!$code) {
-            return response()->json(['message' => 'Invalid or expired code.'], 422);
-        }
-
-        $claimed = DB::transaction(function () use ($customer, $code) {
-            $customer = Customer::query()->lockForUpdate()->findOrFail($customer->id);
-            $customer->forceFill(['email_verified_at' => now()])->save();
+            if ($pending) {
+                if ($pending->phone !== null && Customer::query()->where('phone', $pending->phone)->exists()) {
+                    throw ValidationException::withMessages(['phone' => ['Phone already taken. Please register with a different number.']]);
+                }
+                $customer = new Customer([
+                    'name' => $pending->name,
+                    'email' => $pending->email,
+                    'phone' => $pending->phone,
+                    'profile_picture' => $pending->profile_picture,
+                ]);
+                // The pending row receives a hash at registration; never hash it twice.
+                $customer->password = $pending->password;
+                $customer->email_verified_at = now();
+                $customer->save();
+                $pending->delete();
+            } elseif ($customer->email_verified_at === null) {
+                $customer->forceFill(['email_verified_at' => now()])->save();
+            }
 
             $phone = $this->normalizedPhone($customer->phone);
             $claimed = $phone === null ? 0 : Order::query()
-                ->whereNull('customer_id')
-                ->where('is_guest', true)
-                ->where('shipping_phone', $phone)
+                ->whereNull('customer_id')->where('is_guest', true)->where('shipping_phone', $phone)
                 ->update(['customer_id' => $customer->id]);
-
-            $code->forceFill(['used_at' => now()])->save();
-
+            $code->forceFill(['used_at' => now(), 'customer_id' => $customer->id])->save();
             return $claimed;
         });
 
@@ -227,21 +224,14 @@ class CustomerController extends Controller
 
     public function resendVerificationEmail(Request $request): JsonResponse
     {
-        $data = $request->validate([
-            'email' => ['required', 'email'],
-        ]);
-
-        $customer = Customer::where('email', $data['email'])->first();
-        if (!$customer) {
+        $data = $request->validate(['email' => ['required', 'email']]);
+        $email = strtolower(trim($data['email']));
+        $customer = Customer::where('email', $email)->first();
+        if ($customer?->email_verified_at !== null) return response()->json(['message' => 'Email already verified.']);
+        if (!$customer && !PendingCustomerRegistration::where('email', $email)->exists()) {
             return response()->json(['message' => 'If that email exists, a code has been sent.']);
         }
-
-        if ($customer->email_verified_at !== null) {
-            return response()->json(['message' => 'Email already verified.']);
-        }
-
-        $this->sendVerificationCode($customer, 'email_verification');
-
+        $this->sendVerificationCode($email, 'email_verification', $customer?->id);
         return response()->json(['message' => 'Verification code resent.']);
     }
 
@@ -287,10 +277,10 @@ class CustomerController extends Controller
         return response()->json(['message' => 'Password reset successfully.']);
     }
 
-    private function sendVerificationCode(Customer $customer, string $type): void
+    private function sendVerificationCode(string $email, string $type, ?int $customerId = null): void
     {
         CustomerVerificationCode::query()
-            ->where('email', $customer->email)
+            ->where('email', $email)
             ->where('type', $type)
             ->whereNull('used_at')
             ->delete();
@@ -298,14 +288,14 @@ class CustomerController extends Controller
         $code = (string) random_int(100000, 999999);
 
         $verification = CustomerVerificationCode::create([
-            'customer_id' => $customer->id,
-            'email' => $customer->email,
+            'customer_id' => $customerId,
+            'email' => $email,
             'code' => $code,
             'type' => $type,
             'expires_at' => now()->addMinutes(self::CODE_EXPIRES_MINUTES),
         ]);
 
-        Mail::to($customer->email)->send(
+        Mail::to($email)->send(
             new CustomerVerificationCodeMail($verification->code, $verification->type)
         );
     }
