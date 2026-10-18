@@ -49,6 +49,7 @@ Route::prefix('resellers')->group(function () {
     Route::post('/login', [ResellerController::class, 'login']);
     Route::post('/forgot-password', [ResellerController::class, 'forgotPassword']);
     Route::post('/reset-password', [ResellerController::class, 'resetPassword']);
+    Route::post('/check-reset-code', \App\Http\Controllers\PasswordResetCheckController::class)->defaults('accountType', 'reseller')->middleware('throttle:10,1');
     Route::middleware('sanctum.type:reseller,reseller:basic')->group(function () {
         Route::get('/me', [ResellerController::class, 'me']);
         Route::post('/me', [ResellerController::class, 'updateMe']);
@@ -77,6 +78,7 @@ Route::prefix('customers')->group(function () {
     Route::post('/resend-verification', [CustomerController::class, 'resendVerificationEmail']);
     Route::post('/forgot-password', [CustomerController::class, 'forgotPassword']);
     Route::post('/reset-password', [CustomerController::class, 'resetPassword']);
+    Route::post('/check-reset-code', \App\Http\Controllers\PasswordResetCheckController::class)->defaults('accountType', 'customer')->middleware('throttle:10,1');
 
     Route::middleware('sanctum.type:customer,customer:basic')->group(function () {
         Route::post('/me', [CustomerController::class, 'update']);
@@ -188,6 +190,7 @@ Route::prefix('admin')->group(function () {
     Route::post('/login', [AdminController::class, 'login']);
     Route::post('/forgot-password', [AdminController::class, 'forgotPassword']);
     Route::post('/reset-password', [AdminController::class, 'resetPassword']);
+    Route::post('/check-reset-code', \App\Http\Controllers\PasswordResetCheckController::class)->defaults('accountType', 'admin')->middleware('throttle:10,1');
     Route::middleware('sanctum.type:admin,admin:basic')->post('/logout', [AdminController::class, 'logout']);
     // Temporarily disable admin creation endpoint to prevent accidental creation of multiple admins during testing
     Route::middleware('sanctum.type:admin,admin:manage-admins')->post('/create', [AdminController::class, 'store']);
@@ -245,6 +248,7 @@ Route::prefix('sellers')->group(function () {
     Route::post('/login', [SellerController::class, 'login']);
     Route::post('/forgot-password', [SellerController::class, 'forgotPassword']);
     Route::post('/reset-password', [SellerController::class, 'resetPassword']);
+    Route::post('/check-reset-code', \App\Http\Controllers\PasswordResetCheckController::class)->defaults('accountType', 'seller')->middleware('throttle:10,1');
     Route::middleware('sanctum.type:seller,seller:basic')->post('/logout', [SellerController::class, 'logout']);
     Route::middleware('sanctum.type:seller,seller:basic')->post('/me', [SellerController::class, 'updateProfile']);
     Route::middleware('sanctum.type:seller,seller:basic')->post('/me/password', [SellerController::class, 'updatePassword']);

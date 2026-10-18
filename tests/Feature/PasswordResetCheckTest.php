@@ -1,0 +1,6 @@
+<?php
+namespace Tests\Feature;
+use App\Models\Customer; use App\Models\PasswordResetCode; use Illuminate\Foundation\Testing\RefreshDatabase; use Illuminate\Support\Facades\Hash; use Tests\TestCase;
+class PasswordResetCheckTest extends TestCase { use RefreshDatabase;
+ public function test_reset_code_check_does_not_consume_a_valid_code(): void { $customer=Customer::create(['name'=>'Shopper','email'=>'shop@example.test','password'=>'password123']); PasswordResetCode::create(['account_type'=>'customer','account_id'=>$customer->id,'email'=>$customer->email,'code_hash'=>Hash::make('123456'),'expires_at'=>now()->addMinutes(10)]); $this->postJson('/api/customers/check-reset-code',['email'=>$customer->email,'code'=>'000000'])->assertUnprocessable()->assertJsonPath('errors.code.0','Invalid or expired code.'); $this->postJson('/api/customers/check-reset-code',['email'=>$customer->email,'code'=>'123456'])->assertOk(); $this->postJson('/api/customers/reset-password',['email'=>$customer->email,'code'=>'123456','password'=>'abcd','password_confirmation'=>'abcd'])->assertOk(); $this->postJson('/api/customers/check-reset-code',['email'=>$customer->email,'code'=>'123456'])->assertUnprocessable(); }
+}

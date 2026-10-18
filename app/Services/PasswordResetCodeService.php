@@ -28,9 +28,21 @@ class PasswordResetCodeService
 
     public function consume(Model $account, string $accountType, string $code): bool
     {
-        $reset = PasswordResetCode::query()->where('account_type', $accountType)->where('account_id', $account->getKey())->where('email', $account->email)->whereNull('used_at')->where('expires_at', '>', now())->latest()->first();
-        if (!$reset || !Hash::check($code, $reset->code_hash)) return false;
+        $reset = $this->match($account, $accountType, $code);
+        if (!$reset) return false;
         $reset->update(['used_at' => now()]);
         return true;
+    }
+
+    /** Checks a current code without consuming it, for the code-entry step. */
+    public function check(Model $account, string $accountType, string $code): bool
+    {
+        return $this->match($account, $accountType, $code) !== null;
+    }
+
+    private function match(Model $account, string $accountType, string $code): ?PasswordResetCode
+    {
+        $reset = PasswordResetCode::query()->where('account_type', $accountType)->where('account_id', $account->getKey())->where('email', $account->email)->whereNull('used_at')->where('expires_at', '>', now())->latest()->first();
+        return $reset && Hash::check($code, $reset->code_hash) ? $reset : null;
     }
 }
