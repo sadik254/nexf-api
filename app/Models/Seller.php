@@ -18,6 +18,7 @@ class Seller extends Authenticatable
         'sku_prefix', 'commission_rate', 'address_line', 'address_area', 'address_district',
         'seller_name',
         'email',
+        'pending_email',
         'phone',
         'store_name',
         'store_slug',

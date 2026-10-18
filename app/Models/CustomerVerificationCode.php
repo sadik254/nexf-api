@@ -9,6 +9,8 @@ class CustomerVerificationCode extends Model
 {
     protected $fillable = [
         'customer_id',
+        'account_type',
+        'account_id',
         'email',
         'code',
         'type',

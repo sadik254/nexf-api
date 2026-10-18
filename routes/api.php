@@ -54,6 +54,11 @@ Route::prefix('resellers')->group(function () {
         Route::post('/me', [ResellerController::class, 'updateMe']);
         Route::get('/me/commission-period', [ResellerController::class, 'commissionPeriod']);
         Route::post('/me/password', [ResellerController::class, 'updatePassword']);
+        Route::post('/me/email/send-current', [ResellerController::class, 'sendCurrentEmailCode']);
+        Route::post('/me/email/verify-current', [ResellerController::class, 'verifyCurrentEmail']);
+        Route::post('/me/email', [ResellerController::class, 'requestEmailChange']);
+        Route::post('/me/email/verify-new', [ResellerController::class, 'verifyNewEmail']);
+        Route::post('/me/email/resend', [ResellerController::class, 'resendEmailChangeCode']);
         Route::post('/logout', [ResellerController::class, 'logout']);
         Route::get('/support-tickets', [SupportTicketController::class, 'index']);
         Route::post('/support-tickets', [SupportTicketController::class, 'store']);
@@ -94,6 +99,11 @@ Route::prefix('customers')->group(function () {
         Route::post('/addresses/{address}/default', [\App\Http\Controllers\CustomerAddressController::class, 'makeDefault']);
         Route::post('/addresses/{address}/delete', [\App\Http\Controllers\CustomerAddressController::class, 'destroy']);
         Route::post('/me/password', [CustomerController::class, 'updatePassword']);
+        Route::post('/me/email/send-current', [CustomerController::class, 'sendCurrentEmailCode']);
+        Route::post('/me/email/verify-current', [CustomerController::class, 'verifyCurrentEmail']);
+        Route::post('/me/email', [CustomerController::class, 'requestEmailChange']);
+        Route::post('/me/email/verify-new', [CustomerController::class, 'verifyNewEmail']);
+        Route::post('/me/email/resend', [CustomerController::class, 'resendEmailChangeCode']);
         Route::post('/logout', [CustomerController::class, 'logout']);
         Route::get('/orders', [OrderController::class, 'indexCustomer']);
         Route::post('/orders/preview', [OrderController::class, 'preview']);
@@ -183,6 +193,11 @@ Route::prefix('admin')->group(function () {
     Route::middleware('sanctum.type:admin,admin:manage-admins')->post('/create', [AdminController::class, 'store']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/me', [AdminController::class, 'updateProfile']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/me/password', [AdminController::class, 'updatePassword']);
+    Route::middleware('sanctum.type:admin,admin:basic')->post('/me/email/send-current', [AdminController::class, 'sendCurrentEmailCode']);
+    Route::middleware('sanctum.type:admin,admin:basic')->post('/me/email/verify-current', [AdminController::class, 'verifyCurrentEmail']);
+    Route::middleware('sanctum.type:admin,admin:basic')->post('/me/email', [AdminController::class, 'requestEmailChange']);
+    Route::middleware('sanctum.type:admin,admin:basic')->post('/me/email/verify-new', [AdminController::class, 'verifyNewEmail']);
+    Route::middleware('sanctum.type:admin,admin:basic')->post('/me/email/resend', [AdminController::class, 'resendEmailChangeCode']);
     Route::middleware('sanctum.type:admin,admin:manage-admins')->get('/admins', [AdminController::class, 'index']);
     Route::middleware('sanctum.type:admin,admin:manage-admins')->get('/user-roster', [AdminController::class, 'userRoster']);
     Route::middleware('sanctum.type:admin,admin:manage-admins')->get('/admins/{admin}', [AdminController::class, 'show']);
@@ -233,6 +248,11 @@ Route::prefix('sellers')->group(function () {
     Route::middleware('sanctum.type:seller,seller:basic')->post('/logout', [SellerController::class, 'logout']);
     Route::middleware('sanctum.type:seller,seller:basic')->post('/me', [SellerController::class, 'updateProfile']);
     Route::middleware('sanctum.type:seller,seller:basic')->post('/me/password', [SellerController::class, 'updatePassword']);
+    Route::middleware('sanctum.type:seller,seller:basic')->post('/me/email/send-current', [SellerController::class, 'sendCurrentEmailCode']);
+    Route::middleware('sanctum.type:seller,seller:basic')->post('/me/email/verify-current', [SellerController::class, 'verifyCurrentEmail']);
+    Route::middleware('sanctum.type:seller,seller:basic')->post('/me/email', [SellerController::class, 'requestEmailChange']);
+    Route::middleware('sanctum.type:seller,seller:basic')->post('/me/email/verify-new', [SellerController::class, 'verifyNewEmail']);
+    Route::middleware('sanctum.type:seller,seller:basic')->post('/me/email/resend', [SellerController::class, 'resendEmailChangeCode']);
 });
 
 Route::prefix('admin')->group(function () {

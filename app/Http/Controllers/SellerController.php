@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Validation\ValidationException;
+
 use App\Mail\SellerApprovedMail;
 use App\Models\Admin;
 use App\Models\Seller;
@@ -16,6 +18,7 @@ use Uploadcare\Configuration;
 
 class SellerController extends Controller
 {
+    use \App\Http\Controllers\Concerns\HandlesEmailChange;
     public function __construct(private PasswordResetCodeService $passwordResets) {}
 
     public function index(Request $request): JsonResponse
@@ -306,6 +309,8 @@ class SellerController extends Controller
             'image' => ['sometimes', 'file', 'image', 'max:5120'],
             'clear_image' => ['sometimes', 'boolean'],
         ]);
+        if (array_key_exists('email', $data) && strcasecmp((string) $data['email'], (string) $seller->email) !== 0) throw ValidationException::withMessages(['email' => ['Verify the new email to change it.']]);
+        unset($data['email']);
         if (!empty($data['clear_image'])) $data['seller_image'] = null;
         if ($request->hasFile('image')) $data['seller_image'] = app(\App\Services\MediaUploadService::class)->upload($request->file('image'));
         unset($data['image'], $data['clear_image']);
@@ -416,4 +421,6 @@ class SellerController extends Controller
 
         return $slug;
     }
+
+    protected function emailChangeKey(): string { return 'seller'; }
 }

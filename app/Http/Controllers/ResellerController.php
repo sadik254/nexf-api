@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Validation\ValidationException;
+
 use App\Models\OrderItem;
 use App\Models\Reseller;
 use Illuminate\Http\JsonResponse;
@@ -14,6 +16,7 @@ use Illuminate\Support\Carbon;
 
 class ResellerController extends Controller
 {
+    use \App\Http\Controllers\Concerns\HandlesEmailChange;
     public function __construct(private PasswordResetCodeService $passwordResets) {}
 
     public function login(Request $request): JsonResponse
@@ -113,6 +116,8 @@ class ResellerController extends Controller
             'image' => ['sometimes', 'file', 'image', 'max:5120'],
             'clear_image' => ['sometimes', 'boolean'],
         ]);
+        if (array_key_exists('email', $data) && strcasecmp((string) $data['email'], (string) $reseller->email) !== 0) throw ValidationException::withMessages(['email' => ['Verify the new email to change it.']]);
+        unset($data['email']);
         if (!empty($data['clear_image'])) $data['image'] = null;
         if ($request->hasFile('image')) $data['image'] = app(\App\Services\MediaUploadService::class)->upload($request->file('image'));
         unset($data['clear_image']);
@@ -187,4 +192,6 @@ class ResellerController extends Controller
         $reseller->setAttribute('commission_earned', $units >= $reseller->monthly_target ? round($sales * (float) $reseller->commission_rate / 100, 2) : 0);
         return $reseller;
     }
+
+    protected function emailChangeKey(): string { return 'reseller'; }
 }

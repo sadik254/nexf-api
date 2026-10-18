@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Validation\ValidationException;
+
 use App\Models\Admin;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,6 +17,7 @@ use App\Services\PasswordResetCodeService;
 
 class AdminController extends Controller
 {
+    use \App\Http\Controllers\Concerns\HandlesEmailChange;
     public function __construct(private PasswordResetCodeService $passwordResets) {}
 
     public function index(Request $request): JsonResponse
@@ -305,6 +308,10 @@ class AdminController extends Controller
             'clear_image' => ['sometimes', 'boolean'],
         ]);
 
+        if ($request->has('email') && strcasecmp((string) $data['email'], (string) $admin->email) !== 0) {
+            throw ValidationException::withMessages(['email' => ['Verify the new email to change it.']]);
+        }
+
         if ($request->filled('email')) {
             $emailExists = Admin::where('email', $data['email'])
                 ->where('id', '!=', $admin->id)
@@ -427,4 +434,6 @@ class AdminController extends Controller
 
         return $base;
     }
+
+    protected function emailChangeKey(): string { return 'admin'; }
 }

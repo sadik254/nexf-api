@@ -23,9 +23,11 @@ class CustomerVerificationCodeMail extends Mailable
 
     public function envelope(): Envelope
     {
-        $subject = $this->type === 'password_reset'
-            ? 'Password Reset Code'
-            : 'Email Verification Code';
+        $subject = match ($this->type) {
+            'password_reset' => 'Password Reset Code',
+            'email_change_current', 'email_change_new' => 'Email Change Code',
+            default => 'Email Verification Code',
+        };
 
         return new Envelope(
             subject: $subject,

@@ -22,6 +22,7 @@ use Uploadcare\Configuration;
 
 class CustomerController extends Controller
 {
+    use \App\Http\Controllers\Concerns\HandlesEmailChange;
     private const CODE_EXPIRES_MINUTES = 10;
 
     public function __construct(private PasswordResetCodeService $passwordResets) {}
@@ -334,6 +335,10 @@ class CustomerController extends Controller
             'remove_profile_picture' => ['sometimes', 'boolean'],
         ]);
 
+        if ($request->has('email') && strcasecmp((string) $data['email'], (string) $customer->email) !== 0) {
+            throw ValidationException::withMessages(['email' => ['Verify the new email to change it.']]);
+        }
+
         if ($request->filled('email')) {
             $emailExists = Customer::where('email', $data['email'])
                 ->where('id', '!=', $customer->id)
@@ -421,4 +426,6 @@ class CustomerController extends Controller
 
         return response()->json(['message' => 'Logged out successfully.']);
     }
+
+    protected function emailChangeKey(): string { return 'customer'; }
 }
