@@ -27,6 +27,7 @@ use App\Http\Controllers\SellerShippingRateController;
 use App\Http\Controllers\HomepageNoticeController;
 use App\Http\Controllers\HomepageTrustBadgeController;
 use App\Http\Controllers\SiteInfoController;
+use App\Http\Controllers\SitePopupController;
 use App\Http\Controllers\ProductCollectionController;
 use App\Http\Controllers\MediaAssetController;
 use App\Http\Controllers\HomepageCategoryCardController;
@@ -176,6 +177,7 @@ Route::get('/store/marketplace-stats', [StoreProductController::class, 'marketpl
 Route::get('/homepage/layout', [HomepageLayoutController::class, 'show']);
 Route::post('/contact', [SupportTicketController::class, 'contact'])->middleware('throttle:5,1');
 Route::get('/site-info', [SiteInfoController::class, 'show']);
+Route::get('/popups', [SitePopupController::class, 'publicIndex']);
 Route::get('/store/brands', [CatalogTermController::class, 'brands']);
 Route::get('/store/tags', [CatalogTermController::class, 'tags']);
 Route::post('/coupons/validate', [CouponController::class, 'validateCode']);
@@ -300,6 +302,8 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::get('/chats', [StoreChatController::class, 'index']);
     Route::get('/chats/{chat}', [StoreChatController::class, 'show']);
     Route::post('/chats/{chat}/messages', [StoreChatController::class, 'reply']);
+    Route::get('/popups', [SitePopupController::class, 'index']);
+    Route::post('/popups', [SitePopupController::class, 'replace']);
     Route::get('/media', [MediaAssetController::class, 'index']);
     Route::post('/media', [MediaAssetController::class, 'store']);
     Route::post('/media/link', [MediaAssetController::class, 'link']);
