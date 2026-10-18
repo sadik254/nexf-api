@@ -105,7 +105,7 @@ class CustomerController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:32'],
-            'password' => ['required', 'string', 'min:8'],
+            'password' => ['required', 'string', 'min:4'],
             'profile_picture' => ['nullable', 'file', 'image', 'max:5120'],
         ]);
         $email = strtolower(trim($data['email']));
@@ -257,7 +257,7 @@ class CustomerController extends Controller
         $data = $request->validate([
             'email' => ['required', 'email'],
             'code' => ['required', 'digits:6'],
-            'password' => ['required', 'string', 'min:8', 'confirmed'],
+            'password' => ['required', 'string', 'min:4', 'confirmed'],
         ]);
 
         $customer = Customer::where('email', $data['email'])->first();
@@ -393,7 +393,7 @@ class CustomerController extends Controller
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
 
-        $data = $request->validate(['current_password' => ['required', 'string'], 'new_password' => ['required', 'string', 'min:8', 'confirmed']]);
+        $data = $request->validate(['current_password' => ['required', 'string'], 'new_password' => ['required', 'string', 'min:4', 'confirmed']]);
         $currentPassword = $data['current_password']; $newPassword = $data['new_password'];
         if ($currentPassword === $newPassword) {
             return response()->json(['message' => 'New password must be different from current password.'], 422);
