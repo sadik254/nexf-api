@@ -152,6 +152,16 @@ class SellerController extends Controller
         return response()->json(['message' => 'Seller removed from the marketplace. Products remain unassigned and order history is preserved.']);
     }
 
+    public function updateStatus(Request $request, Seller $seller): JsonResponse
+    {
+        $actor = $request->user();
+        abort_unless($actor instanceof Admin && in_array($actor->role, ['super_admin', 'admin'], true), 403);
+        $data = $request->validate(['status' => ['required', 'in:suspended,approved']]);
+        abort_if($seller->status === 'rejected' && $data['status'] === 'approved', 422, 'Use the approval action for rejected applications.');
+        $seller->update(['status' => $data['status'], 'is_active' => $data['status'] === 'approved']);
+        return response()->json($seller->fresh());
+    }
+
     public function onboard(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -159,14 +169,14 @@ class SellerController extends Controller
             'email' => ['required', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:32'],
             'store_name' => ['required', 'string', 'max:255'],
-            'store_address' => ['nullable', 'string'],
+            'store_address' => ['nullable', 'string'], 'address_line' => ['nullable', 'string', 'max:255'], 'address_area' => ['nullable', 'string', 'max:255'], 'address_district' => ['nullable', 'string', 'max:255'], 'sku_prefix' => ['nullable', 'regex:/^[A-Za-z0-9]{4}$/', \Illuminate\Validation\Rule::unique('sellers')],
             'store_logo' => ['nullable', 'file', 'image', 'max:5120'],
             'store_image' => ['nullable', 'file', 'image', 'max:5120'],
             'seller_image' => ['nullable', 'file', 'image', 'max:5120'],
             'kyc_type' => ['required', 'in:nid,passport'],
             'kyc_number' => ['required', 'string', 'max:64'],
             'kyc_document' => ['required', 'file', 'max:10240'],
-            'product_category' => ['required', 'string', 'max:255'],
+            'product_category' => ['nullable', 'string', 'max:255'],
             'support_email' => ['nullable', 'email', 'max:255'],
             'support_phone' => ['nullable', 'string', 'max:32'],
             'city' => ['nullable', 'string', 'max:255'],
@@ -226,14 +236,14 @@ class SellerController extends Controller
             'phone' => $data['phone'] ?? null,
             'store_name' => $data['store_name'],
             'store_slug' => $storeSlug,
-            'store_address' => $data['store_address'] ?? null,
+            'store_address' => $data['store_address'] ?? implode(', ', array_filter([$data['address_line'] ?? null, $data['address_area'] ?? null, $data['address_district'] ?? null])), 'address_line' => $data['address_line'] ?? null, 'address_area' => $data['address_area'] ?? null, 'address_district' => $data['address_district'] ?? null, 'sku_prefix' => isset($data['sku_prefix']) ? strtoupper($data['sku_prefix']) : null,
             'store_logo' => $storeLogoUrl,
             'store_image' => $storeImageUrl,
             'seller_image' => $sellerImageUrl,
             'kyc_type' => $data['kyc_type'],
             'kyc_number' => $data['kyc_number'],
             'kyc_document_url' => $kycDocumentUrl ?? '',
-            'product_category' => $data['product_category'],
+            'product_category' => $data['product_category'] ?? 'General',
             'support_email' => $data['support_email'] ?? null,
             'support_phone' => $data['support_phone'] ?? null,
             'city' => $data['city'] ?? null,

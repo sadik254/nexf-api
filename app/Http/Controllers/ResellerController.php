@@ -176,7 +176,7 @@ class ResellerController extends Controller
         $email = [($creating ? 'required' : 'sometimes'), 'email', 'max:255', Rule::unique('resellers', 'email')->ignore($request->route('reseller'))];
         return $request->validate([
             'name' => [($creating ? 'required' : 'sometimes'), 'string', 'max:255'], 'email' => $email,
-            'phone' => ['nullable', 'string', 'max:32'], 'location' => ['nullable', 'string', 'max:255'],
+            'phone' => ['nullable', 'string', 'max:32'], 'location' => ['nullable', 'string', 'max:255'], 'address_line' => ['nullable', 'string', 'max:255'], 'address_area' => ['nullable', 'string', 'max:255'], 'address_district' => ['nullable', 'string', 'max:255'],
             'commission_rate' => ['sometimes', 'numeric', 'min:0', 'max:100'], 'monthly_target' => ['sometimes', 'integer', 'min:0', 'max:1000000'], 'is_active' => ['sometimes', 'boolean'],
         ]);
     }

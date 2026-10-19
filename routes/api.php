@@ -269,6 +269,7 @@ Route::prefix('admin')->group(function () {
     Route::middleware('sanctum.type:admin,admin:basic')->post('/sellers/{seller}/delete', [SellerController::class, 'archive']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/sellers', [SellerController::class, 'adminSave']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/sellers/{seller}', [SellerController::class, 'adminSave']);
+    Route::middleware('sanctum.type:admin,admin:basic')->post('/sellers/{seller}/status', [SellerController::class, 'updateStatus']);
     Route::middleware('sanctum.type:admin,admin:basic')->get('/sellers', [SellerController::class, 'index']);
     Route::middleware('sanctum.type:admin,admin:basic')->get('/sellers/{seller}', [SellerController::class, 'show']);
 });
