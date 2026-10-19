@@ -23,7 +23,7 @@ class CheckoutService
     public function preview(?Customer $customer, array $data): array
     {
         $paymentMethod = PaymentMethod::query()->active()->find($data['payment_method_id']);
-        $shippingMethod = ShippingMethod::query()->whereNull('seller_id')->where('is_store_option',false)->active()->find($data['shipping_method_id']);
+        $shippingMethod = $this->shippingMethodForAddress($data);
         if (!$paymentMethod || !$shippingMethod) {
             throw ValidationException::withMessages(['checkout' => ['Selected payment or shipping method is unavailable.']]);
         }
@@ -51,23 +51,48 @@ class CheckoutService
             'product' => $item['product'],
             'subtotal' => $item['quote']['subtotal'],
         ], $items), $shippingMethod, $data['store_shipping_methods'] ?? [], $data['store_delivery_options'] ?? []);
-        $coupon = $this->resolveCoupon($data['coupon_code'] ?? null, $subtotal, $customer, $items, isset($data['exclude_order_id']) ? (int) $data['exclude_order_id'] : null);
-        $discount = $coupon ? $this->discountForCart($coupon, $items, $subtotal, (float) $shipping['total']) : 0.0;
+        $coupons = $this->resolveCoupons($data['coupon_code'] ?? null, $subtotal, $customer, $items, isset($data['exclude_order_id']) ? (int) $data['exclude_order_id'] : null);
+        $appliedDiscounts = [];
+        $remaining = $subtotal + (float) $shipping['total'];
+        foreach ($coupons as $coupon) {
+            $amount = min($remaining, $this->discountForCart($coupon, $items, $subtotal, (float) $shipping['total']));
+            if ($amount <= 0) continue;
+            $appliedDiscounts[] = ['coupon' => $coupon, 'amount' => $amount];
+            $remaining = round($remaining - $amount, 2);
+        }
+        $discount = round(array_sum(array_column($appliedDiscounts, 'amount')), 2);
         $total = round($subtotal + $shipping['total'] - $discount, 2);
         if ($paymentMethod->code === 'wallet') {
             if (!$customer) throw ValidationException::withMessages(['payment_method_id' => ['NEXF Balance is available only to signed-in customers.']]);
             if (app(WalletBalanceService::class)->balance($customer->id) < $total) {
-                throw ValidationException::withMessages(['payment_method_id' => ['Your NEXF Balance is not enough for this order.']]);
+                throw ValidationException::withMessages(['payment_method_id' => ['NEXF Balance is not enough for this order.']]);
             }
         }
         $this->fraudGuard->assertAllowed($customer, $data + ['payment_method_code' => $paymentMethod->code], $total);
 
-        return compact('paymentMethod', 'shippingMethod', 'items', 'coupon', 'subtotal') + [
+        return compact('paymentMethod', 'shippingMethod', 'items', 'subtotal') + [
+            // Kept for compatibility with existing order persistence.
+            'coupon' => $appliedDiscounts[0]['coupon'] ?? null,
+            'coupons' => array_map(fn (array $discount) => $discount['coupon'], $appliedDiscounts),
+            'applied_discounts' => $appliedDiscounts,
             'discount_total' => $discount,
             'shipping_groups' => $shipping['groups'],
             'shipping_charge' => $shipping['total'],
             'total' => $total,
         ];
+    }
+
+    private function shippingMethodForAddress(array $data): ?ShippingMethod
+    {
+        $methods = ShippingMethod::query()->whereNull('seller_id')->where('is_store_option', false)->active();
+        $district = mb_strtolower(trim((string) ($data['shipping_district'] ?? '')));
+        if ($district !== '') {
+            $code = $district === 'dhaka' ? 'inside_dhaka' : 'outside_dhaka';
+            $districtMethod = (clone $methods)->where('code', $code)->first();
+            if ($districtMethod) return $districtMethod;
+        }
+
+        return $methods->find($data['shipping_method_id']);
     }
 
     public function quoteCouponForCart(?Customer $customer, string $code, array $cartItems, float $shippingAmount = 0): array
@@ -101,14 +126,36 @@ class CheckoutService
 
     private function resolveCoupon(?string $couponCode, float $subtotal, ?Customer $customer, array $items, ?int $excludeOrderId = null): ?Coupon
     {
-        $coupon = $couponCode ? Coupon::where('code', preg_replace('/[^A-Z0-9_-]/', '', Str::upper($couponCode)))->first() : Coupon::query()->where('is_automatic', true)->get()->first(fn (Coupon $candidate) => !$candidate->unusableReason() && $this->couponMatches($candidate, $items));
-        if (!$coupon && !$couponCode) return null;
-        if (!$coupon) throw ValidationException::withMessages(['coupon_code' => ['Coupon code was not found.']]);
-        if ($reason = $coupon->unusableReason()) throw ValidationException::withMessages(['coupon_code' => [$reason]]);
-        if ($coupon->minimum_order_amount !== null && $subtotal < (float) $coupon->minimum_order_amount) throw ValidationException::withMessages(['coupon_code' => ['Minimum order amount not reached for this coupon.']]);
-        if ($customer && $coupon->per_customer_limit !== null && CouponRedemption::where('coupon_id', $coupon->id)->where('customer_id', $customer->id)->when($excludeOrderId, fn ($query) => $query->where('order_id', '!=', $excludeOrderId))->count() >= $coupon->per_customer_limit) throw ValidationException::withMessages(['coupon_code' => ['Coupon usage limit reached for this customer.']]);
-        if (!$this->couponMatches($coupon, $items)) throw ValidationException::withMessages(['coupon_code' => ['This discount does not apply to the items in your cart.']]);
-        return $coupon;
+        return $this->resolveCoupons($couponCode, $subtotal, $customer, $items, $excludeOrderId)->first();
+    }
+
+    /** @return \Illuminate\Support\Collection<int, Coupon> */
+    private function resolveCoupons(?string $couponCode, float $subtotal, ?Customer $customer, array $items, ?int $excludeOrderId = null): \Illuminate\Support\Collection
+    {
+        $coupons = collect();
+        if ($couponCode) {
+            $coupon = Coupon::where('code', preg_replace('/[^A-Z0-9_-]/', '', Str::upper($couponCode)))->first();
+            if (!$coupon) throw ValidationException::withMessages(['coupon_code' => ['Coupon code was not found.']]);
+            $this->assertCouponApplies($coupon, $subtotal, $customer, $items, $excludeOrderId, 'coupon_code');
+            $coupons->push($coupon);
+        }
+
+        // Every eligible automatic discount is shown and included in the quote.
+        Coupon::query()->where('is_automatic', true)->orderBy('id')->get()->each(function (Coupon $coupon) use ($subtotal, $customer, $items, $excludeOrderId, $coupons): void {
+            if ($coupon->unusableReason() || ($coupon->minimum_order_amount !== null && $subtotal < (float) $coupon->minimum_order_amount)) return;
+            if ($customer && $coupon->per_customer_limit !== null && CouponRedemption::where('coupon_id', $coupon->id)->where('customer_id', $customer->id)->when($excludeOrderId, fn ($query) => $query->where('order_id', '!=', $excludeOrderId))->count() >= $coupon->per_customer_limit) return;
+            if ($this->couponMatches($coupon, $items) && !$coupons->contains('id', $coupon->id)) $coupons->push($coupon);
+        });
+
+        return $coupons;
+    }
+
+    private function assertCouponApplies(Coupon $coupon, float $subtotal, ?Customer $customer, array $items, ?int $excludeOrderId, string $field): void
+    {
+        if ($reason = $coupon->unusableReason()) throw ValidationException::withMessages([$field => [$reason]]);
+        if ($coupon->minimum_order_amount !== null && $subtotal < (float) $coupon->minimum_order_amount) throw ValidationException::withMessages([$field => ['Minimum order amount not reached for this coupon.']]);
+        if ($customer && $coupon->per_customer_limit !== null && CouponRedemption::where('coupon_id', $coupon->id)->where('customer_id', $customer->id)->when($excludeOrderId, fn ($query) => $query->where('order_id', '!=', $excludeOrderId))->count() >= $coupon->per_customer_limit) throw ValidationException::withMessages([$field => ['Coupon usage limit reached for this customer.']]);
+        if (!$this->couponMatches($coupon, $items)) throw ValidationException::withMessages([$field => ['This discount does not apply to the items in your cart.']]);
     }
 
     private function couponMatches(Coupon $coupon, array $items): bool

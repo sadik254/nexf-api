@@ -72,7 +72,7 @@ class OrderController extends Controller
         $customer = !empty($data['customer_id']) ? Customer::findOrFail($data['customer_id']) : null;
         if (!empty($data['editing_order_id'])) $data['exclude_order_id'] = (int) $data['editing_order_id'];
         unset($data['editing_order_id']);
-        $preview = $this->checkout->preview($customer, $data + ['ip_address' => $request->ip()]);
+        $preview = $this->checkout->preview($customer, $data + ['ip_address' => $request->ip(), 'staff_order' => true]);
 
         return $this->checkoutPreviewResponse($preview);
     }
@@ -95,10 +95,8 @@ class OrderController extends Controller
             'shipping_email' => ['nullable', 'email', 'max:255'],
             'shipping_address' => ['required', 'string'],
             'notes' => ['nullable', 'string'],
-            'turnstile_token' => ['required', 'string', 'max:2048'],
         ]);
         $this->assertGuestPhone($data['shipping_phone']);
-        $this->turnstile->assertHuman($request, true);
         $preview = $this->checkout->preview(null, $data + ['ip_address' => $request->ip()]);
         return $this->checkoutPreviewResponse($preview);
     }
@@ -120,13 +118,13 @@ class OrderController extends Controller
             'payment_method' => $preview['paymentMethod'], 'shipping_method' => $preview['shippingMethod'],
             'coupon' => $preview['coupon'], 'subtotal' => $preview['subtotal'],
             'discount_total' => $preview['discount_total'],
-            'applied_discounts' => $preview['coupon'] ? [[
-                'id' => $preview['coupon']->id,
-                'name' => $preview['coupon']->name ?: $preview['coupon']->code,
-                'code' => $preview['coupon']->code,
-                'kind' => $preview['coupon']->is_automatic ? 'automatic' : 'coupon',
-                'amount' => $preview['discount_total'],
-            ]] : [],
+            'applied_discounts' => collect($preview['applied_discounts'] ?? [])->map(fn (array $discount) => [
+                'id' => $discount['coupon']->id,
+                'name' => $discount['coupon']->name ?: $discount['coupon']->code,
+                'code' => $discount['coupon']->code,
+                'kind' => $discount['coupon']->is_automatic ? 'automatic' : 'coupon',
+                'amount' => $discount['amount'],
+            ])->values(),
             'shipping_groups' => $preview['shipping_groups'],
             'shipping_charge' => $preview['shipping_charge'], 'total' => $preview['total'],
         ]);
@@ -240,6 +238,8 @@ class OrderController extends Controller
             'shipping_phone' => ['sometimes', 'string', 'max:32'],
             'shipping_email' => ['sometimes', 'nullable', 'email', 'max:255'],
             'shipping_address' => ['sometimes', 'string'],
+            'shipping_area' => ['sometimes', 'nullable', 'string', 'max:150'],
+            'shipping_district' => ['sometimes', 'nullable', 'string', 'max:150'],
             'notes' => ['sometimes', 'nullable', 'string'],
             'payment_sender' => ['sometimes', 'nullable', 'string', 'max:40'],
             'payment_reference' => ['sometimes', 'nullable', 'string', 'max:60'],
@@ -316,6 +316,7 @@ class OrderController extends Controller
         $data['ip_address'] = $request->ip();
         $data['exclude_order_id'] = $order->id;
         $actor = $request->user();
+        $data['staff_order'] = true;
 
         $updated = DB::transaction(function () use ($order, $data, $customer, $actor) {
             $locked = Order::query()->lockForUpdate()->findOrFail($order->id);
@@ -388,14 +389,11 @@ class OrderController extends Controller
             }
 
             $paymentMethod = PaymentMethod::query()->active()->findOrFail($data['payment_method_id']);
-            $shippingMethod = ShippingMethod::query()->whereNull('seller_id')->where('is_store_option',false)->active()->findOrFail($data['shipping_method_id']);
+            $shippingMethod = $preview['shippingMethod'];
             $shipping = $this->storeShipping->quote($shippingLines, $shippingMethod, $data['store_shipping_methods'] ?? [], $data['store_delivery_options'] ?? []);
-            $coupon = $preview['coupon'] ? Coupon::query()->lockForUpdate()->find($preview['coupon']->id) : null;
-            if ($coupon && ($reason = $coupon->unusableReason())) throw ValidationException::withMessages(['coupon_code' => [$reason]]);
-            if ($coupon && $customer && $coupon->per_customer_limit !== null && CouponRedemption::query()->where('coupon_id', $coupon->id)->where('customer_id', $customer->id)->count() >= $coupon->per_customer_limit) {
-                throw ValidationException::withMessages(['coupon_code' => ['Coupon usage limit reached for this customer.']]);
-            }
-            $couponDiscount = $coupon ? (float) $preview['discount_total'] : 0.0;
+            $appliedDiscounts = $this->lockAppliedDiscounts($preview, $customer);
+            $coupon = $appliedDiscounts[0]['coupon'] ?? null;
+            $couponDiscount = round(array_sum(array_column($appliedDiscounts, 'amount')), 2);
             $manualDiscount = $coupon ? 0.0 : $this->manualDiscountAmount($subtotal, $data['manual_discount_kind'] ?? null, (float) ($data['manual_discount_value'] ?? 0));
             $discount = round($couponDiscount + $manualDiscount, 2);
             $locked->storeGroups()->createMany(collect($shipping['groups'])->map(function (array $group) {
@@ -409,14 +407,16 @@ class OrderController extends Controller
                 'shipping_method_id' => $shippingMethod->id, 'shipping_method_code' => $shippingMethod->code, 'shipping_method_name' => $shippingMethod->name,
                 'shipping_currency' => $shippingMethod->currency, 'shipping_name' => $data['shipping_name'], 'shipping_phone' => $data['shipping_phone'],
                 'shipping_email' => $data['shipping_email'] ?? $customer?->email, 'shipping_address' => $data['shipping_address'],
+                'shipping_area' => $data['shipping_area'] ?? null, 'shipping_district' => $data['shipping_district'] ?? null,
                 'notes' => $data['notes'] ?? null, 'internal_note' => $data['internal_note'] ?? null, 'paid_amount' => $data['paid_amount'] ?? null,
                 'coupon_id' => $coupon?->id, 'coupon_code' => $coupon?->code, 'manual_discount_kind' => $data['manual_discount_kind'] ?? null,
                 'manual_discount_value' => $data['manual_discount_value'] ?? null, 'subtotal' => $subtotal,
                 'discount_total' => $discount, 'shipping_charge' => $shipping['total'], 'total' => round($subtotal + $shipping['total'] - $discount, 2),
             ])->save();
-            if ($coupon) {
-                $coupon->increment('used_count');
-                CouponRedemption::create(['coupon_id' => $coupon->id, 'customer_id' => $customer?->id, 'order_id' => $locked->id, 'coupon_code' => $coupon->code, 'order_subtotal' => $subtotal, 'discount_amount' => $discount]);
+            foreach ($appliedDiscounts as $appliedDiscount) {
+                $appliedCoupon = $appliedDiscount['coupon'];
+                $appliedCoupon->increment('used_count');
+                CouponRedemption::create(['coupon_id' => $appliedCoupon->id, 'customer_id' => $customer?->id, 'order_id' => $locked->id, 'coupon_code' => $appliedCoupon->code, 'order_subtotal' => $subtotal, 'discount_amount' => $appliedDiscount['amount']]);
             }
             return $locked->fresh()->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
@@ -739,6 +739,7 @@ class OrderController extends Controller
 
         // Uses the same validation, availability, and pricing rules as checkout preview.
         $data['ip_address'] = $request->ip();
+        $data['staff_order'] = $isAdminOrder || $actor instanceof Seller;
         $preview = $this->checkout->preview($customer, $data);
 
         $order = DB::transaction(function () use ($customer, $actor, $isGuestOrder, $data, $preview, $exchangeReturn) {
@@ -749,12 +750,7 @@ class OrderController extends Controller
                 ]);
             }
 
-            $shippingMethod = ShippingMethod::query()->whereNull('seller_id')->where('is_store_option',false)->active()->find($data['shipping_method_id']);
-            if (!$shippingMethod) {
-                throw ValidationException::withMessages([
-                    'shipping_method_id' => ['Selected shipping method is unavailable.'],
-                ]);
-            }
+            $shippingMethod = $preview['shippingMethod'];
 
             if ($paymentMethod->code === 'wallet') {
                 if (!$customer) throw ValidationException::withMessages(['payment_method_id' => ['NEXF Balance is available only to signed-in customers.']]);
@@ -893,14 +889,9 @@ class OrderController extends Controller
             }
 
             $shipping = $this->storeShipping->quote($shippingLines, $shippingMethod, $data['store_shipping_methods'] ?? [], $data['store_delivery_options'] ?? []);
-            $coupon = $preview['coupon'] ? Coupon::query()->lockForUpdate()->find($preview['coupon']->id) : null;
-            if ($coupon && ($reason = $coupon->unusableReason())) {
-                throw ValidationException::withMessages(['coupon_code' => [$reason]]);
-            }
-            if ($coupon && $customer && $coupon->per_customer_limit !== null && CouponRedemption::query()->where('coupon_id', $coupon->id)->where('customer_id', $customer->id)->count() >= $coupon->per_customer_limit) {
-                throw ValidationException::withMessages(['coupon_code' => ['Coupon usage limit reached for this customer.']]);
-            }
-            $couponDiscount = $coupon ? (float) $preview['discount_total'] : 0.0;
+            $appliedDiscounts = $this->lockAppliedDiscounts($preview, $customer);
+            $coupon = $appliedDiscounts[0]['coupon'] ?? null;
+            $couponDiscount = round(array_sum(array_column($appliedDiscounts, 'amount')), 2);
             $manualDiscount = $exchangeReturn ? $subtotal : ($coupon ? 0.0 : $this->manualDiscountAmount($subtotal, $data['manual_discount_kind'] ?? null, (float) ($data['manual_discount_value'] ?? 0)));
             if ($exchangeReturn) {
                 $shipping['total'] = 0;
@@ -931,16 +922,16 @@ class OrderController extends Controller
                 'total' => $total,
             ])->save();
 
-            if ($coupon) {
-                $coupon->increment('used_count');
-
+            foreach ($appliedDiscounts as $appliedDiscount) {
+                $appliedCoupon = $appliedDiscount['coupon'];
+                $appliedCoupon->increment('used_count');
                 CouponRedemption::create([
-                    'coupon_id' => $coupon->id,
+                    'coupon_id' => $appliedCoupon->id,
                     'customer_id' => $customer?->id,
                     'order_id' => $order->id,
-                    'coupon_code' => $coupon->code,
+                    'coupon_code' => $appliedCoupon->code,
                     'order_subtotal' => $subtotal,
-                    'discount_amount' => $discountTotal,
+                    'discount_amount' => $appliedDiscount['amount'],
                 ]);
             }
 
@@ -995,6 +986,22 @@ class OrderController extends Controller
             $response->setData($payload);
         }
         return $response;
+    }
+
+    /** Lock and recheck every discount that contributed to a checkout quote. */
+    private function lockAppliedDiscounts(array $preview, ?Customer $customer): array
+    {
+        $applied = [];
+        foreach ($preview['applied_discounts'] ?? [] as $discount) {
+            $coupon = Coupon::query()->lockForUpdate()->find($discount['coupon']->id);
+            if (!$coupon) throw ValidationException::withMessages(['coupon_code' => ['A discount is no longer available.']]);
+            if ($reason = $coupon->unusableReason()) throw ValidationException::withMessages(['coupon_code' => [$reason]]);
+            if ($customer && $coupon->per_customer_limit !== null && CouponRedemption::query()->where('coupon_id', $coupon->id)->where('customer_id', $customer->id)->count() >= $coupon->per_customer_limit) {
+                throw ValidationException::withMessages(['coupon_code' => ['Coupon usage limit reached for this customer.']]);
+            }
+            $applied[] = ['coupon' => $coupon, 'amount' => (float) $discount['amount']];
+        }
+        return $applied;
     }
 
     private function checkoutRules(): array
