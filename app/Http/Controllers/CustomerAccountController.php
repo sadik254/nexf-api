@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Customer;
 use App\Models\CustomerFollowedStore;
+use Illuminate\Support\Facades\DB;
 use App\Models\CustomerInSiteNotification;
 use App\Models\CustomerRestockAlert;
 use App\Models\CustomerWishlistItem;
@@ -44,16 +45,29 @@ class CustomerAccountController extends Controller
     {
         $rows = CustomerFollowedStore::where('customer_id', $this->customer($request)->id)
             ->with('seller:id,store_name,store_slug,store_logo,store_image,status,is_active')->latest()->paginate(100);
+        $house = DB::table('customer_followed_house_stores')->where('customer_id', $this->customer($request)->id)->first();
+        if ($house) $rows->getCollection()->prepend(['id' => 'house', 'store_type' => 'house', 'seller' => ['type' => 'admin', 'name' => \App\Models\Store::primary()?->name ?? config('app.name'), 'slug' => 'admin']]);
         return response()->json($rows);
     }
 
     public function followStore(Request $request): JsonResponse
     {
         $customer = $this->customer($request);
-        $data = $request->validate(['seller_id' => ['required', 'integer']]);
+        $data = $request->validate(['seller_id' => ['nullable', 'integer'], 'store_type' => ['nullable', 'in:house']]);
+        if (($data['store_type'] ?? null) === 'house') {
+            DB::table('customer_followed_house_stores')->insertOrIgnore(['customer_id' => $customer->id, 'created_at' => now(), 'updated_at' => now()]);
+            return response()->json(['store_type' => 'house', 'seller' => ['type' => 'admin', 'name' => \App\Models\Store::primary()?->name ?? config('app.name'), 'slug' => 'admin']], 201);
+        }
+        if (empty($data['seller_id'])) throw ValidationException::withMessages(['seller_id' => ['Choose a store to follow.']]);
         $seller = Seller::where('status', 'approved')->where('is_active', true)->findOrFail($data['seller_id']);
         $follow = CustomerFollowedStore::firstOrCreate(['customer_id' => $customer->id, 'seller_id' => $seller->id]);
         return response()->json($follow->load('seller:id,store_name,store_slug,store_logo,store_image,status,is_active'), 201);
+    }
+
+    public function unfollowHouseStore(Request $request): JsonResponse
+    {
+        DB::table('customer_followed_house_stores')->where('customer_id', $this->customer($request)->id)->delete();
+        return response()->json(['message' => 'Store unfollowed.']);
     }
 
     public function unfollowStore(Request $request, Seller $seller): JsonResponse

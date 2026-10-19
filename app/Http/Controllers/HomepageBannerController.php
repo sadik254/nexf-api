@@ -78,6 +78,8 @@ class HomepageBannerController extends Controller
             'theme' => ['sometimes', 'nullable', \Illuminate\Validation\Rule::in(['slate','gray','zinc','neutral','stone','red','orange','amber','yellow','lime','green','emerald','teal','cyan','sky','blue','indigo','violet','purple','fuchsia','pink','rose'])],
             'href' => ['sometimes', 'string', 'max:2048'],
             'title' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'eyebrow' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'text_alignment' => ['sometimes', 'nullable', 'in:left,center,right'],
             'emphasis' => ['sometimes', 'nullable', 'string', 'max:100'],
             'subtitle' => ['sometimes', 'nullable', 'string', 'max:160'],
             'is_active' => ['sometimes', 'boolean'],

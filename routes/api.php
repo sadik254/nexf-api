@@ -88,6 +88,7 @@ Route::prefix('customers')->group(function () {
         Route::post('/wishlist/{product}/delete', [\App\Http\Controllers\CustomerAccountController::class, 'removeWishlist']);
         Route::get('/followed-stores', [\App\Http\Controllers\CustomerAccountController::class, 'followedStores']);
         Route::post('/followed-stores', [\App\Http\Controllers\CustomerAccountController::class, 'followStore']);
+        Route::post('/followed-stores/house/delete', [\App\Http\Controllers\CustomerAccountController::class, 'unfollowHouseStore']);
         Route::post('/followed-stores/{seller}/delete', [\App\Http\Controllers\CustomerAccountController::class, 'unfollowStore']);
         Route::get('/restock-alerts', [\App\Http\Controllers\CustomerAccountController::class, 'restockAlerts']);
         Route::post('/restock-alerts', [\App\Http\Controllers\CustomerAccountController::class, 'addRestockAlert']);

@@ -17,6 +17,8 @@ class ProductCategory extends Model
         'menu_heading',
         'promo_image',
         'promo_href',
+        'promo_title',
+        'promo_caption',
         'is_active',
     ];
 
