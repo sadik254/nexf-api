@@ -21,6 +21,7 @@ use App\Services\SteadfastService;
 use App\Services\StoreShippingService;
 use App\Services\TurnstileService;
 use App\Services\WalletBalanceService;
+use App\Services\WalletLedgerService;
 use App\Models\CustomerWalletTransaction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -573,6 +574,7 @@ class OrderController extends Controller
                 'status' => 'cancelled',
                 'cancelled_at' => now(),
             ]);
+            app(WalletLedgerService::class)->cancellationCredit($lockedOrder);
 
             return $lockedOrder->load(['customer', 'items', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
