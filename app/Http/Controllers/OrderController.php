@@ -330,6 +330,8 @@ class OrderController extends Controller
                 $this->inventory->restoreOrderItem($oldItem, $actor, 'admin_order_edit_restore');
             }
 
+            $keepRequest = $locked->stock_request && $itemFulfillmentState === 'pending';
+            $data['stock_request'] = $keepRequest;
             // Requote only after the old lot allocations are restored, so unchanged quantities remain available.
             $preview = $this->checkout->preview($customer, $data);
 
@@ -359,6 +361,11 @@ class OrderController extends Controller
                 if (!empty($itemData['variation_id'])) {
                     $variation = ProductVariation::query()->where('product_id', $product->id)->where('is_active', true)->find($itemData['variation_id']);
                     if (!$variation) throw ValidationException::withMessages(['items' => ["Selected variation for {$product->name} is unavailable."]]);
+                }
+                if ($keepRequest) {
+                    $revenue = round($this->inventory->unitSellingPrice($product, $variation) * $quantity, 2);
+                    $result = ['allocations' => [], 'totals' => ['cost' => 0.0, 'revenue' => $revenue, 'profit' => $revenue]];
+                } elseif ($variation) {
                     $result = $this->inventory->consumeVariation($variation, $quantity, $actor, 'order_sale', ['order_id' => $locked->id]);
                 } else {
                     $result = $this->inventory->consumeProduct($product, $quantity, $actor, 'order_sale', ['order_id' => $locked->id]);
@@ -372,7 +379,7 @@ class OrderController extends Controller
                     'sku' => $variation?->sku, 'variation_attributes' => $variation?->attributes, 'quantity' => $quantity,
                     'unit_selling_price' => round($lineSubtotal / $quantity, 2), 'unit_buying_price' => round($lineCost / $quantity, 2),
                     'line_subtotal' => $lineSubtotal, 'line_cost' => $lineCost, 'line_profit' => (float) $result['totals']['profit'],
-                    'lot_allocations' => $result['allocations'], 'fulfillment_status' => $itemFulfillmentState,
+                    'lot_allocations' => $result['allocations'], 'fulfillment_status' => $itemFulfillmentState, 'awaiting_stock' => $keepRequest,
                 ]);
                 $subtotal = round($subtotal + $lineSubtotal, 2);
                 $shippingLines[] = ['product' => $product, 'subtotal' => $lineSubtotal];
@@ -583,7 +590,8 @@ class OrderController extends Controller
             ]);
         }
 
-        $order = DB::transaction(function () use ($order, $item, $data, $sellerId) {
+        $actor = $request->user();
+        $order = DB::transaction(function () use ($order, $item, $data, $sellerId, $actor) {
             $lockedOrder = Order::query()->lockForUpdate()->findOrFail($order->id);
             if ($lockedOrder->status === 'cancelled') {
                 throw ValidationException::withMessages(['order' => ['Cancelled orders cannot be fulfilled.']]);
@@ -601,6 +609,10 @@ class OrderController extends Controller
                 throw ValidationException::withMessages([
                     'status' => ["Item must transition from {$lockedItem->fulfillment_status} to {$allowedNextStatus}."],
                 ]);
+            }
+
+            if ($data['status'] === 'confirmed' && $lockedItem->awaiting_stock) {
+                $this->takeAwaitedStock($lockedItem, $actor);
             }
 
             $courier = null;
@@ -640,6 +652,18 @@ class OrderController extends Controller
             'message' => 'Item fulfilment updated successfully.',
             'order' => $order,
         ]);
+    }
+
+    private function takeAwaitedStock(OrderItem $item, $actor): void
+    {
+        $quantity = (int) $item->quantity;
+        $variation = $item->variation_id ? ProductVariation::query()->find($item->variation_id) : null;
+        $product = $item->product_id ? Product::query()->find($item->product_id) : null;
+        if (!$variation && !$product) throw ValidationException::withMessages(['status' => ["{$item->product_name} is no longer in the catalogue, so its stock cannot be taken."]]);
+        try { $result = $variation ? $this->inventory->consumeVariation($variation, $quantity, $actor, 'order_sale', ['order_id' => $item->order_id, 'stock_request' => true]) : $this->inventory->consumeProduct($product, $quantity, $actor, 'order_sale', ['order_id' => $item->order_id, 'stock_request' => true]); }
+        catch (ValidationException $e) { throw ValidationException::withMessages(['status' => ["{$item->product_name} is still out of stock. Add stock before confirming this request."]]); }
+        $cost=(float)$result['totals']['cost']; $revenue=(float)$item->line_subtotal;
+        $item->update(['lot_allocations'=>$result['allocations'],'unit_buying_price'=>round($cost/max(1,$quantity),2),'line_cost'=>$cost,'line_profit'=>round($revenue-$cost,2),'awaiting_stock'=>false]);
     }
 
     public function refreshOrderStatus(Order $order): void
@@ -757,6 +781,7 @@ class OrderController extends Controller
                 'total' => 0,
                 'paid_amount' => $data['paid_amount'] ?? null,
                 'manual_ship' => (bool) $exchangeReturn,
+                'stock_request' => !$exchangeReturn && !empty($data['stock_request']),
                 'exchange_for' => $exchangeReturn ? (string) $exchangeReturn->id : null,
                 'manual_discount_kind' => $data['manual_discount_kind'] ?? null,
                 'manual_discount_value' => $data['manual_discount_value'] ?? null,
@@ -825,13 +850,13 @@ class OrderController extends Controller
                         ]);
                     }
 
-                    $result = $this->inventory->consumeVariation($variation, $quantity, $actor, 'order_sale', [
-                        'order_id' => $order->id,
-                    ]);
+                    $result = $order->stock_request
+                        ? ['allocations' => [], 'totals' => ['cost' => 0.0, 'revenue' => round($this->inventory->unitSellingPrice($product, $variation) * $quantity, 2), 'profit' => round($this->inventory->unitSellingPrice($product, $variation) * $quantity, 2)]]
+                        : $this->inventory->consumeVariation($variation, $quantity, $actor, 'order_sale', ['order_id' => $order->id]);
                 } else {
-                    $result = $this->inventory->consumeProduct($product, $quantity, $actor, 'order_sale', [
-                        'order_id' => $order->id,
-                    ]);
+                    $result = $order->stock_request
+                        ? ['allocations' => [], 'totals' => ['cost' => 0.0, 'revenue' => round($this->inventory->unitSellingPrice($product) * $quantity, 2), 'profit' => round($this->inventory->unitSellingPrice($product) * $quantity, 2)]]
+                        : $this->inventory->consumeProduct($product, $quantity, $actor, 'order_sale', ['order_id' => $order->id]);
                 }
 
                 $lineSubtotal = (float) $result['totals']['revenue'];
@@ -858,6 +883,7 @@ class OrderController extends Controller
                     'line_cost' => $lineCost,
                     'line_profit' => $lineProfit,
                     'lot_allocations' => $result['allocations'],
+                    'awaiting_stock' => $order->stock_request,
                 ]);
 
                 $subtotal = round($subtotal + $lineSubtotal, 2);
@@ -987,6 +1013,7 @@ class OrderController extends Controller
             'shipping_email' => ['sometimes', 'nullable', 'email', 'max:255'],
             'shipping_area' => ['sometimes', 'nullable', 'string', 'max:150'],
             'shipping_district' => ['sometimes', 'nullable', 'string', 'max:150'],
+            'stock_request' => ['sometimes', 'boolean'],
         ];
     }
 

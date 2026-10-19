@@ -41,7 +41,8 @@ class CheckoutService
             $variation = $variationId ? ProductVariation::query()->where('product_id', $product->id)->where('is_active', true)->find($variationId) : null;
             if ($variationId && !$variation) throw ValidationException::withMessages(['items' => ["Selected variation for {$product->name} is unavailable."]]);
             $quantity = (int) $itemData['quantity'];
-            $quote = $variation ? $this->inventory->previewVariation($variation, $quantity) : $this->inventory->previewProduct($product, $quantity);
+            $stockRequest = !empty($data['stock_request']);
+            $quote = $variation ? $this->inventory->previewVariation($variation, $quantity, $stockRequest) : $this->inventory->previewProduct($product, $quantity, $stockRequest);
             $subtotal = round($subtotal + $quote['subtotal'], 2);
             $items[] = ['product' => $product, 'variation' => $variation, 'quantity' => $quantity, 'quote' => $quote];
         }

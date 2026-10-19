@@ -1,0 +1,3 @@
+<?php
+use Illuminate\Database\Migrations\Migration; use Illuminate\Database\Schema\Blueprint; use Illuminate\Support\Facades\Schema;
+return new class extends Migration { public function up(): void { Schema::table('orders',fn(Blueprint $t)=>$t->boolean('stock_request')->default(false)->after('manual_ship')); Schema::table('order_items',fn(Blueprint $t)=>$t->boolean('awaiting_stock')->default(false)->after('lot_allocations')); } public function down(): void { Schema::table('order_items',fn(Blueprint $t)=>$t->dropColumn('awaiting_stock')); Schema::table('orders',fn(Blueprint $t)=>$t->dropColumn('stock_request')); } };

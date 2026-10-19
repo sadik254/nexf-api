@@ -12,15 +12,18 @@ use Illuminate\Validation\ValidationException;
 
 class InventoryService
 {
-    public function previewProduct(Product $product, int $quantity): array
+    public function previewProduct(Product $product, int $quantity, bool $allowShortfall = false): array
     {
-        return $this->previewLots(productId: $product->id, variationId: null, quantityRequested: $quantity, sellingPrice: $this->sellingPrice($product->default_selling_price));
+        return $this->previewLots(productId: $product->id, variationId: null, quantityRequested: $quantity, sellingPrice: $this->sellingPrice($product->default_selling_price), allowShortfall: $allowShortfall);
     }
 
-    public function previewVariation(ProductVariation $variation, int $quantity): array
+    public function previewVariation(ProductVariation $variation, int $quantity, bool $allowShortfall = false): array
     {
-        return $this->previewLots(productId: null, variationId: $variation->id, quantityRequested: $quantity, sellingPrice: $this->sellingPrice($variation->default_selling_price ?? $variation->product->default_selling_price));
+        return $this->previewLots(productId: null, variationId: $variation->id, quantityRequested: $quantity, sellingPrice: $this->sellingPrice($variation->default_selling_price ?? $variation->product->default_selling_price), allowShortfall: $allowShortfall);
     }
+    public function unitSellingPrice(Product $product, ?ProductVariation $variation = null): float
+    { return $this->sellingPrice($variation ? ($variation->default_selling_price ?? $product->default_selling_price) : $product->default_selling_price); }
+
     public function restoreOrderItem(OrderItem $item, $actor, string $reason = 'order_cancellation'): void
     {
         foreach ($item->lot_allocations ?? [] as $allocation) {
@@ -214,7 +217,7 @@ class InventoryService
         });
     }
 
-    private function previewLots(?int $productId, ?int $variationId, int $quantityRequested, float $sellingPrice): array
+    private function previewLots(?int $productId, ?int $variationId, int $quantityRequested, float $sellingPrice, bool $allowShortfall = false): array
     {
         $lots = ProductLot::query()
             ->when($productId !== null, fn ($q) => $q->where('product_id', $productId))
@@ -223,6 +226,7 @@ class InventoryService
             ->orderByRaw('received_at is null')->orderBy('received_at')->orderBy('id')->get();
 
         $available = (int) $lots->sum('quantity_remaining');
+        if ($allowShortfall && $available < $quantityRequested) return ['quantity' => $quantityRequested, 'available_quantity' => $available, 'cost' => 0.0, 'subtotal' => round($sellingPrice * $quantityRequested, 2)];
         if ($available < $quantityRequested) {
             throw ValidationException::withMessages(['quantity' => ["Insufficient stock. Requested {$quantityRequested}, available {$available}."]]);
         }
