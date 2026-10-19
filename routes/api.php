@@ -453,6 +453,7 @@ Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(f
     Route::post('/product-reviews/{review}/moderate', [ProductEngagementController::class, 'moderateReviewForSeller']);
     Route::post('/product-reviews/{review}/respond', [ProductEngagementController::class, 'respondToReview']);
     Route::get('/product-questions', [ProductEngagementController::class, 'questionsForSeller']);
+    Route::post('/product-questions/{question}/moderate', [ProductEngagementController::class, 'moderateQuestion']);
     Route::post('/product-questions/{question}/answer', [ProductEngagementController::class, 'answer']);
     Route::post('/product-questions/{question}', [ProductEngagementController::class, 'editQuestion']);
     Route::post('/product-questions/{question}/delete', [ProductEngagementController::class, 'deleteQuestion']);

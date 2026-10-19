@@ -242,7 +242,6 @@ class ProductEngagementController extends Controller
 
     public function moderateQuestion(Request $request, ProductQuestion $question): JsonResponse
     {
-        abort_unless($request->user() instanceof Admin, 403);
         $this->authorizeQuestionOwner($request, $question);
         $data = $request->validate(['status' => ['required', 'in:approved,rejected'], 'rejection_note' => ['nullable', 'string', 'max:2000']]);
         $question->update(['status' => $data['status'], 'rejection_note' => $data['status'] === 'rejected' ? ($data['rejection_note'] ?? null) : null, 'moderated_at' => now()]);
