@@ -13,7 +13,6 @@ use App\Services\InventoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -94,6 +93,7 @@ class ReturnRequestController extends Controller
         abort_unless($customer instanceof Customer, 403);
         $data = $request->validate([
             'order_id' => ['required', 'integer', 'exists:orders,id'],
+            'support_ticket_id' => ['nullable', 'integer', 'exists:support_tickets,id'],
             'type' => ['required', Rule::in(['refund', 'exchange'])],
             'reason' => ['required', 'string', 'max:3000'],
             'refund_to' => ['sometimes', Rule::in(['original', 'balance'])],
@@ -104,17 +104,24 @@ class ReturnRequestController extends Controller
             'items.*.quantity' => ['required', 'integer', 'min:1'],
         ]);
         $order = \App\Models\Order::query()->where('customer_id', $customer->id)->findOrFail($data['order_id']);
-        $submissionReference = 'RET-' . strtoupper(Str::random(10));
-        $returns = DB::transaction(function () use ($customer, $data, $order, $submissionReference) {
+        $ticket = null;
+        if (!empty($data['support_ticket_id'])) {
+            $ticket = SupportTicket::query()->where('customer_id', $customer->id)->findOrFail($data['support_ticket_id']);
+            if ((int) $ticket->order_id !== (int) $order->id) {
+                throw ValidationException::withMessages(['support_ticket_id' => ['The support ticket does not match this order.']]);
+            }
+        }
+        $returns = DB::transaction(function () use ($customer, $data, $order, $ticket) {
             $created = [];
             foreach ($data['items'] as $line) {
                 $item = OrderItem::query()->where('order_id', $order->id)->whereKey($line['order_item_id'])->lockForUpdate()->firstOrFail();
                 if ($item->fulfillment_status !== 'delivered') throw ValidationException::withMessages(['items' => ['Only delivered items can be returned.']]);
+                if ($ticket?->seller_id && (int) $ticket->seller_id !== (int) $item->seller_id) throw ValidationException::withMessages(['support_ticket_id' => ['The support ticket does not match this item store.']]);
                 $claimed = ReturnRequest::query()->where('order_item_id', $item->id)->whereNotIn('status', ['rejected', 'cancelled'])->sum('quantity');
                 if ($claimed + $line['quantity'] > $item->quantity) throw ValidationException::withMessages(['items' => ["The quantity requested for {$item->product_name} exceeds its eligible quantity."]]);
                 $return = ReturnRequest::query()->create([
                     'order_item_id' => $item->id, 'order_id' => $order->id, 'customer_id' => $customer->id,
-                    'seller_id' => $item->seller_id, 'submission_reference' => $submissionReference,
+                    'seller_id' => $item->seller_id, 'support_ticket_id' => $ticket?->id,
                     'type' => $data['type'], 'status' => 'requested', 'quantity' => $line['quantity'],
                     'reason' => trim($data['reason']), 'refund_to' => $data['refund_to'] ?? 'balance',
                     'attachments' => $data['attachments'] ?? [], 'return_address_name' => $order->shipping_name,
@@ -122,13 +129,14 @@ class ReturnRequestController extends Controller
                     'return_address' => $order->shipping_address, 'return_address_area' => $order->shipping_area,
                     'return_address_district' => $order->shipping_district,
                 ]);
-                $return->update(['reference' => $submissionReference . '-' . str_pad((string) $return->id, 3, '0', STR_PAD_LEFT)]);
+                $reference = 'RET-' . str_pad((string) $return->id, 5, '0', STR_PAD_LEFT);
+                $return->update(['reference' => $reference, 'submission_reference' => $reference]);
                 $created[] = $return;
             }
             return $created;
         });
         foreach ($returns as $return) $return->load(['item', 'order:id,order_number', 'seller:id,store_name'])->makeHidden('staff_note');
-        return response()->json(['reference' => $submissionReference, 'data' => $returns], 201);
+        return response()->json(['reference' => $returns[0]->reference ?? null, 'data' => $returns], 201);
     }
 
     public function update(Request $request, ReturnRequest $returnRequest): JsonResponse
@@ -180,7 +188,6 @@ class ReturnRequestController extends Controller
             $data['exchange_order_id'] = $exchangeOrder->id;
             $data['outcome_reference'] = $exchangeOrder->order_number;
         }
-        if ($next === 'refunded' && empty($data['outcome_reference'])) throw ValidationException::withMessages(['outcome_reference' => 'Record the payment reference before completion.']);
         if ($next === 'refunded') {
             $maximum = (float) $returnRequest->item->unit_selling_price * $returnRequest->quantity;
             if (!isset($data['refund_amount']) || $data['refund_amount'] > $maximum) throw ValidationException::withMessages(['refund_amount' => 'A valid refund amount up to the item value is required.']);
@@ -189,7 +196,7 @@ class ReturnRequestController extends Controller
         if (array_key_exists('exchange_order_id', $data)) $updates['exchange_order_id'] = $data['exchange_order_id'];
         if (in_array($next, ['approved', 'rejected'], true)) $updates['reviewed_at'] = now();
         if ($next === 'received') $updates['received_at'] = now();
-        if (in_array($next, ['refunded', 'exchanged'], true)) { $updates['completed_at'] = now(); $updates['outcome_reference'] = $data['outcome_reference']; $updates['refund_amount'] = $data['refund_amount'] ?? null; }
+        if (in_array($next, ['refunded', 'exchanged'], true)) { $updates['completed_at'] = now(); $updates['outcome_reference'] = $data['outcome_reference'] ?? $returnRequest->outcome_reference; $updates['refund_amount'] = $data['refund_amount'] ?? null; }
         DB::transaction(function () use ($returnRequest, $updates, $next) {
             $returnRequest->update($updates);
             if ($next === 'refunded' && $returnRequest->refund_to === 'balance') {

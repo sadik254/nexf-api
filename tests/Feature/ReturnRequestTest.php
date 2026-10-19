@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\ReturnRequest;
 use App\Models\Seller;
+use App\Models\SupportTicket;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -34,7 +35,7 @@ class ReturnRequestTest extends TestCase
         $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$id}", ['status' => 'approved'])->assertOk()->assertJsonPath('status', 'approved');
         $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$id}", ['status' => 'refunded', 'refund_amount' => 100, 'outcome_reference' => 'TX-1'])->assertForbidden();
         $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$id}", ['status' => 'received'])->assertOk()->assertJsonPath('status', 'received');
-        $this->withToken($admin->createToken('test', ['admin:orders'])->plainTextToken)->postJson("/api/admin/return-requests/{$id}", ['status' => 'refunded', 'refund_amount' => 100, 'outcome_reference' => 'TX-1'])->assertOk()->assertJsonPath('status', 'refunded');
+        $this->withToken($admin->createToken('test', ['admin:orders'])->plainTextToken)->postJson("/api/admin/return-requests/{$id}", ['status' => 'refunded', 'refund_amount' => 100])->assertOk()->assertJsonPath('status', 'refunded');
     }
 
     public function test_completed_refund_creates_wallet_credit_and_withdrawal_is_reserved(): void
@@ -62,11 +63,13 @@ class ReturnRequestTest extends TestCase
         $customer = Customer::create(['name' => 'Batch Buyer', 'email' => 'batch-return@example.test', 'password' => 'password123']);
         $order = Order::create(['order_number' => 'RMA-BATCH', 'customer_id' => $customer->id, 'status' => 'delivered', 'payment_status' => 'paid', 'subtotal' => 200, 'total' => 200, 'shipping_charge' => 0, 'shipping_name' => 'Buyer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka']);
         $items = collect(['Coat', 'Shirt'])->map(fn ($name) => OrderItem::create(['order_id' => $order->id, 'product_name' => $name, 'quantity' => 2, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 200, 'line_cost' => 100, 'line_profit' => 100, 'fulfillment_status' => 'delivered']));
+        $ticket = SupportTicket::create(['customer_id' => $customer->id, 'order_id' => $order->id, 'category' => 'Order', 'subject' => 'Return this order', 'status' => 'open']);
         $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
-        $payload = ['order_id' => $order->id, 'type' => 'refund', 'reason' => 'Damaged: stitching failed', 'refund_to' => 'balance', 'items' => $items->map(fn ($item) => ['order_item_id' => $item->id, 'quantity' => 1])->all()];
+        $payload = ['order_id' => $order->id, 'support_ticket_id' => $ticket->id, 'type' => 'refund', 'reason' => 'Damaged: stitching failed', 'refund_to' => 'balance', 'items' => $items->map(fn ($item) => ['order_item_id' => $item->id, 'quantity' => 1])->all()];
         $response = $this->withToken($token)->postJson('/api/customers/return-requests/batch', $payload)->assertCreated()->assertJsonCount(2, 'data');
-        $this->assertNotEmpty($response->json('reference'));
-        $this->assertSame(2, ReturnRequest::query()->where('submission_reference', $response->json('reference'))->count());
+        $this->assertMatchesRegularExpression('/^RET-\d{5}$/', $response->json('reference'));
+        $this->assertSame(2, ReturnRequest::query()->where('support_ticket_id', $ticket->id)->count());
+        $this->assertTrue(ReturnRequest::query()->whereNotNull('reference')->get()->every(fn (ReturnRequest $return) => preg_match('/^RET-\d{5}$/', $return->reference) === 1));
         $payload['items'][1]['quantity'] = 3;
         $this->withToken($token)->postJson('/api/customers/return-requests/batch', $payload)->assertUnprocessable();
         $this->assertSame(2, ReturnRequest::query()->count(), 'Failed batch must not create a partial request.');
