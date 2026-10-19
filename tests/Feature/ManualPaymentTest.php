@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Admin;
 use App\Models\Order;
 use App\Models\PaymentMethod;
+use App\Models\SiteSetting;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -72,18 +73,71 @@ class ManualPaymentTest extends TestCase
         $this->getJson("/api/orders/{$order->id}/payment?phone=01700000000")->assertNotFound();
     }
 
-    public function test_bank_transfer_requires_a_reference_and_non_manual_orders_cannot_submit(): void
+    public function test_bank_transfer_requires_a_bank_name_but_not_a_reference(): void
     {
         $bank = PaymentMethod::where('code', 'bank')->firstOrFail();
         $bankOrder = $this->order($bank, 'bank');
+
         $this->postJson("/api/orders/{$bankOrder->id}/payment", ['phone' => '01712345678'])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors('reference');
+            ->assertJsonValidationErrors('sender');
 
+        $this->postJson("/api/orders/{$bankOrder->id}/payment", [
+            'phone' => '01712345678',
+            'sender' => 'Example Bank PLC',
+            'amount' => 35,
+        ])->assertOk()
+            ->assertJsonPath('payment_sender', 'Example Bank PLC')
+            ->assertJsonPath('payment_reference', null);
+
+        $this->assertDatabaseHas('orders', ['id' => $bankOrder->id, 'payment_amount' => 35]);
+    }
+
+    public function test_pending_cod_order_can_switch_to_an_enabled_manual_method(): void
+    {
         $cod = PaymentMethod::create(['name' => 'Cash on Delivery', 'code' => 'cod', 'is_active' => true]);
-        $codOrder = $this->order($cod, 'cod');
-        $this->postJson("/api/orders/{$codOrder->id}/payment", ['phone' => '01712345678', 'sender' => '01712345678'])
-            ->assertStatus(422);
+        $order = $this->order($cod, 'cod');
+        SiteSetting::create(['key' => 'payment_accounts', 'payload' => [
+            ['id' => 'nagad', 'enabled' => true, 'number' => '01812345678'],
+        ]]);
+
+        $this->postJson("/api/orders/{$order->id}/payment", [
+            'phone' => '01712345678',
+            'method' => 'nagad',
+            'sender' => '01712345678',
+            'reference' => 'ab12-cd34',
+            'amount' => 40,
+        ])->assertOk()
+            ->assertJsonPath('payment_method_code', 'nagad')
+            ->assertJsonPath('payment_amount', '40.00');
+    }
+
+    public function test_admin_can_record_and_delete_a_manual_payment(): void
+    {
+        $method = PaymentMethod::where('code', 'bkash')->firstOrFail();
+        $order = $this->order($method, 'bkash');
+        $admin = Admin::create([
+            'name' => 'Orders Admin', 'email' => 'orders-admin@example.test',
+            'password' => 'password123', 'role' => 'admin', 'is_active' => true,
+        ]);
+        $token = $admin->createToken('test', ['admin:orders'])->plainTextToken;
+
+        $this->withToken($token)->postJson("/api/admin/orders/{$order->id}", [
+            'paid_amount' => 25,
+            'payment_sender' => 'Counter payment',
+            'payment_reference' => 'Manual entry',
+        ])->assertOk();
+        $this->assertDatabaseHas('orders', [
+            'id' => $order->id, 'paid_amount' => 25,
+            'payment_sender' => 'Counter payment', 'payment_reference' => 'Manual entry',
+        ]);
+        $this->assertNotNull($order->fresh()->payment_received_at);
+
+        $this->withToken($token)->postJson("/api/admin/orders/{$order->id}/payment/delete")
+            ->assertOk()
+            ->assertJsonPath('message', 'Payment deleted.');
+        $this->assertDatabaseHas('orders', ['id' => $order->id, 'paid_amount' => 0]);
+        $this->assertNull($order->fresh()->payment_received_at);
     }
 
     private function order(PaymentMethod $method, string $code): Order

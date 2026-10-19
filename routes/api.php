@@ -227,6 +227,7 @@ Route::prefix('admin')->group(function () {
     Route::middleware('sanctum.type:admin,admin:orders')->get('/orders', [OrderController::class, 'indexAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/preview', [OrderController::class, 'previewAdmin']);
     Route::middleware('sanctum.type:admin,admin:orders')->post('/orders', [OrderController::class, 'storeAdmin']);
+    Route::middleware('sanctum.type:admin,admin:orders')->post('/orders/{order}/payment/delete', [ManualPaymentController::class, 'clear']);
     Route::middleware('sanctum.type:admin,admin:orders')->get('/returns', [OrderReturnController::class, 'index']);
     Route::middleware('sanctum.type:admin,admin:orders')->get('/return-requests', [ReturnRequestController::class, 'index']);
     Route::middleware('sanctum.type:admin,admin:orders')->get('/return-requests/{returnRequest}', [ReturnRequestController::class, 'show']);

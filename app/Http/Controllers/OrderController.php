@@ -241,6 +241,8 @@ class OrderController extends Controller
             'shipping_email' => ['sometimes', 'nullable', 'email', 'max:255'],
             'shipping_address' => ['sometimes', 'string'],
             'notes' => ['sometimes', 'nullable', 'string'],
+            'payment_sender' => ['sometimes', 'nullable', 'string', 'max:40'],
+            'payment_reference' => ['sometimes', 'nullable', 'string', 'max:60'],
         ]);
         if (array_key_exists('status', $data)) {
             if (!empty($data['packed'])) {

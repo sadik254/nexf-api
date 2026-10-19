@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Admin;
+use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductVariation;
 use App\Models\ReturnRequest;
@@ -34,9 +35,16 @@ class ConsoleController extends Controller
             ->whereDoesntHave('lots', fn ($q) => $q->where('quantity_remaining', '>', 0))->count();
         $variations = ProductVariation::query()->whereHas('product', fn ($q) => $scope($q)->where('product_type', 'variable'))
             ->whereDoesntHave('lots', fn ($q) => $q->where('quantity_remaining', '>', 0))->count();
+        $payments = $actor instanceof Admin ? Order::query()
+            ->whereIn('payment_method_code', ['bkash', 'nagad', 'rocket', 'bank'])
+            ->where('status', 'pending')
+            ->whereNotNull('payment_submitted_at')
+            ->where(fn ($query) => $query->whereNull('paid_amount')->orWhere('paid_amount', 0))
+            ->count() : 0;
+
         return response()->json([
             'support' => $support, 'returns' => $returns, 'chats' => $chats,
-            'inventory' => $simple + $variations,
+            'inventory' => $simple + $variations, 'payments' => $payments,
             // These services have no persisted backend models yet.
             'reports' => 0, 'withdrawals' => 0,
         ]);

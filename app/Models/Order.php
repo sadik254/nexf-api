@@ -34,7 +34,9 @@ class Order extends Model
         'paid_amount',
         'payment_reference',
         'payment_sender',
+        'payment_amount',
         'payment_submitted_at',
+        'payment_received_at',
         'shipping_name',
         'shipping_phone',
         'shipping_email',
@@ -64,6 +66,7 @@ class Order extends Model
             'manual_discount_value' => 'decimal:2',
             'total' => 'decimal:2',
             'paid_amount' => 'decimal:2',
+            'payment_amount' => 'decimal:2',
             'is_guest' => 'boolean',
             'manual_ship' => 'boolean',
             'stock_request' => 'boolean',
@@ -71,6 +74,7 @@ class Order extends Model
             'packed_at' => 'datetime',
             'payment_paid_at' => 'datetime',
             'payment_submitted_at' => 'datetime',
+            'payment_received_at' => 'datetime',
             'cancelled_at' => 'datetime',
         ];
     }
@@ -80,6 +84,9 @@ class Order extends Model
         static::saving(function (Order $order): void {
             if ($order->isDirty('payment_status') && $order->payment_status === 'paid' && !$order->payment_paid_at) {
                 $order->payment_paid_at = now();
+            }
+            if ($order->isDirty('paid_amount') && in_array($order->payment_method_code, ['bkash', 'nagad', 'rocket', 'bank'], true)) {
+                $order->payment_received_at = (float) $order->paid_amount > 0 ? ($order->payment_received_at ?? now()) : null;
             }
         });
     }
