@@ -6,6 +6,7 @@ use App\Models\Admin;
 use App\Models\Seller;
 use App\Models\SellerShippingRate;
 use App\Models\ShippingMethod;
+use App\Http\Controllers\DeliveryGroupController;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -29,8 +30,18 @@ class SellerShippingRateController extends Controller
 
     private function index(Seller $seller): JsonResponse
     {
-        $rates = SellerShippingRate::where('seller_id', $seller->id)->pluck('charge', 'shipping_method_id');
-        return response()->json(ShippingMethod::query()->active()->when($seller->delivery_options_customized, fn($q)=>$q->where('seller_id',$seller->id), fn($q)=>$q->whereNull('seller_id')->where('is_store_option',false))->orderBy('sort_order')->orderBy('id')->get()->map(fn ($method) => [
+        $group = DeliveryGroupController::groupForSeller($seller->id);
+        $sourceSellerId = $group?->ships_from_seller_id;
+        // A linked store reads the main store's rates. It cannot change them.
+        if ($group && $sourceSellerId === null) {
+            $store = \App\Models\Store::primary();
+            $custom = (bool) $store?->delivery_options_customized;
+            $methods = ShippingMethod::query()->active()->whereNull('seller_id')->where('is_store_option', $custom)->orderBy('sort_order')->orderBy('id')->get();
+            return response()->json($methods->map(fn ($method) => ['shipping_method_id'=>$method->id,'code'=>$method->code,'name'=>$method->name,'currency'=>$method->currency,'is_active'=>$method->is_active,'default_charge'=>$method->charge,'charge'=>$method->charge,'has_override'=>$custom,'is_custom'=>$custom,'read_only'=>true]));
+        }
+        $source = $group ? Seller::findOrFail($sourceSellerId) : $seller;
+        $rates = SellerShippingRate::where('seller_id', $source->id)->pluck('charge', 'shipping_method_id');
+        return response()->json(ShippingMethod::query()->active()->when($source->delivery_options_customized, fn($q)=>$q->where('seller_id',$source->id), fn($q)=>$q->whereNull('seller_id')->where('is_store_option',false))->orderBy('sort_order')->orderBy('id')->get()->map(fn ($method) => [
             'shipping_method_id' => $method->id,
             'code' => $method->code,
             'name' => $method->name,
@@ -40,11 +51,15 @@ class SellerShippingRateController extends Controller
             'charge' => $rates[$method->id] ?? $method->charge,
             'has_override' => $method->seller_id !== null || $rates->has($method->id),
             'is_custom' => $method->seller_id !== null,
+            'read_only' => $group !== null && $source->id !== $seller->id,
         ]));
     }
 
     private function update(Seller $seller, Request $request): JsonResponse
     {
+        if (DeliveryGroupController::isLinkedSeller($seller)) {
+            abort(422, 'Linked stores use their main store delivery rates.');
+        }
         if ($request->exists('options')) return $this->saveOptions($seller,$request);
         $data = $request->validate([
             'rates' => ['required', 'array', 'min:1'],

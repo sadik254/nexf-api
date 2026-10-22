@@ -199,7 +199,7 @@ class CustomerController extends Controller
             $phone = $this->normalizedPhone($customer->phone);
             $claimed = $phone === null ? 0 : Order::query()
                 ->whereNull('customer_id')->where('is_guest', true)->where('shipping_phone', $phone)
-                ->update(['customer_id' => $customer->id]);
+                ->update(['customer_id' => $customer->id, 'is_guest' => false]);
             $code->forceFill(['used_at' => now(), 'customer_id' => $customer->id])->save();
             return $claimed;
         });

@@ -43,6 +43,7 @@ use App\Http\Controllers\FraudGuardController;
 use App\Http\Controllers\SellerPromotionController;
 use App\Http\Controllers\StoreLayoutController;
 use App\Http\Controllers\ManualPaymentController;
+use App\Http\Controllers\DeliveryGroupController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -180,9 +181,10 @@ Route::post('/contact', [SupportTicketController::class, 'contact'])->middleware
 Route::get('/site-info', [SiteInfoController::class, 'show']);
 Route::get('/popups', [SitePopupController::class, 'publicIndex']);
 Route::get('/store/brands', [CatalogTermController::class, 'brands']);
+Route::get('/store/delivery-groups', [DeliveryGroupController::class, 'publicIndex']);
 Route::get('/store/tags', [CatalogTermController::class, 'tags']);
 Route::post('/coupons/validate', [CouponController::class, 'validateCode']);
-Route::post('/guest/orders/preview', [OrderController::class, 'previewGuest'])->middleware('throttle:5,1');
+Route::post('/guest/orders/preview', [OrderController::class, 'previewGuest'])->middleware('throttle:30,1,guest-preview');
 Route::post('/guest/orders', [OrderController::class, 'storeGuest'])->middleware('throttle:5,1');
 Route::get('/guest-orders/pending-count', [CustomerController::class, 'pendingGuestOrderCount'])->middleware('throttle:10,1,guest-order-count');
 Route::get('/payment-accounts', [ManualPaymentController::class, 'accounts']);
@@ -340,6 +342,10 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
     Route::post('/tags', [CatalogTermController::class, 'storeTag']);
     Route::post('/tags/{tag}', [CatalogTermController::class, 'updateTag']);
     Route::post('/tags/{tag}/delete', [CatalogTermController::class, 'deleteTag']);
+    Route::get('/delivery-groups', [DeliveryGroupController::class, 'index']);
+    Route::post('/delivery-groups', [DeliveryGroupController::class, 'store']);
+    Route::post('/delivery-groups/{deliveryGroup}', [DeliveryGroupController::class, 'update']);
+    Route::post('/delivery-groups/{deliveryGroup}/delete', [DeliveryGroupController::class, 'destroy']);
     Route::get('/platform-delivery-rates', [SellerShippingRateController::class, 'platformIndex']);
     Route::post('/platform-delivery-rates', [SellerShippingRateController::class, 'platformUpdate']);
     Route::get('/sellers/{seller}/delivery-rates', [SellerShippingRateController::class, 'adminIndex']);
@@ -462,6 +468,7 @@ Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(f
     Route::get('/collections/{collection}', [ProductCollectionController::class, 'show']);
     Route::post('/collections/{collection}', [ProductCollectionController::class, 'update']);
     Route::post('/collections/{collection}/delete', [ProductCollectionController::class, 'destroy']);
+    Route::get('/delivery-group', [DeliveryGroupController::class, 'sellerGroup']);
     Route::get('/delivery-rates', [SellerShippingRateController::class, 'sellerIndex']);
     Route::post('/delivery-rates', [SellerShippingRateController::class, 'sellerUpdate']);
     Route::get('/console-summary', [\App\Http\Controllers\ConsoleController::class, 'summary']);

@@ -49,7 +49,7 @@ class GuestOrderClaimTest extends TestCase
             ->assertJsonPath('claimed_orders', 1);
 
         $this->assertSame($customer->id, $matching->fresh()->customer_id);
-        $this->assertTrue($matching->fresh()->is_guest);
+        $this->assertFalse($matching->fresh()->is_guest);
         $this->assertNull($different->fresh()->customer_id);
         $this->assertSame($otherCustomer->id, $alreadyOwned->fresh()->customer_id);
 

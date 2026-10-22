@@ -197,7 +197,7 @@ class ProductController extends Controller
             'default_buying_price' => ['nullable', 'numeric', 'min:0'],
             'default_selling_price' => ['nullable', 'numeric', 'min:0'],
             'initial_quantity' => ['sometimes', 'integer', 'min:1'],
-            'initial_buying_price' => ['required_with:initial_quantity', 'prohibited_without:initial_quantity', 'numeric', 'min:0'],
+            'initial_buying_price' => ['nullable', 'required_with:initial_quantity', 'numeric', 'min:0'],
             'compare_at_price' => ['nullable', 'numeric', 'min:0'],
             'discount_kind' => ['nullable', 'in:flat,percent'],
             'discount_value' => ['nullable', 'numeric', 'min:0'],
@@ -215,6 +215,9 @@ class ProductController extends Controller
         $data = $this->normalizeSpecifications($data);
         if (($data['product_type'] ?? null) !== 'simple' && isset($data['initial_quantity'])) {
             throw ValidationException::withMessages(['initial_quantity' => ['Initial stock can only be supplied for a simple product.']]);
+        }
+        if (!isset($data['initial_quantity']) && array_key_exists('initial_buying_price', $data) && $data['initial_buying_price'] !== null) {
+            throw ValidationException::withMessages(['initial_buying_price' => ['Initial quantity is required when setting an opening buying price.']]);
         }
         if (array_key_exists('option_groups', $data)) $this->validateOptionGroups($data['option_groups'] ?? []);
         if (array_key_exists('description', $data)) $data['description'] = app(ProductHtmlSanitizer::class)->clean($data['description']);
