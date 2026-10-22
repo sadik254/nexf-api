@@ -690,6 +690,7 @@ class OrderController extends Controller
             'status' => $lowest,
             'packed_at' => $allPackedOrFurther ? ($order->packed_at ?? now()) : null,
         ]);
+        if (in_array($lowest, ['delivered', 'completed'], true)) app(\App\Services\WalletRewardService::class)->orderDelivered($order->fresh());
     }
 
     public function store(Request $request): JsonResponse

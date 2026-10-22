@@ -27,6 +27,8 @@ class Customer extends Authenticatable
         'phone',
         'password',
         'profile_picture',
+        'referral_code',
+        'referred_by_customer_id',
         'reseller_id',
         'crm_status', 'is_risky', 'contact_street', 'contact_area', 'contact_district', 'roster_archived_at',
     ];
@@ -65,4 +67,5 @@ class Customer extends Authenticatable
         return $this->hasMany(Order::class);
     }
     public function reseller(): BelongsTo { return $this->belongsTo(Reseller::class); }
+    public function referrer(): BelongsTo { return $this->belongsTo(self::class, 'referred_by_customer_id'); }
 }

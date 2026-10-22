@@ -292,6 +292,7 @@ class ProductEngagementController extends Controller
     {
         $data = $request->validate(['status' => ['required', 'in:approved,rejected'], 'rejection_note' => ['nullable','string','max:2000']]);
         $review->update(['status' => $data['status'], 'rejection_note' => $data['status']==='rejected'?($data['rejection_note']??null):null, 'moderated_at'=>now()]);
+        if ($data['status'] === 'approved') app(\App\Services\WalletRewardService::class)->reviewApproved($review->fresh());
 
         return response()->json([
             'message' => "Review {$data['status']} successfully.",

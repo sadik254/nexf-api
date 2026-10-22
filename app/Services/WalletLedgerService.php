@@ -28,7 +28,7 @@ class WalletLedgerService
 
     public function referralReward(Customer $customer, Order $order, float $amount): ?CustomerWalletTransaction
     {
-        return $this->credit($customer, $order, 'referral_reward', $amount, "Referral reward for order {$order->order_number}", "order:{$order->id}:referral");
+        return $this->credit($customer, $order, 'referral_reward', $amount, "Referral reward for order {$order->order_number}", "customer:{$order->customer_id}:referral");
     }
 
     private function credit(?Customer $customer, ?Order $order, string $kind, float $amount, string $description, string $sourceKey): ?CustomerWalletTransaction

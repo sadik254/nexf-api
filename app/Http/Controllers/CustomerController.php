@@ -107,6 +107,7 @@ class CustomerController extends Controller
             'phone' => ['nullable', 'string', 'max:32'],
             'password' => ['required', 'string', 'min:4'],
             'profile_picture' => ['nullable', 'file', 'image', 'max:5120'],
+            'referral_code' => ['nullable', 'string', 'max:24'],
         ]);
         $email = strtolower(trim($data['email']));
         $phone = $this->normalizedPhone($data['phone'] ?? null);
@@ -118,6 +119,10 @@ class CustomerController extends Controller
         }
         if ($phone !== null && Customer::where('phone', $phone)->exists()) {
             return response()->json(['message' => 'Phone already taken.'], 422);
+        }
+        $referralCode = isset($data['referral_code']) ? strtoupper(trim($data['referral_code'])) : null;
+        if ($referralCode !== null && !Customer::where('referral_code', $referralCode)->exists()) {
+            throw ValidationException::withMessages(['referral_code' => ['Referral code was not found.']]);
         }
 
         $profileUrl = null;
@@ -132,6 +137,7 @@ class CustomerController extends Controller
             'phone' => $phone,
             'password' => Hash::make($data['password']),
             'profile_picture' => $profileUrl,
+            'referral_code' => $referralCode,
         ]);
         $this->sendVerificationCode($email, 'email_verification');
 
@@ -186,6 +192,8 @@ class CustomerController extends Controller
                     'email' => $pending->email,
                     'phone' => $pending->phone,
                     'profile_picture' => $pending->profile_picture,
+                    'referred_by_customer_id' => $pending->referral_code ? Customer::where('referral_code', $pending->referral_code)->value('id') : null,
+                    'referral_code' => $this->newReferralCode(),
                 ]);
                 // The pending row receives a hash at registration; never hash it twice.
                 $customer->password = $pending->password;
@@ -311,6 +319,12 @@ class CustomerController extends Controller
             ->where('expires_at', '>', now())
             ->latest()
             ->first();
+    }
+
+    private function newReferralCode(): string
+    {
+        do { $code = 'NEXF' . Str::upper(Str::random(8)); } while (Customer::where('referral_code', $code)->exists());
+        return $code;
     }
 
     private function normalizedPhone(?string $phone): ?string
