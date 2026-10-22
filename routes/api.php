@@ -263,6 +263,11 @@ Route::prefix('sellers')->group(function () {
     Route::middleware('sanctum.type:seller,seller:basic')->post('/me/email/resend', [SellerController::class, 'resendEmailChangeCode']);
     Route::middleware('sanctum.type:seller,seller:basic')->post('/staff/me', [\App\Http\Controllers\SellerStaffController::class, 'me']);
     Route::middleware('sanctum.type:seller,seller:basic')->post('/staff/me/password', [\App\Http\Controllers\SellerStaffController::class, 'password']);
+    Route::middleware('sanctum.type:seller,seller:basic')->post('/staff/me/email/send-current', [\App\Http\Controllers\SellerStaffController::class, 'emailCurrent']);
+    Route::middleware('sanctum.type:seller,seller:basic')->post('/staff/me/email/verify-current', [\App\Http\Controllers\SellerStaffController::class, 'emailVerifyCurrent']);
+    Route::middleware('sanctum.type:seller,seller:basic')->post('/staff/me/email', [\App\Http\Controllers\SellerStaffController::class, 'emailRequest']);
+    Route::middleware('sanctum.type:seller,seller:basic')->post('/staff/me/email/verify-new', [\App\Http\Controllers\SellerStaffController::class, 'emailVerifyNew']);
+    Route::middleware('sanctum.type:seller,seller:basic')->post('/staff/me/email/resend', [\App\Http\Controllers\SellerStaffController::class, 'emailResend']);
 });
 
 Route::prefix('admin')->group(function () {
