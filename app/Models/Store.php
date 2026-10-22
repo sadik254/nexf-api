@@ -12,6 +12,13 @@ class Store extends Model
         'setup_key',
         'name',
         'logo',
+        'sku_prefix',
+        'support_email',
+        'support_phone',
+        'address_line',
+        'address_area',
+        'address_district',
+        'store_address',
     ];
 
     protected function casts(): array { return ['delivery_options_customized' => 'boolean']; }
