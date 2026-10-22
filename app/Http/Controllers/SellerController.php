@@ -7,6 +7,7 @@ use Illuminate\Validation\ValidationException;
 use App\Mail\SellerApprovedMail;
 use App\Models\Admin;
 use App\Models\Seller;
+use App\Models\SellerStaff;
 use App\Services\PasswordResetCodeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -254,7 +255,7 @@ class SellerController extends Controller
 
         return response()->json([
             'message' => 'Seller onboarding submitted and pending approval.',
-            'seller' => $seller,
+            'seller' => $seller->setAttribute('staff', $staff),
         ], 201);
     }
 
@@ -266,20 +267,22 @@ class SellerController extends Controller
         ]);
 
         $seller = Seller::where('email', $data['email'])->first();
-        if (!$seller || !Hash::check($data['password'], $seller->password ?? '')) {
-            return response()->json(['message' => 'Invalid credentials.'], 401);
-        }
-
+        $staff = null;
+        if (!$seller) { $staff = SellerStaff::with('seller')->where('email', $data['email'])->first(); $seller = $staff?->seller; }
+        $account = $staff ?: $seller;
+        if (!$account || !Hash::check($data['password'], $account->password ?? '')) return response()->json(['message' => 'Invalid credentials.'], 401);
+        if ($staff && $staff->status === 'suspended') return response()->json(['message' => 'Account is suspended.'], 403);
         if ($seller->status !== 'approved' || !$seller->is_active) {
             return response()->json(['message' => 'Account is not approved.'], 403);
         }
 
+        if ($staff) $staff->update(['status' => 'active', 'last_login_at' => now()]);
         $seller->forceFill([
             'login_ip' => $request->ip(),
             'last_login_at' => now(),
         ])->save();
 
-        $token = $seller->createToken('seller-api', ['seller:basic']);
+        $token = $staff ? $staff->createToken('seller-api', ['seller:basic']) : $seller->createToken('seller-api', ['seller:basic']);
 
         return response()->json([
             'token' => $token->plainTextToken,

@@ -74,6 +74,8 @@ class Seller extends Authenticatable
         return $this->hasMany(OrderItem::class);
     }
 
+    public function staff(): HasMany { return $this->hasMany(SellerStaff::class); }
+
     public function products(): HasMany
     {
         return $this->hasMany(Product::class);

@@ -270,6 +270,10 @@ Route::prefix('admin')->group(function () {
     Route::middleware('sanctum.type:admin,admin:basic')->post('/sellers', [SellerController::class, 'adminSave']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/sellers/{seller}', [SellerController::class, 'adminSave']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/sellers/{seller}/status', [SellerController::class, 'updateStatus']);
+    Route::middleware('sanctum.type:admin,admin:basic')->get('/seller-staff', [\App\Http\Controllers\SellerStaffController::class, 'adminIndex']);
+    Route::middleware('sanctum.type:admin,admin:basic')->post('/sellers/{seller}/staff', [\App\Http\Controllers\SellerStaffController::class, 'adminStore']);
+    Route::middleware('sanctum.type:admin,admin:basic')->post('/seller-staff/{staff}', [\App\Http\Controllers\SellerStaffController::class, 'adminUpdate']);
+    Route::middleware('sanctum.type:admin,admin:basic')->post('/seller-staff/{staff}/delete', [\App\Http\Controllers\SellerStaffController::class, 'adminDestroy']);
     Route::middleware('sanctum.type:admin,admin:basic')->get('/sellers', [SellerController::class, 'index']);
     Route::middleware('sanctum.type:admin,admin:basic')->get('/sellers/{seller}', [SellerController::class, 'show']);
 });
@@ -408,6 +412,10 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 });
 
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
+    Route::get('/staff', [\App\Http\Controllers\SellerStaffController::class, 'index']);
+    Route::post('/staff', [\App\Http\Controllers\SellerStaffController::class, 'store']);
+    Route::post('/staff/{staff}', [\App\Http\Controllers\SellerStaffController::class, 'update']);
+    Route::post('/staff/{staff}/delete', [\App\Http\Controllers\SellerStaffController::class, 'destroy']);
     Route::get('/coupons', [CouponController::class, 'indexSeller']);
     Route::post('/coupons', [CouponController::class, 'storeSeller']);
     Route::get('/coupons/{coupon}', [CouponController::class, 'showSeller']);

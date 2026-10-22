@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Laravel\Sanctum\PersonalAccessToken;
+use App\Models\SellerStaff;
 use Symfony\Component\HttpFoundation\Response;
 
 class SanctumTypeMiddleware
@@ -27,7 +28,8 @@ class SanctumTypeMiddleware
         $tokenableClass = ltrim($tokenable::class, '\\');
         $tokenableBase = strtolower(class_basename($tokenableClass));
 
-        $typeMatches = $tokenableClass === $type || $tokenableBase === strtolower($type);
+        $staffSeller = strtolower($type) === 'seller' && $tokenable instanceof SellerStaff;
+        $typeMatches = $staffSeller || $tokenableClass === $type || $tokenableBase === strtolower($type);
         if (!$typeMatches) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
@@ -36,8 +38,7 @@ class SanctumTypeMiddleware
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        $request->setUserResolver(fn () => $tokenable);
-        Auth::setUser($tokenable);
+        if ($staffSeller) { $seller = $tokenable->seller; if (!$seller) return response()->json(['message' => 'Forbidden.'], 403); $request->attributes->set('seller_staff', $tokenable); $request->setUserResolver(fn () => $seller); Auth::setUser($seller); } else { $request->setUserResolver(fn () => $tokenable); Auth::setUser($tokenable); }
 
         return $next($request);
     }
