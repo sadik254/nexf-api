@@ -261,6 +261,8 @@ Route::prefix('sellers')->group(function () {
     Route::middleware('sanctum.type:seller,seller:basic')->post('/me/email', [SellerController::class, 'requestEmailChange']);
     Route::middleware('sanctum.type:seller,seller:basic')->post('/me/email/verify-new', [SellerController::class, 'verifyNewEmail']);
     Route::middleware('sanctum.type:seller,seller:basic')->post('/me/email/resend', [SellerController::class, 'resendEmailChangeCode']);
+    Route::middleware('sanctum.type:seller,seller:basic')->post('/staff/me', [\App\Http\Controllers\SellerStaffController::class, 'me']);
+    Route::middleware('sanctum.type:seller,seller:basic')->post('/staff/me/password', [\App\Http\Controllers\SellerStaffController::class, 'password']);
 });
 
 Route::prefix('admin')->group(function () {

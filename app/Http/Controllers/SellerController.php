@@ -359,17 +359,17 @@ class SellerController extends Controller
     public function forgotPassword(Request $request): JsonResponse
     {
         $data = $request->validate(['email' => ['required', 'email']]);
-        $seller = Seller::where('email', $data['email'])->first();
-        if ($seller) $this->passwordResets->send($seller, 'seller');
+        $seller = Seller::where('email', $data['email'])->first(); $staff = !$seller ? SellerStaff::where('email', $data['email'])->first() : null;
+        if ($seller) $this->passwordResets->send($seller, 'seller'); elseif ($staff) $this->passwordResets->send($staff, 'seller_staff');
         return response()->json(['message' => 'If that email exists, a code has been sent.']);
     }
 
     public function resetPassword(Request $request): JsonResponse
     {
         $data = $request->validate(['email' => ['required', 'email'], 'code' => ['required', 'digits:6'], 'password' => ['required', 'string', 'min:8', 'confirmed']]);
-        $seller = Seller::where('email', $data['email'])->first();
-        if (!$seller || !$this->passwordResets->consume($seller, 'seller', $data['code'])) return response()->json(['message' => 'Invalid or expired code.'], 422);
-        $seller->forceFill(['password' => $data['password']])->save(); $seller->tokens()->delete();
+        $seller = Seller::where('email', $data['email'])->first(); $staff = !$seller ? SellerStaff::where('email', $data['email'])->first() : null; $account = $staff ?: $seller; $type = $staff ? 'seller_staff' : 'seller';
+        if (!$account || !$this->passwordResets->consume($account, $type, $data['code'])) return response()->json(['message' => 'Invalid or expired code.'], 422);
+        $account->forceFill(['password' => $data['password']])->save(); $account->tokens()->delete();
         return response()->json(['message' => 'Password reset successfully.']);
     }
 

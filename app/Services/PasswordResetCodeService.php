@@ -12,6 +12,14 @@ class PasswordResetCodeService
 {
     private const EXPIRES_MINUTES = 10;
 
+    public function issue(Model $account, string $accountType, int $minutes = 10080): string
+    {
+        PasswordResetCode::query()->where('account_type', $accountType)->where('account_id', $account->getKey())->whereNull('used_at')->delete();
+        $code = (string) random_int(100000, 999999);
+        PasswordResetCode::create(['account_type' => $accountType, 'account_id' => $account->getKey(), 'email' => $account->email, 'code_hash' => Hash::make($code), 'expires_at' => now()->addMinutes($minutes)]);
+        return $code;
+    }
+
     public function send(Model $account, string $accountType): void
     {
         PasswordResetCode::query()->where('account_type', $accountType)->where('account_id', $account->getKey())->whereNull('used_at')->delete();
