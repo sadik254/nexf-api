@@ -55,7 +55,7 @@ class StoreProductController extends Controller
 
         return [
             'type' => 'admin', 'name' => $store?->name ?? config('app.name'), 'slug' => 'admin',
-            'logo' => $store?->logo, 'image' => null, 'location' => null, 'joined_at' => null,
+            'logo' => $store?->logo, 'image' => null, 'location' => $store?->store_address, 'joined_at' => $store?->created_at?->toDateString(),
             'rating_summary' => [
                 'average' => $reviewCount ? round((float) (clone $reviews)->avg('rating'), 2) : null,
                 'review_count' => $reviewCount,
@@ -64,7 +64,7 @@ class StoreProductController extends Controller
             ],
             'performance' => [
                 'positive_rating_percentage' => $reviewCount ? round($positiveCount / $reviewCount * 100, 1) : null,
-                'on_time_shipping_percentage' => null,
+                'on_time_shipping_percentage' => $this->onTimeShippingPercentage(null),
                 'chat_response_percentage' => null,
             ],
         ];
@@ -87,9 +87,16 @@ class StoreProductController extends Controller
             'rating_summary' => ['average' => $count ? round((float) (clone $reviews)->avg('rating'), 2) : null, 'review_count' => $count,
                 'sold_count' => (int) $seller->orderItems()->where('fulfillment_status', 'delivered')->whereHas('order', fn ($orders) => $orders->whereIn('status', ['delivered', 'completed']))->sum('quantity')],
             'performance' => ['positive_rating_percentage' => $count ? round($positiveCount / $count * 100, 1) : null,
-                'on_time_shipping_percentage' => $seller->on_time_shipping_percentage,
+                'on_time_shipping_percentage' => $this->onTimeShippingPercentage($seller->id),
                 'chat_response_percentage' => $chatCount ? round($repliedChats / $chatCount * 100, 1) : null],
         ];
+    }
+
+    private function onTimeShippingPercentage(?int $sellerId): ?float
+    {
+        $items = \App\Models\OrderItem::query()->where('seller_id', $sellerId)->where('fulfillment_status', 'delivered')->whereNotNull('shipped_at')->whereNotNull('delivered_at')->get(['shipped_at','delivered_at']);
+        if ($items->isEmpty()) return null;
+        return round($items->filter(fn ($item) => $item->delivered_at->lessThanOrEqualTo($item->shipped_at->copy()->addDays(3)))->count() / $items->count() * 100, 1);
     }
 
     public function marketplaceStats(): JsonResponse

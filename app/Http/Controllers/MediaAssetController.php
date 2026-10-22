@@ -49,6 +49,7 @@ class MediaAssetController extends Controller
             'mime_type' => $file->getMimeType(),
             'size_bytes' => $file->getSize(),
             'alt_text' => $data['alt_text'] ?? null,
+            ...$this->metadata($file),
         ]);
         return response()->json($asset, 201);
     }
@@ -91,6 +92,14 @@ class MediaAssetController extends Controller
         $this->authorizeAsset($this->actor($request), $asset);
         $asset->delete();
         return response()->json(['message' => 'Removed from the media library. The original file remains available at its URL.']);
+    }
+
+    private function metadata(\Illuminate\Http\UploadedFile $file): array
+    {
+        $meta = ['width'=>null, 'height'=>null, 'duration_seconds'=>null];
+        if (str_starts_with((string) $file->getMimeType(), 'image/')) { $size = @getimagesize($file->getPathname()); if ($size) { $meta['width']=$size[0]; $meta['height']=$size[1]; } }
+        if (str_starts_with((string) $file->getMimeType(), 'video/') && function_exists('shell_exec')) { $value = @shell_exec('ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 '.escapeshellarg($file->getPathname()).' 2>/dev/null'); if (is_numeric(trim((string)$value))) $meta['duration_seconds']=(int)round((float)$value); }
+        return $meta;
     }
 
     private function actor(Request $request): Admin|Seller

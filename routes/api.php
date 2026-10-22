@@ -44,6 +44,7 @@ use App\Http\Controllers\SellerPromotionController;
 use App\Http\Controllers\StoreLayoutController;
 use App\Http\Controllers\ManualPaymentController;
 use App\Http\Controllers\DeliveryGroupController;
+use App\Http\Controllers\HouseStoreController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -273,6 +274,8 @@ Route::prefix('sellers')->group(function () {
 });
 
 Route::prefix('admin')->group(function () {
+    Route::middleware('sanctum.type:admin,admin:basic')->get('/house-store', [HouseStoreController::class, 'show']);
+    Route::middleware('sanctum.type:admin,admin:basic')->post('/house-store', [HouseStoreController::class, 'save']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/sellers/{seller}/approve', [SellerController::class, 'approve']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/sellers/{seller}/reject', [SellerController::class, 'reject']);
     Route::middleware('sanctum.type:admin,admin:basic')->post('/sellers/{seller}/delete', [SellerController::class, 'archive']);
@@ -425,6 +428,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin,admin:basic')->group(func
 });
 
 Route::prefix('seller')->middleware('sanctum.type:seller,seller:basic')->group(function () {
+    Route::post('/store', [SellerController::class, 'updateStore']);
     Route::get('/staff', [\App\Http\Controllers\SellerStaffController::class, 'index']);
     Route::post('/staff', [\App\Http\Controllers\SellerStaffController::class, 'store']);
     Route::post('/staff/{staff}', [\App\Http\Controllers\SellerStaffController::class, 'update']);

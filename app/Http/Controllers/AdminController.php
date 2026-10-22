@@ -135,7 +135,7 @@ class AdminController extends Controller
             'phone' => ['nullable', 'string', 'max:32'],
             'address' => ['nullable', 'string'],
             'image' => ['nullable', 'file', 'image', 'max:5120'],
-            'role' => ['nullable', 'in:admin,moderator,editor'],
+            'role' => ['nullable', 'in:admin'],
         ]);
 
         if (Admin::where('email', $data['email'])->exists()) {
@@ -171,7 +171,7 @@ class AdminController extends Controller
             'password' => $initialPassword,
             'address' => $data['address'] ?? null,
             'image' => $imageUrl,
-            'role' => $data['role'] ?? 'moderator',
+            'role' => 'admin',
         ]);
 
         $code = $this->passwordResets->issue($admin, 'admin');

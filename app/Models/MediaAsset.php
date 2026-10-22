@@ -6,6 +6,6 @@ use Illuminate\Database\Eloquent\Model;
 
 class MediaAsset extends Model
 {
-    protected $fillable = ['owner_type', 'owner_id', 'source', 'url', 'file_name', 'mime_type', 'size_bytes', 'alt_text'];
-    protected function casts(): array { return ['size_bytes' => 'integer']; }
+    protected $fillable = ['owner_type', 'owner_id', 'source', 'url', 'file_name', 'mime_type', 'size_bytes', 'width', 'height', 'duration_seconds', 'alt_text'];
+    protected function casts(): array { return ['size_bytes' => 'integer', 'width' => 'integer', 'height' => 'integer', 'duration_seconds' => 'integer']; }
 }

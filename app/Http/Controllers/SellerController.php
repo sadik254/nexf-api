@@ -116,10 +116,17 @@ class SellerController extends Controller
             'address_area' => ['required', 'string', 'max:255'],
             'address_district' => ['required', 'string', 'max:255'],
             'commission_rate' => ['required', 'numeric', 'between:0,100'],
+            'support_email' => ['sometimes', 'nullable', 'email', 'max:255'],
+            'support_phone' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'store_logo' => ['sometimes', 'nullable', 'file', 'image', 'max:5120'],
+            'clear_store_logo' => ['sometimes', 'boolean'],
             'is_featured' => ['sometimes', 'boolean'],
         ]);
         $data['store_address'] = implode(', ', [$data['address_line'], $data['address_area'], $data['address_district']]);
         $data['city'] = $data['address_district'];
+        $logo = $request->boolean('clear_store_logo') ? null : $seller?->store_logo;
+        if ($request->hasFile('store_logo')) { $api = new Api(Configuration::create(config('services.uploadcare.public_key'), config('services.uploadcare.secret_key'))); $logo = 'https://ucarecdn.com/'.$api->uploader()->fromPath($request->file('store_logo')->getPathname())->getUuid().'/-/preview/'; }
+        unset($data['store_logo'], $data['clear_store_logo']); $data['store_logo'] = $logo;
         $saved = \Illuminate\Support\Facades\DB::transaction(function () use ($seller, $data, $actor) {
             if ($seller) {
                 $locked = Seller::query()->lockForUpdate()->findOrFail($seller->id);
@@ -138,6 +145,14 @@ class SellerController extends Controller
             ]);
         });
         return response()->json($saved, $seller ? 200 : 201);
+    }
+
+    public function updateStore(Request $request): JsonResponse
+    {
+        $seller = $request->user(); abort_unless($seller instanceof Seller && !$request->attributes->has('seller_staff'), 403);
+        $request->merge(['email'=>strtolower(trim((string)$request->input('email')))]);
+        $data=$request->validate(['store_name'=>['required','string','max:255'],'email'=>['required','email','max:255',\Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],'phone'=>['required','regex:/^01[3-9][0-9]{8}$/',\Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],'address_line'=>['required','string','max:255'],'address_area'=>['required','string','max:255'],'address_district'=>['required','string','max:255'],'support_email'=>['sometimes','nullable','email','max:255'],'support_phone'=>['sometimes','nullable','string','max:32'],'store_logo'=>['nullable','file','image','max:5120'],'clear_store_logo'=>['sometimes','boolean']]);
+        $logo=$request->boolean('clear_store_logo')?null:$seller->store_logo;if($request->hasFile('store_logo')){$api=new Api(Configuration::create(config('services.uploadcare.public_key'),config('services.uploadcare.secret_key')));$logo='https://ucarecdn.com/'.$api->uploader()->fromPath($request->file('store_logo')->getPathname())->getUuid().'/-/preview/';}unset($data['store_logo'],$data['clear_store_logo']);$data['store_logo']=$logo;$data['store_address']=implode(', ',[$data['address_line'],$data['address_area'],$data['address_district']]);$data['city']=$data['address_district'];$seller->update($data);return response()->json(['message'=>'Store updated.','seller'=>$seller->fresh()]);
     }
 
     public function archive(Request $request, Seller $seller): JsonResponse
@@ -273,7 +288,9 @@ class SellerController extends Controller
         $account = $staff ?: $seller;
         if (!$account || !Hash::check($data['password'], $account->password ?? '')) return response()->json(['message' => 'Invalid credentials.'], 401);
         if ($staff && $staff->status === 'suspended') return response()->json(['message' => 'Account is suspended.'], 403);
-        if ($seller->status !== 'approved' || !$seller->is_active) {
+        // A suspended store is hidden from shoppers and cannot receive orders,
+        // but its owner retains console access to manage their catalogue.
+        if (in_array($seller->status, ['pending', 'rejected'], true) || $seller->roster_archived_at !== null) {
             return response()->json(['message' => 'Account is not approved.'], 403);
         }
 
