@@ -14,7 +14,7 @@ class HomepageOfferBlockController extends Controller
 {
     public function publicIndex(): JsonResponse
     {
-        return response()->json(HomepageOfferBlock::where('hidden', false)->orderByRaw("CASE row_type WHEN 'four' THEN 0 WHEN 'wide' THEN 1 ELSE 2 END")->orderBy('slot')->get());
+        return response()->json(HomepageOfferBlock::where('hidden', false)->where(fn ($q) => $q->whereNull('expires_at')->orWhereDate('expires_at', '>=', today()))->orderByRaw("CASE row_type WHEN 'four' THEN 0 WHEN 'wide' THEN 1 ELSE 2 END")->orderBy('slot')->get());
     }
 
     public function index(Request $request): JsonResponse
@@ -34,7 +34,7 @@ class HomepageOfferBlockController extends Controller
             'image' => ['sometimes', 'required', 'string', 'max:1000', 'regex:/^(\/|https:\/\/)/'],
             'mobile_image' => ['sometimes', 'nullable', 'string', 'max:1000', 'regex:/^(\/|https:\/\/)/'],
             'theme' => ['sometimes', Rule::in(['slate', 'gray', 'zinc', 'neutral', 'stone', 'red', 'orange', 'amber', 'yellow', 'lime', 'green', 'emerald', 'teal', 'cyan', 'sky', 'blue', 'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose'])],
-            'hidden' => ['sometimes', 'boolean'],
+            'hidden' => ['sometimes', 'boolean'], 'coupon_id' => ['sometimes', 'nullable', 'integer', 'exists:coupons,id'], 'expires_at' => ['sometimes', 'nullable', 'date'], 'store_name' => ['sometimes', 'nullable', 'string', 'max:120'], 'slot' => ['sometimes', 'integer', 'min:0'],
         ]);
         $block->update($data);
         return response()->json($block->fresh());
@@ -43,7 +43,7 @@ class HomepageOfferBlockController extends Controller
     public function sets(Request $request): JsonResponse { $this->authorizeManager($request); return response()->json(HomepageOfferSet::with(['blocks' => fn ($q) => $q->orderBy('slot')])->orderBy('row_type')->latest()->get()); }
     public function storeSet(Request $request): JsonResponse
     {
-        $this->authorizeManager($request); $data=$request->validate(['row_type'=>['required',Rule::in(['four','wide','two'])],'name'=>['required','string','max:120'],'copy_from_id'=>['nullable','integer','exists:homepage_offer_sets,id']]);
+        $this->authorizeManager($request); $data=$request->validate(['row_type'=>['required',Rule::in(['four','wide','two','coupons'])],'name'=>['required','string','max:120'],'copy_from_id'=>['nullable','integer','exists:homepage_offer_sets,id']]);
         $set=HomepageOfferSet::create(['row_type'=>$data['row_type'],'name'=>$data['name']]);
         $source=!empty($data['copy_from_id'])?HomepageOfferSet::with('blocks')->findOrFail($data['copy_from_id']):null;
         foreach (($source?->blocks ?? []) as $block) $set->blocks()->create($block->only(['row_type','slot','title','body','cta','href','image','mobile_image','theme','hidden']));
@@ -65,14 +65,14 @@ class HomepageOfferBlockController extends Controller
             'image' => ['required', 'string', 'max:1000', 'regex:/^(\/|https:\/\/)/'],
             'mobile_image' => ['nullable', 'string', 'max:1000', 'regex:/^(\/|https:\/\/)/'],
             'theme' => ['required', Rule::in(['slate','gray','zinc','neutral','stone','red','orange','amber','yellow','lime','green','emerald','teal','cyan','sky','blue','indigo','violet','purple','fuchsia','pink','rose'])],
-            'hidden' => ['sometimes', 'boolean'],
+            'hidden' => ['sometimes', 'boolean'], 'coupon_id' => ['sometimes', 'nullable', 'integer', 'exists:coupons,id'], 'expires_at' => ['sometimes', 'nullable', 'date'], 'store_name' => ['sometimes', 'nullable', 'string', 'max:120'],
         ]);
         $block = \Illuminate\Support\Facades\DB::transaction(function () use ($offerSet, $data) {
             $locked = HomepageOfferSet::query()->lockForUpdate()->findOrFail($offerSet->id);
             $slot = ((int) $locked->blocks()->max('slot')) + 1;
             if ($slot > 255) abort(422, 'This offer set cannot contain more blocks.');
             return $locked->blocks()->create($data + [
-                'row_type' => $locked->row_type, 'slot' => $slot, 'hidden' => true,
+                'row_type' => $locked->row_type, 'slot' => $slot, 'hidden' => $data['hidden'] ?? true,
             ]);
         });
         return response()->json(['block' => $block], 201);

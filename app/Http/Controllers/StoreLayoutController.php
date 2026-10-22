@@ -10,8 +10,8 @@ use Illuminate\Validation\ValidationException;
 
 class StoreLayoutController extends Controller
 {
-    private const TYPES = ['categories', 'collection', 'offerFour', 'offerWide', 'offerTwo', 'storeProducts'];
-    private const OFFER_LAYOUTS = ['offerFour' => 'four', 'offerWide' => 'wide', 'offerTwo' => 'two'];
+    private const TYPES = ['categories', 'collection', 'offerFour', 'offerWide', 'offerTwo', 'coupons', 'storeProducts'];
+    private const OFFER_LAYOUTS = ['offerFour' => 'four', 'offerWide' => 'wide', 'offerTwo' => 'two', 'coupons' => 'coupons'];
     public function publicShow(string $slug): JsonResponse { $seller = Seller::where('store_slug', $slug)->where('status', 'approved')->where('is_active', true)->firstOrFail(); return response()->json(['sections' => $seller->store_layout]); }
     public function sellerShow(Request $request): JsonResponse { return response()->json(['sections' => $this->seller($request)->store_layout]); }
     public function sellerSave(Request $request): JsonResponse
