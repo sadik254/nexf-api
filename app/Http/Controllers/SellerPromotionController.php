@@ -12,7 +12,7 @@ use Illuminate\Validation\ValidationException;
 
 class SellerPromotionController extends Controller
 {
-    private const WITH = 'seller:id,store_name,store_slug';
+    private const WITH = 'seller:id,store_name,store_slug,store_logo';
 
     public function publicIndex(): JsonResponse
     {
