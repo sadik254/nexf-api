@@ -17,7 +17,7 @@ use Illuminate\Validation\ValidationException;
  */
 class ManualPaymentController extends Controller
 {
-    private const METHODS = ['bkash', 'nagad', 'rocket', 'bank'];
+    private const METHODS = ['bkash', 'nagad', 'rocket', 'upay', 'bank'];
 
     public function accounts(): JsonResponse
     {
@@ -29,7 +29,7 @@ class ManualPaymentController extends Controller
         abort_unless($request->user() instanceof Admin && $request->user()->role === 'super_admin', 403);
 
         $data = $request->validate([
-            'accounts' => ['present', 'array', 'max:4'],
+            'accounts' => ['present', 'array', 'max:5'],
             'accounts.*.id' => ['required', Rule::in(self::METHODS), 'distinct'],
             'accounts.*.enabled' => ['required', 'boolean'],
             'accounts.*.number' => ['nullable', 'string', 'max:60'],

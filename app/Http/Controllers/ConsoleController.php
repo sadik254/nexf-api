@@ -36,7 +36,7 @@ class ConsoleController extends Controller
         $variations = ProductVariation::query()->whereHas('product', fn ($q) => $scope($q)->where('product_type', 'variable'))
             ->whereDoesntHave('lots', fn ($q) => $q->where('quantity_remaining', '>', 0))->count();
         $payments = $actor instanceof Admin ? Order::query()
-            ->whereIn('payment_method_code', ['bkash', 'nagad', 'rocket', 'bank'])
+            ->whereIn('payment_method_code', ['bkash', 'nagad', 'rocket', 'upay', 'bank'])
             ->where('status', 'pending')
             ->whereNotNull('payment_submitted_at')
             ->where(fn ($query) => $query->whereNull('paid_amount')->orWhere('paid_amount', 0))

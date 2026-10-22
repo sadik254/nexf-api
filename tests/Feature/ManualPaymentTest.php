@@ -24,6 +24,7 @@ class ManualPaymentTest extends TestCase
         ]);
         $accounts = [
             ['id' => 'bkash', 'enabled' => true, 'number' => '01712345678', 'accountType' => 'Merchant', 'note' => 'Use Send Money'],
+            ['id' => 'upay', 'enabled' => true, 'number' => '01912345678', 'accountType' => 'Merchant'],
             ['id' => 'bank', 'enabled' => false, 'number' => '', 'bankName' => 'Example Bank'],
         ];
 

@@ -85,7 +85,7 @@ class Order extends Model
             if ($order->isDirty('payment_status') && $order->payment_status === 'paid' && !$order->payment_paid_at) {
                 $order->payment_paid_at = now();
             }
-            if ($order->isDirty('paid_amount') && in_array($order->payment_method_code, ['bkash', 'nagad', 'rocket', 'bank'], true)) {
+            if ($order->isDirty('paid_amount') && in_array($order->payment_method_code, ['bkash', 'nagad', 'rocket', 'upay', 'bank'], true)) {
                 $order->payment_received_at = (float) $order->paid_amount > 0 ? ($order->payment_received_at ?? now()) : null;
             }
         });
