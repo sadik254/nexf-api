@@ -13,26 +13,15 @@ class AdminCreatedMail extends Mailable
 {
     use Queueable, SerializesModels;
 
-    public Admin $admin;
-    public string $password;
-
-    public function __construct(Admin $admin, string $password)
-    {
-        $this->admin = $admin;
-        $this->password = $password;
-    }
+    public function __construct(public Admin $admin, public string $code) {}
 
     public function envelope(): Envelope
     {
-        return new Envelope(
-            subject: 'Your Admin Account Credentials',
-        );
+        return new Envelope(subject: 'Create your admin password');
     }
 
     public function content(): Content
     {
-        return new Content(
-            view: 'emails.admin-created',
-        );
+        return new Content(view: 'emails.admin-created');
     }
 }

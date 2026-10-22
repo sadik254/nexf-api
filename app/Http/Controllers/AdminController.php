@@ -160,19 +160,22 @@ class AdminController extends Controller
             $imageUrl = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
         }
 
-        $passwordPlain = bin2hex(random_bytes(4));
+        // The initial password is deliberately never disclosed. The invite code below
+        // is the only credential sent to the new administrator.
+        $initialPassword = bin2hex(random_bytes(32));
 
         $admin = Admin::create([
             'name' => $data['name'],
             'email' => $data['email'],
             'phone' => $data['phone'] ?? null,
-            'password' => $passwordPlain,
+            'password' => $initialPassword,
             'address' => $data['address'] ?? null,
             'image' => $imageUrl,
             'role' => $data['role'] ?? 'moderator',
         ]);
 
-        Mail::to($admin->email)->send(new AdminCreatedMail($admin, $passwordPlain));
+        $code = $this->passwordResets->issue($admin, 'admin');
+        Mail::to($admin->email)->send(new AdminCreatedMail($admin, $code));
 
         return response()->json([
             'message' => 'Admin created successfully.',

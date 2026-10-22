@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Validation\ValidationException;
 
 use App\Mail\SellerApprovedMail;
+use App\Mail\StaffInvitedMail;
 use App\Models\Admin;
 use App\Models\Seller;
 use App\Models\SellerStaff;
@@ -359,8 +360,20 @@ class SellerController extends Controller
     public function forgotPassword(Request $request): JsonResponse
     {
         $data = $request->validate(['email' => ['required', 'email']]);
-        $seller = Seller::where('email', $data['email'])->first(); $staff = !$seller ? SellerStaff::where('email', $data['email'])->first() : null;
-        if ($seller) $this->passwordResets->send($seller, 'seller'); elseif ($staff) $this->passwordResets->send($staff, 'seller_staff');
+        $seller = Seller::where('email', $data['email'])->first();
+        $staff = !$seller ? SellerStaff::with('seller')->where('email', $data['email'])->first() : null;
+        if ($seller) {
+            $this->passwordResets->send($seller, 'seller');
+        } elseif ($staff) {
+            // An invited staff member has no password yet, so resend the same
+            // create-password invitation rather than a password-reset email.
+            if ($staff->password === null) {
+                $code = $this->passwordResets->issue($staff, 'seller_staff');
+                Mail::to($staff->email)->send(new StaffInvitedMail($staff->name, $staff->email, $staff->seller->store_name, $code));
+            } else {
+                $this->passwordResets->send($staff, 'seller_staff');
+            }
+        }
         return response()->json(['message' => 'If that email exists, a code has been sent.']);
     }
 
@@ -382,20 +395,20 @@ class SellerController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        $passwordPlain = bin2hex(random_bytes(4));
+        $needsInvite = $seller->getRawOriginal('password') === null;
 
         $seller->forceFill([
             'status' => 'approved',
             'rejection_reason' => null,
             'approved_by' => $actor->id,
             'approved_at' => now(),
-            'password' => $passwordPlain,
             'is_active' => true,
         ])->save();
 
-        Mail::to($seller->email)->send(new SellerApprovedMail($seller, $passwordPlain));
+        $code = $needsInvite ? $this->passwordResets->issue($seller, 'seller') : null;
+        Mail::to($seller->email)->send(new SellerApprovedMail($seller, $code));
 
-        return response()->json(['message' => 'Seller approved and credentials sent.']);
+        return response()->json(['message' => 'Seller approved and invite sent.']);
     }
 
     public function reject(Seller $seller, Request $request): JsonResponse

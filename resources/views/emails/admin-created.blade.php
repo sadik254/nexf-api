@@ -1,8 +1,5 @@
 Hello {{ $admin->name }},
 
-Your admin account has been created.
+Your admin account has been created. Use the secure link below to create your password:
 
-Login email: {{ $admin->email }}
-Temporary password: {{ $password }}
-
-Please log in and change your password immediately.
+{{ url('/forgot-password?actor=admin&email='.urlencode($admin->email).'&code='.urlencode($code).'&invite=1') }}

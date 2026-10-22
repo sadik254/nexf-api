@@ -1,8 +1,5 @@
 Hello {{ $admin->name }},
 
-Your admin password has been reset by a super admin.
+A super admin requested a password reset for your admin account. Use the secure link below to create a new password:
 
-Login email: {{ $admin->email }}
-Temporary password: {{ $password }}
-
-Please log in and change your password immediately.
+{{ url('/forgot-password?actor=admin&email='.urlencode($admin->email).'&code='.urlencode($code)) }}
