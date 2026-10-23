@@ -6,6 +6,7 @@ use App\Models\Admin;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Seller;
+use App\Models\SellerStaff;
 use App\Models\Reseller;
 use App\Models\SupportTicket;
 use Illuminate\Http\JsonResponse;
@@ -113,10 +114,11 @@ class SupportTicketController extends Controller
             'attachments' => ['sometimes', 'array', 'max:6'],
             'attachments.*' => ['required', 'url', 'max:1000', 'regex:/^https:\/\//'],
         ]);
-        DB::transaction(function () use ($ticket, $actor, $data) {
+        $staff = $request->attributes->get('seller_staff');
+        DB::transaction(function () use ($ticket, $actor, $staff, $data) {
             $ticket->messages()->create([
-                'author_type' => $actor instanceof Customer ? 'customer' : ($actor instanceof Seller ? 'seller' : ($actor instanceof Reseller ? 'reseller' : 'admin')),
-                'author_id' => $actor->id, 'body' => trim($data['body']), 'attachments' => $data['attachments'] ?? [],
+                'author_type' => $staff instanceof SellerStaff ? 'seller_staff' : ($actor instanceof Customer ? 'customer' : ($actor instanceof Seller ? 'seller' : ($actor instanceof Reseller ? 'reseller' : 'admin'))),
+                'author_id' => $staff?->id ?? $actor->id, 'author_name' => $staff?->name, 'body' => trim($data['body']), 'attachments' => $data['attachments'] ?? [],
             ]);
             $ticket->update(['status' => 'open', 'resolved_at' => null]);
         });

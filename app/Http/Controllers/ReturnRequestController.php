@@ -215,14 +215,15 @@ class ReturnRequestController extends Controller
         $this->authorizeRequest($actor, $returnRequest);
         abort_if($actor instanceof Customer, 403);
 
-        $updated = DB::transaction(function () use ($returnRequest, $actor) {
+        $inventoryActor = $request->attributes->get('seller_staff') ?? $actor;
+        $updated = DB::transaction(function () use ($returnRequest, $actor, $inventoryActor) {
             $locked = ReturnRequest::query()->lockForUpdate()->findOrFail($returnRequest->id);
             if ($locked->restocked_at) return $locked;
             if (!in_array($locked->status, ['received', 'refunded', 'exchanged'], true)) {
                 throw ValidationException::withMessages(['status' => ['Restock is available after staff have received the returned item.']]);
             }
             $item = OrderItem::query()->lockForUpdate()->findOrFail($locked->order_item_id);
-            $this->inventory->restoreOrderItemQuantity($item, (int) $locked->quantity, $actor, 'return_restock', [
+            $this->inventory->restoreOrderItemQuantity($item, (int) $locked->quantity, $inventoryActor, 'return_restock', [
                 'return_request_id' => $locked->id,
             ]);
             $locked->update(['restocked_at' => now()]);

@@ -31,7 +31,8 @@ class ProductVariationController extends Controller
             'variants.*.initial_quantity' => ['required', 'integer', 'min:0'],
         ]);
 
-        $saved = DB::transaction(function () use ($product, $data, $request) {
+        $auditActor = $request->attributes->get('seller_staff') ?? $request->user();
+        $saved = DB::transaction(function () use ($product, $data, $request, $auditActor) {
             $lockedProduct = Product::query()->lockForUpdate()->findOrFail($product->id);
             if ($lockedProduct->product_type !== 'variable' || empty($lockedProduct->option_groups)) {
                 throw ValidationException::withMessages(['variants' => ['Save product options before applying a variation matrix.']]);
@@ -112,9 +113,9 @@ class ProductVariationController extends Controller
                         'product_lot_id' => $lot->id,
                         'quantity_change' => $quantity,
                         'reason' => 'received',
-                        'actor_type' => $request->user()::class,
-                        'actor_id' => $request->user()->id,
-                        'meta' => ['lot_number' => $lotNumber, 'source' => 'variant_matrix'],
+                        'actor_type' => $auditActor::class,
+                        'actor_id' => $auditActor->id,
+                        'meta' => ['lot_number' => $lotNumber, 'source' => 'variant_matrix', 'actor_name' => $auditActor->name ?? $auditActor->seller_name ?? null],
                     ]);
                     app(RestockAlertService::class)->notify($lockedProduct->id, $variation->id);
                 }

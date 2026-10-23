@@ -77,7 +77,7 @@ class StoreProductController extends Controller
         $positiveCount = (clone $reviews)->where('rating', '>=', 4)->count();
         $customerChats = $seller->storeChats()->whereHas('messages', fn ($messages) => $messages->where('author_type', 'customer'));
         $chatCount = (clone $customerChats)->count();
-        $repliedChats = (clone $customerChats)->whereHas('messages', fn ($messages) => $messages->where('author_type', 'seller')->where('author_id', $seller->id))->count();
+        $repliedChats = (clone $customerChats)->whereHas('messages', fn ($messages) => $messages->whereIn('author_type', ['seller', 'seller_staff']))->count();
         return [
             'type' => 'seller', 'id' => $seller->id, 'name' => $seller->store_name,
             'slug' => $seller->store_slug, 'logo' => $seller->store_logo, 'image' => $seller->store_image,

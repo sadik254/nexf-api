@@ -64,4 +64,21 @@ class SellerRosterPersistenceTest extends TestCase {
   $this->withToken($moderator->createToken('test',['admin:basic'])->plainTextToken)->postJson('/api/admin/sellers',$input)->assertForbidden();
   Mail::assertNothingSent();
  }
+
+ public function test_admin_store_update_keeps_owner_and_kyc_when_blank_values_are_sent():void {
+  $admin=Admin::create(['name'=>'Roster admin','email'=>'seller-kyc@example.test','password'=>'password123','role'=>'admin']);
+  $seller=Seller::create(['seller_name'=>'Saved owner','email'=>'saved-kyc@example.test','phone'=>'01712345678','store_name'=>'Saved store','store_slug'=>'saved-store','sku_prefix'=>'SVD1','address_line'=>'Line','address_area'=>'Area','address_district'=>'Dhaka','commission_rate'=>8,'kyc_type'=>'nid','kyc_number'=>'ABC123','kyc_document_url'=>'https://ucarecdn.com/saved/','status'=>'approved','is_active'=>true]);
+  $input=['store_name'=>'Saved store','sku_prefix'=>'SVD1','email'=>'saved-kyc@example.test','phone'=>'01712345678','address_line'=>'Line','address_area'=>'Area','address_district'=>'Dhaka','commission_rate'=>8,'seller_name'=>'','kyc_type'=>'','kyc_number'=>''];
+  $this->withToken($admin->createToken('test',['admin:basic'])->plainTextToken)->postJson('/api/admin/sellers/'.$seller->id,$input)->assertOk();
+  $seller->refresh();$this->assertSame('Saved owner',$seller->seller_name);$this->assertSame('nid',$seller->kyc_type);$this->assertSame('ABC123',$seller->kyc_number);$this->assertSame('https://ucarecdn.com/saved/',$seller->kyc_document_url);
+ }
+
+
+ public function test_staff_cannot_update_the_owner_profile():void {
+  $seller=Seller::create(['seller_name'=>'Owner','email'=>'owner-profile@example.test','store_name'=>'Owner store','store_slug'=>'owner-store','kyc_type'=>'nid','kyc_number'=>'1','kyc_document_url'=>'https://example.test/id','product_category'=>'General','status'=>'approved','is_active'=>true,'password'=>'password123']);
+  $staff=\App\Models\SellerStaff::create(['seller_id'=>$seller->id,'name'=>'Store worker','email'=>'worker-profile@example.test','password'=>'password123','status'=>'active']);
+  $this->withToken($staff->createToken('test',['seller:basic'])->plainTextToken)->postJson('/api/sellers/me',['seller_name'=>'Changed'])->assertForbidden();
+  $this->assertSame('Owner',$seller->fresh()->seller_name);
+ }
+
 }

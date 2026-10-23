@@ -30,4 +30,18 @@ class StoreChatTest extends TestCase
         $this->withToken($sellerToken)->postJson("/api/seller/chats/{$id}/messages", ['body' => 'How can we help?'])->assertOk()->assertJsonPath('messages.2.author_type', 'seller');
         $this->withToken($admin->createToken('test', ['admin:basic'])->plainTextToken)->getJson('/api/admin/chats')->assertOk()->assertJsonPath('total', 1);
     }
+
+    public function test_peek_does_not_mark_a_chat_as_read(): void
+    {
+        $customer = Customer::create(['name' => 'Buyer', 'email' => 'peek-buyer@example.test', 'password' => 'password123']);
+        $seller = Seller::create(['seller_name' => 'Seller', 'email' => 'peek-seller@example.test', 'store_name' => 'Store', 'store_slug' => 'peek-store', 'kyc_type' => 'nid', 'kyc_number' => '1', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
+        $chat = \App\Models\StoreChat::create(['customer_id' => $customer->id, 'seller_id' => $seller->id, 'store_key' => "seller:{$seller->id}"]);
+        $token = $seller->createToken('test', ['seller:basic'])->plainTextToken;
+
+        $this->withToken($token)->getJson("/api/seller/chats/{$chat->id}?peek=1")->assertOk();
+        $this->assertNull($chat->fresh()->store_read_at);
+        $this->withToken($token)->getJson("/api/seller/chats/{$chat->id}")->assertOk();
+        $this->assertNotNull($chat->fresh()->store_read_at);
+    }
+
 }

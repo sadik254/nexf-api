@@ -43,7 +43,7 @@ class SellerController extends Controller
             ->withCount(['productReviews as review_count' => fn($reviews) => $reviews->where('reviews.status', 'approved')])
             ->withCount(['productReviews as positive_review_count' => fn($reviews) => $reviews->where('reviews.status', 'approved')->where('reviews.rating', '>=', 4)])
             ->withCount(['storeChats as customer_chat_count' => fn($chats) => $chats->whereHas('messages', fn($messages) => $messages->where('author_type', 'customer'))])
-            ->withCount(['storeChats as replied_chat_count' => fn($chats) => $chats->whereHas('messages', fn($messages) => $messages->where('author_type', 'customer'))->whereHas('messages', fn($messages) => $messages->where('author_type', 'seller')->whereColumn('store_chat_messages.author_id', 'store_chats.seller_id'))])
+            ->withCount(['storeChats as replied_chat_count' => fn($chats) => $chats->whereHas('messages', fn($messages) => $messages->where('author_type', 'customer'))->whereHas('messages', fn($messages) => $messages->whereIn('author_type', ['seller', 'seller_staff']))])
             ->withAvg(['productReviews as rating_average' => fn($reviews) => $reviews->where('reviews.status', 'approved')], 'rating')
             ->withSum(['orderItems as lifetime_units_sold' => fn($items) => $items->where('fulfillment_status', 'delivered')->whereHas('order', fn($orders) => $orders->whereIn('status', ['delivered', 'completed']))], 'quantity')
             ->withSum(['orderItems as units_sold' => $salesScope], 'quantity')
@@ -118,15 +118,24 @@ class SellerController extends Controller
             'commission_rate' => ['required', 'numeric', 'between:0,100'],
             'support_email' => ['sometimes', 'nullable', 'email', 'max:255'],
             'support_phone' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'seller_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'kyc_type' => ['sometimes', 'nullable', 'in:nid,passport'],
+            'kyc_number' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'kyc_document' => ['sometimes', 'nullable', 'file', 'mimetypes:image/jpeg,image/png,image/webp,image/gif,application/pdf', 'max:10240'],
             'store_logo' => ['sometimes', 'nullable', 'file', 'image', 'max:5120'],
             'clear_store_logo' => ['sometimes', 'boolean'],
             'is_featured' => ['sometimes', 'boolean'],
         ]);
         $data['store_address'] = implode(', ', [$data['address_line'], $data['address_area'], $data['address_district']]);
         $data['city'] = $data['address_district'];
+        // Optional owner/KYC fields must not erase existing details when the console sends blanks.
+        foreach (['seller_name', 'kyc_type', 'kyc_number'] as $field) {
+            if (array_key_exists($field, $data) && trim((string) $data[$field]) === '') unset($data[$field]);
+        }
         $logo = $request->boolean('clear_store_logo') ? null : $seller?->store_logo;
-        if ($request->hasFile('store_logo')) { $api = new Api(Configuration::create(config('services.uploadcare.public_key'), config('services.uploadcare.secret_key'))); $logo = 'https://ucarecdn.com/'.$api->uploader()->fromPath($request->file('store_logo')->getPathname())->getUuid().'/-/preview/'; }
-        unset($data['store_logo'], $data['clear_store_logo']); $data['store_logo'] = $logo;
+        if ($request->hasFile('store_logo')) $logo = $this->uploadToCdn($request->file('store_logo'));
+        if ($request->hasFile('kyc_document')) $data['kyc_document_url'] = $this->uploadToCdn($request->file('kyc_document'));
+        unset($data['store_logo'], $data['clear_store_logo'], $data['kyc_document']); $data['store_logo'] = $logo;
         $saved = \Illuminate\Support\Facades\DB::transaction(function () use ($seller, $data, $actor) {
             if ($seller) {
                 $locked = Seller::query()->lockForUpdate()->findOrFail($seller->id);
@@ -328,7 +337,7 @@ class SellerController extends Controller
     public function updateProfile(Request $request): JsonResponse
     {
         $seller = $request->user();
-        abort_unless($seller instanceof Seller, 403);
+        abort_unless($seller instanceof Seller && ! $request->attributes->has('seller_staff'), 403);
         $request->merge(array_filter([
             'seller_name' => $request->has('seller_name') ? trim((string) $request->input('seller_name')) : null,
             'email' => $request->has('email') ? strtolower(trim((string) $request->input('email'))) : null,
@@ -449,6 +458,12 @@ class SellerController extends Controller
         ])->save();
 
         return response()->json(['message' => 'Seller rejected.']);
+    }
+
+    private function uploadToCdn(\Illuminate\Http\UploadedFile $file): string
+    {
+        $api = new Api(Configuration::create(config('services.uploadcare.public_key'), config('services.uploadcare.secret_key')));
+        return 'https://ucarecdn.com/'.$api->uploader()->fromPath($file->getPathname())->getUuid().'/-/preview/';
     }
 
     private function uniqueStoreSlug(string $storeName): string

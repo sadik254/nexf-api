@@ -6,6 +6,7 @@ use App\Models\Admin;
 use App\Models\Customer;
 use App\Models\Seller;
 use App\Models\StoreChat;
+use App\Models\SellerStaff;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -42,7 +43,9 @@ class StoreChatController extends Controller
     {
         $actor = $this->actor($request);
         $this->authorizeChat($actor, $chat);
-        $chat->update($actor instanceof Customer ? ['customer_read_at' => now()] : ['store_read_at' => now()]);
+        if (! $request->boolean('peek')) {
+            $chat->update($actor instanceof Customer ? ['customer_read_at' => now()] : ['store_read_at' => now()]);
+        }
         return response()->json($chat->load(['customer:id,name,email,profile_picture', 'seller:id,store_name,store_slug,store_logo', 'messages']));
     }
 
@@ -75,8 +78,9 @@ class StoreChatController extends Controller
             'attachments' => ['sometimes', 'array', 'max:6'],
             'attachments.*' => ['required', 'url', 'max:1000', 'regex:/^https:\/\//'],
         ]);
-        DB::transaction(function () use ($chat, $actor, $data) {
-            $chat->messages()->create(['author_type' => $actor instanceof Customer ? 'customer' : ($actor instanceof Seller ? 'seller' : 'admin'), 'author_id' => $actor->id, 'body' => trim($data['body']), 'attachments' => $data['attachments'] ?? []]);
+        $staff = $request->attributes->get('seller_staff');
+        DB::transaction(function () use ($chat, $actor, $staff, $data) {
+            $chat->messages()->create(['author_type' => $staff instanceof SellerStaff ? 'seller_staff' : ($actor instanceof Customer ? 'customer' : ($actor instanceof Seller ? 'seller' : 'admin')), 'author_id' => $staff?->id ?? $actor->id, 'author_name' => $staff?->name, 'body' => trim($data['body']), 'attachments' => $data['attachments'] ?? []]);
             $chat->update($actor instanceof Customer ? ['customer_read_at' => now(), 'store_read_at' => null] : ['store_read_at' => now(), 'customer_read_at' => null]);
         });
         return $this->show($request, $chat);

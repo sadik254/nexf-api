@@ -260,7 +260,8 @@ class ProductController extends Controller
 
         $this->authorizeSizeChart($data['size_chart_id'] ?? null, $actor, $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null));
 
-        $product = DB::transaction(function () use ($actor, $data, $slug, $thumbnailUrl, $galleryUrls): Product {
+        $auditActor = $request->attributes->get('seller_staff') ?? $actor;
+        $product = DB::transaction(function () use ($actor, $auditActor, $data, $slug, $thumbnailUrl, $galleryUrls): Product {
             $product = Product::create([
                 'seller_id' => $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null),
                 'created_by_admin_id' => $actor instanceof Admin ? $actor->id : null,
@@ -309,9 +310,9 @@ class ProductController extends Controller
                     'product_lot_id' => $lot->id,
                     'quantity_change' => $data['initial_quantity'],
                     'reason' => 'received',
-                    'actor_type' => $actor::class,
-                    'actor_id' => $actor->id,
-                    'meta' => ['lot_number' => $lot->lot_number, 'source' => 'product_create'],
+                    'actor_type' => $auditActor::class,
+                    'actor_id' => $auditActor->id,
+                    'meta' => ['lot_number' => $lot->lot_number, 'source' => 'product_create', 'actor_name' => $auditActor->name ?? $auditActor->seller_name ?? null],
                 ]);
                 app(RestockAlertService::class)->notify($product->id);
             }

@@ -316,7 +316,7 @@ class OrderController extends Controller
         $customer = !empty($data['customer_id']) ? Customer::findOrFail($data['customer_id']) : null;
         $data['ip_address'] = $request->ip();
         $data['exclude_order_id'] = $order->id;
-        $actor = $request->user();
+        $actor = $request->attributes->get('seller_staff') ?? $request->user();
         $data['staff_order'] = true;
 
         $updated = DB::transaction(function () use ($order, $data, $customer, $actor) {
@@ -594,7 +594,7 @@ class OrderController extends Controller
             ]);
         }
 
-        $actor = $request->user();
+        $actor = $request->attributes->get('seller_staff') ?? $request->user();
         $order = DB::transaction(function () use ($order, $item, $data, $sellerId, $actor) {
             $lockedOrder = Order::query()->lockForUpdate()->findOrFail($order->id);
             if ($lockedOrder->status === 'cancelled') {

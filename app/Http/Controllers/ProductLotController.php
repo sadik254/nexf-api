@@ -26,7 +26,8 @@ class ProductLotController extends Controller
             'reason' => ['required', 'string', 'max:100'],
             'note' => ['nullable', 'string', 'max:1000'],
         ]);
-        $updated = DB::transaction(function () use ($lot, $data, $request) {
+        $auditActor = $request->attributes->get('seller_staff') ?? $request->user();
+        $updated = DB::transaction(function () use ($lot, $data, $auditActor) {
             $locked = ProductLot::query()->lockForUpdate()->findOrFail($lot->id);
             $change = (int) $data['quantity_change'];
             if ($locked->quantity_remaining + $change < 0) {
@@ -39,9 +40,9 @@ class ProductLotController extends Controller
                 'product_lot_id' => $locked->id,
                 'quantity_change' => $change,
                 'reason' => 'adjustment',
-                'actor_type' => $request->user()::class,
-                'actor_id' => $request->user()->id,
-                'meta' => ['reason' => $data['reason'], 'note' => $data['note'] ?? null],
+                'actor_type' => $auditActor::class,
+                'actor_id' => $auditActor->id,
+                'meta' => ['reason' => $data['reason'], 'note' => $data['note'] ?? null, 'actor_name' => $auditActor->name ?? $auditActor->seller_name ?? null],
             ]);
             return $locked;
         });
@@ -62,7 +63,8 @@ class ProductLotController extends Controller
             'note' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        $updated = DB::transaction(function () use ($actor, $data, $request) {
+        $auditActor = $request->attributes->get('seller_staff') ?? $actor;
+        $updated = DB::transaction(function () use ($actor, $auditActor, $data, $request) {
             $result = [];
             foreach ($data['items'] as $item) {
                 $product = Product::query()->with('variations')->lockForUpdate()->findOrFail($item['product_id']);
@@ -111,9 +113,9 @@ class ProductLotController extends Controller
                         'product_lot_id' => $lots->last()->id,
                         'quantity_change' => $change,
                         'reason' => 'adjustment',
-                        'actor_type' => $actor::class,
-                        'actor_id' => $actor->id,
-                        'meta' => ['reason' => $data['reason'], 'note' => $data['note'] ?? null, 'set_available' => true],
+                        'actor_type' => $auditActor::class,
+                        'actor_id' => $auditActor->id,
+                        'meta' => ['reason' => $data['reason'], 'note' => $data['note'] ?? null, 'set_available' => true, 'actor_name' => $auditActor->name ?? $auditActor->seller_name ?? null],
                     ]);
                 }
                 $result[] = ['product_id' => $product->id, 'variation_id' => $variationId, 'available_quantity' => $item['available_quantity']];
@@ -148,7 +150,7 @@ class ProductLotController extends Controller
             'received_at' => $data['received_at'] ?? null,
             'expires_at' => $data['expires_at'] ?? null,
             ]);
-            $this->recordReceipt($created, $request->user());
+            $this->recordReceipt($created, $request->attributes->get('seller_staff') ?? $request->user());
             app(RestockAlertService::class)->notify($product->id);
             return $created;
         });
@@ -186,7 +188,7 @@ class ProductLotController extends Controller
             'received_at' => $data['received_at'] ?? null,
             'expires_at' => $data['expires_at'] ?? null,
             ]);
-            $this->recordReceipt($created, $request->user());
+            $this->recordReceipt($created, $request->attributes->get('seller_staff') ?? $request->user());
             app(RestockAlertService::class)->notify($product->id, $variation->id);
             return $created;
         });
@@ -213,7 +215,7 @@ class ProductLotController extends Controller
             'reason' => 'received',
             'actor_type' => $actor::class,
             'actor_id' => $actor->id,
-            'meta' => ['lot_number' => $lot->lot_number],
+            'meta' => ['lot_number' => $lot->lot_number, 'actor_name' => $actor->name ?? $actor->seller_name ?? null],
         ]);
     }
 }

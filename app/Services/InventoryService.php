@@ -55,6 +55,7 @@ class InventoryService
                     'order_id' => $item->order_id,
                     'order_item_id' => $item->id,
                     'restored_from_order_sale' => true,
+                    'actor_name' => $actor->name ?? $actor->seller_name ?? null,
                 ],
             ]);
             app(RestockAlertService::class)->notify($lot->product_id ?? $lot->variation?->product_id ?? 0, $lot->variation_id);
@@ -90,6 +91,7 @@ class InventoryService
                     'order_id' => $item->order_id,
                     'order_item_id' => $item->id,
                     'restored_from_order_sale' => true,
+                    'actor_name' => $actor->name ?? $actor->seller_name ?? null,
                 ]),
             ]);
             app(RestockAlertService::class)->notify($lot->product_id ?? $lot->variation?->product_id ?? 0, $lot->variation_id);
@@ -174,6 +176,7 @@ class InventoryService
                 $movementMeta = array_merge($meta, [
                     'unit_buying_price' => (string) $lot->buying_price,
                     'unit_selling_price' => number_format($sellingPrice, 2, '.', ''),
+                    'actor_name' => $actor?->name ?? $actor?->seller_name ?? null,
                 ]);
 
                 ProductLotMovement::create([
@@ -195,6 +198,7 @@ class InventoryService
                     'quantity' => $take,
                     'unit_buying_price' => (string) $lot->buying_price,
                     'unit_selling_price' => number_format($sellingPrice, 2, '.', ''),
+                    'actor_name' => $actor?->name ?? $actor?->seller_name ?? null,
                     'cost' => $lineCost,
                     'revenue' => $lineRevenue,
                     'profit' => $lineProfit,

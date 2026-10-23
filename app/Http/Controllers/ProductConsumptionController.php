@@ -25,7 +25,7 @@ class ProductConsumptionController extends Controller
             'quantity' => ['required', 'integer', 'min:1'],
         ]);
 
-        $result = $this->inventory->consumeProduct($product, (int) $data['quantity'], $actor, 'manual_test');
+        $result = $this->inventory->consumeProduct($product, (int) $data['quantity'], $request->attributes->get('seller_staff') ?? $actor, 'manual_test');
 
         return response()->json([
             'message' => 'Consumed successfully.',
@@ -46,7 +46,7 @@ class ProductConsumptionController extends Controller
             'quantity' => ['required', 'integer', 'min:1'],
         ]);
 
-        $result = $this->inventory->consumeVariation($variation, (int) $data['quantity'], $actor, 'manual_test');
+        $result = $this->inventory->consumeVariation($variation, (int) $data['quantity'], $request->attributes->get('seller_staff') ?? $actor, 'manual_test');
 
         return response()->json([
             'message' => 'Consumed successfully.',
