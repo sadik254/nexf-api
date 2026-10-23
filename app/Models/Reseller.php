@@ -6,10 +6,11 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use App\Models\Concerns\HasPermissions;
 
 class Reseller extends Authenticatable
 {
-    use HasApiTokens, Notifiable;
+    use HasApiTokens, HasPermissions, Notifiable;
 
     protected $fillable = ['name', 'email',
         'pending_email', 'phone', 'image', 'location', 'address_line', 'address_area', 'address_district', 'commission_rate', 'monthly_target', 'is_active', 'password'];
@@ -17,4 +18,6 @@ class Reseller extends Authenticatable
     protected function casts(): array { return ['commission_rate' => 'decimal:2', 'is_active' => 'boolean', 'password' => 'hashed']; }
     public function customers(): HasMany { return $this->hasMany(Customer::class); }
     public function orders(): HasMany { return $this->hasMany(Order::class); }
+    public function rbacRole(): string { return 'reseller'; }
+
 }

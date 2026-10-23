@@ -17,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->append(CorsMiddleware::class);
         $middleware->alias([
             'sanctum.type' => \App\Http\Middleware\SanctumTypeMiddleware::class,
+            'perm' => \App\Http\Middleware\PermissionMiddleware::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

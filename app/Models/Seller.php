@@ -8,11 +8,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use App\Models\Concerns\HasPermissions;
 
 class Seller extends Authenticatable
 {
     /** @use HasFactory<SellerFactory> */
-    use HasApiTokens, HasFactory, Notifiable;
+    use HasApiTokens, HasPermissions, HasFactory, Notifiable;
 
     protected $fillable = [
         'sku_prefix', 'commission_rate', 'address_line', 'address_area', 'address_district',
@@ -95,4 +96,6 @@ class Seller extends Authenticatable
     {
         return $this->hasMany(SellerPromotion::class);
     }
+    public function rbacRole(): string { return 'seller'; }
+
 }

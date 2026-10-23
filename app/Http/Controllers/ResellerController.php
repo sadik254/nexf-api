@@ -27,7 +27,8 @@ class ResellerController extends Controller
             return response()->json(['message' => 'Invalid credentials.'], 401);
         }
         if (!$reseller->is_active) return response()->json(['message' => 'Account is inactive.'], 403);
-        return response()->json(['token' => $reseller->createToken('reseller-api', ['reseller:basic'])->plainTextToken, 'reseller' => $reseller]);
+        $reseller->setAttribute('role', 'reseller')->setAttribute('store_id', null)->setAttribute('permissions', $reseller->permissions());
+        return response()->json(['token' => $reseller->createToken('reseller-api', ['reseller'])->plainTextToken, 'reseller' => $reseller]);
     }
 
     public function forgotPassword(Request $request): JsonResponse
@@ -54,7 +55,7 @@ class ResellerController extends Controller
         if (!$reseller || !$reseller->is_active) return response()->json(['message' => 'Unauthorized.'], 401);
         $data = $request->validate(['month' => ['sometimes', 'date_format:Y-m']]);
         $month = isset($data['month']) ? now()->createFromFormat('Y-m', $data['month']) : now();
-        return response()->json($this->withMonth($reseller, $month->copy()->startOfMonth(), $month->copy()->endOfMonth()));
+        $result=$this->withMonth($reseller, $month->copy()->startOfMonth(), $month->copy()->endOfMonth()); $result->setAttribute('role','reseller')->setAttribute('store_id',null)->setAttribute('permissions',$reseller->permissions()); return response()->json($result);
     }
 
     public function commissionPeriod(Request $request): JsonResponse

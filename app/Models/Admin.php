@@ -9,11 +9,12 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use App\Models\Concerns\HasPermissions;
 
 class Admin extends Authenticatable
 {
     /** @use HasFactory<AdminFactory> */
-    use HasApiTokens, HasFactory, Notifiable, SoftDeletes;
+    use HasApiTokens, HasPermissions, HasFactory, Notifiable, SoftDeletes;
 
     protected $fillable = [
         'name',
@@ -46,4 +47,6 @@ class Admin extends Authenticatable
     {
         return $this->hasMany(Coupon::class, 'created_by_admin_id');
     }
+    public function rbacRole(): string { return $this->role; }
+
 }

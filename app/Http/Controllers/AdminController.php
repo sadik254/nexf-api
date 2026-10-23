@@ -26,7 +26,7 @@ class AdminController extends Controller
         $perPage = max(1, min($perPage, 100));
         $search = (string) $request->query('search', '');
 
-        $filters = $request->validate(['role' => ['nullable', 'in:super_admin,admin,moderator,editor']]);
+        $filters = $request->validate(['role' => ['nullable', 'in:super_admin,admin']]);
         $query = Admin::query()->when($filters['role'] ?? null, fn ($query, $role) => $query->where('role', $role))->latest();
 
         if ($search !== '') {
@@ -113,7 +113,9 @@ class AdminController extends Controller
             'last_login_at' => now(),
         ])->save();
 
-        $token = $admin->createToken('admin-api', $this->abilitiesForRole($admin->role));
+        $token = $admin->createToken('admin-api', ['admin']);
+        $admin->setAttribute('permissions', $admin->permissions());
+        $admin->setAttribute('store_id', null);
 
         return response()->json([
             'token' => $token->plainTextToken,
@@ -208,13 +210,17 @@ class AdminController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
+        if ($actor->id === $admin->id && (array_key_exists('role', $request->all()) || $request->boolean('is_active') === false && $request->has('is_active'))) {
+            return response()->json(['message' => 'You cannot change your own role or suspend yourself.'], 422);
+        }
+
         $data = $request->validate([
             'name' => ['sometimes', 'string', 'max:255'],
             'email' => ['sometimes', 'email', 'max:255'],
             'phone' => ['sometimes', 'string', 'max:32'],
             'address' => ['sometimes', 'string'],
             'image' => ['sometimes', 'file', 'image', 'max:5120'],
-            'role' => ['sometimes', 'in:admin,moderator,editor,super_admin'],
+            'role' => ['sometimes', 'in:admin,super_admin'],
             'is_active' => ['sometimes', 'boolean'],
         ]);
 
@@ -270,6 +276,7 @@ class AdminController extends Controller
             'role' => $data['role'] ?? $admin->role,
             'is_active' => array_key_exists('is_active', $data) ? (bool) $data['is_active'] : $admin->is_active,
         ])->save();
+        if ((array_key_exists('role', $data) || (array_key_exists('is_active', $data) && ! $admin->is_active))) $admin->tokens()->delete();
 
         return response()->json([
             'message' => 'Admin updated successfully.',
@@ -404,39 +411,6 @@ class AdminController extends Controller
         return response()->json(['message' => 'Password reset successfully.']);
     }
 
-    private function abilitiesForRole(string $role): array
-    {
-        $base = ['admin:basic'];
-
-        if ($role === 'super_admin') {
-            return array_merge($base, [
-                'admin:manage-admins',
-                'admin:customers',
-                'admin:orders',
-                'admin:products',
-                'admin:payment-methods',
-                'admin:shipping-methods',
-                'admin:coupons',
-            ]);
-        }
-
-        if ($role === 'admin') {
-            return array_merge($base, [
-                'admin:customers',
-                'admin:orders',
-                'admin:products',
-                'admin:coupons',
-            ]);
-        }
-
-        if ($role === 'moderator') {
-            return array_merge($base, [
-                'admin:customers',
-            ]);
-        }
-
-        return $base;
-    }
 
     protected function emailChangeKey(): string { return 'admin'; }
 }

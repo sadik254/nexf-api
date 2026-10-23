@@ -309,7 +309,12 @@ class SellerController extends Controller
             'last_login_at' => now(),
         ])->save();
 
-        $token = $staff ? $staff->createToken('seller-api', ['seller:basic']) : $seller->createToken('seller-api', ['seller:basic']);
+        $token = $staff ? $staff->createToken('seller-api', ['seller']) : $seller->createToken('seller-api', ['seller']);
+        $actor = $staff ?: $seller;
+        $seller->setAttribute('role', $actor->rbacRole());
+        $seller->setAttribute('store_id', $seller->id);
+        $seller->setAttribute('permissions', $actor->permissions());
+        $seller->setAttribute('staff', $staff);
 
         return response()->json([
             'token' => $token->plainTextToken,

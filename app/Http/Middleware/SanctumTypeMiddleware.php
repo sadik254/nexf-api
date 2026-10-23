@@ -38,11 +38,8 @@ class SanctumTypeMiddleware
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        if ($staffSeller && (
-            str_ends_with($request->path(), '/delete')
-            || $request->path() === 'api/sellers/me'
-            || (preg_match('~^api/seller/(staff|store)(?:/|$)~', $request->path()) && !str_starts_with($request->path(), 'api/seller/staff/me'))
-        )) return response()->json(['message' => 'Staff cannot manage the owner profile, store settings, staff, or delete records.'], 403);
+        if (isset($tokenable->is_active) && ! $tokenable->is_active) return response()->json(['message' => 'Account is inactive.'], 403);
+        if ($tokenable instanceof SellerStaff && $tokenable->status === 'suspended') return response()->json(['message' => 'Account is suspended.'], 403);
         if ($staffSeller) { $seller = $tokenable->seller; if (!$seller) return response()->json(['message' => 'Forbidden.'], 403); $request->attributes->set('seller_staff', $tokenable); $request->setUserResolver(fn () => $seller); Auth::setUser($seller); } else { $request->setUserResolver(fn () => $tokenable); Auth::setUser($tokenable); }
 
         return $next($request);
