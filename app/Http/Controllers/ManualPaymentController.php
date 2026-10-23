@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use App\Services\ManualPaymentExpiryService;
 
 /**
  * Persists the details for offline bKash, Nagad, Rocket and bank transfers.
@@ -17,6 +18,7 @@ use Illuminate\Validation\ValidationException;
  */
 class ManualPaymentController extends Controller
 {
+    public function __construct(private ManualPaymentExpiryService $expiry) {}
     private const METHODS = ['bkash', 'nagad', 'rocket', 'upay', 'bank'];
 
     public function accounts(): JsonResponse
@@ -70,6 +72,10 @@ class ManualPaymentController extends Controller
     public function submit(Request $request, Order $order): JsonResponse
     {
         $this->authorizeByPhone($request, $order);
+        if ($this->expiry->isExpired($order)) {
+            $this->expiry->cancelIfExpired($order);
+            throw ValidationException::withMessages(['payment' => ['This order is closed.']]);
+        }
 
         // A pending COD order may be paid in advance if the shopper picks an
         // enabled manual method in the payment window.

@@ -791,6 +791,7 @@ class OrderController extends Controller
                 'shipping_phone' => $data['shipping_phone'],
                 'shipping_email' => $data['shipping_email'] ?? $customer?->email,
                 'is_guest' => $isGuestOrder,
+                'staff_order' => (bool) $data['staff_order'],
                 'ip_address' => $data['ip_address'],
                 'device_id' => $data['device_id'] ?? null,
                 'shipping_address' => $data['shipping_address'],

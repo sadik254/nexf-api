@@ -49,13 +49,13 @@ class InventoryService
                 'product_lot_id' => $lot->id,
                 'quantity_change' => $quantity,
                 'reason' => $reason,
-                'actor_type' => $actor::class,
-                'actor_id' => $actor->id,
+                'actor_type' => $actor ? $actor::class : 'system',
+                'actor_id' => $actor?->id ?? 0,
                 'meta' => [
                     'order_id' => $item->order_id,
                     'order_item_id' => $item->id,
                     'restored_from_order_sale' => true,
-                    'actor_name' => $actor->name ?? $actor->seller_name ?? null,
+                    'actor_name' => $actor?->name ?? $actor?->seller_name ?? 'System',
                 ],
             ]);
             app(RestockAlertService::class)->notify($lot->product_id ?? $lot->variation?->product_id ?? 0, $lot->variation_id);
@@ -85,13 +85,13 @@ class InventoryService
                 'product_lot_id' => $lot->id,
                 'quantity_change' => $take,
                 'reason' => $reason,
-                'actor_type' => $actor::class,
-                'actor_id' => $actor->id,
+                'actor_type' => $actor ? $actor::class : 'system',
+                'actor_id' => $actor?->id ?? 0,
                 'meta' => array_merge($meta, [
                     'order_id' => $item->order_id,
                     'order_item_id' => $item->id,
                     'restored_from_order_sale' => true,
-                    'actor_name' => $actor->name ?? $actor->seller_name ?? null,
+                    'actor_name' => $actor?->name ?? $actor?->seller_name ?? 'System',
                 ]),
             ]);
             app(RestockAlertService::class)->notify($lot->product_id ?? $lot->variation?->product_id ?? 0, $lot->variation_id);

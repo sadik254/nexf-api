@@ -13,6 +13,8 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\ProductLot;
 use App\Models\ShippingMethod;
+use App\Services\FraudGuardService;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -81,6 +83,24 @@ class CheckoutOrderRegressionTest extends TestCase
         $this->withToken($token)->postJson('/api/customers/orders', $payload + ['shipping_name' => 'Buyer', 'shipping_phone' => '01712345678', 'shipping_address' => 'Dhaka'])->assertCreated()
             ->assertJsonPath('order.discount_total', '30.00');
         $this->assertDatabaseCount('coupon_redemptions', 2);
+    }
+
+
+    public function test_repeat_order_guard_uses_a_doubling_wait_and_ignores_staff_orders(): void
+    {
+        $customer = Customer::create(['name' => 'Repeat buyer', 'email' => 'repeat@example.test', 'password' => 'password123']);
+        FraudGuardSetting::create(['enabled' => true, 'ip_block' => false, 'device_block' => false, 'phone_blacklist' => false, 'fake_number_detection' => false, 'repeat_order_block' => true, 'repeat_order_minutes' => 5]);
+        Order::create(['order_number' => 'REPEAT-1', 'customer_id' => $customer->id, 'status' => 'pending', 'payment_status' => 'unpaid', 'subtotal' => 1, 'total' => 1, 'shipping_charge' => 0, 'shipping_name' => 'Buyer', 'shipping_phone' => '+8801712345678', 'shipping_address' => 'Dhaka', 'ip_address' => '127.0.0.1']);
+        try {
+            app(FraudGuardService::class)->assertAllowed($customer, ['shipping_phone' => '01712345678', 'ip_address' => '127.0.0.1'], 1);
+            $this->fail('Expected repeat-order protection.');
+        } catch (ValidationException $exception) {
+            $this->assertSame("You've just placed an order. You can order again in 5 minutes.", $exception->errors()['checkout'][0]);
+        }
+        Order::query()->update(['status' => 'cancelled']);
+        Order::create(['order_number' => 'REPEAT-STAFF', 'customer_id' => $customer->id, 'staff_order' => true, 'status' => 'pending', 'payment_status' => 'unpaid', 'subtotal' => 1, 'total' => 1, 'shipping_charge' => 0, 'shipping_name' => 'Buyer', 'shipping_phone' => '01712345678', 'shipping_address' => 'Dhaka']);
+        app(FraudGuardService::class)->assertAllowed($customer, ['shipping_phone' => '01712345678'], 1);
+        $this->assertTrue(true);
     }
 
     private function fixtures(): array

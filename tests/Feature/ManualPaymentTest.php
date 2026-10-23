@@ -6,6 +6,7 @@ use App\Models\Admin;
 use App\Models\Order;
 use App\Models\PaymentMethod;
 use App\Models\SiteSetting;
+use App\Services\ManualPaymentExpiryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -139,6 +140,29 @@ class ManualPaymentTest extends TestCase
             ->assertJsonPath('message', 'Payment deleted.');
         $this->assertDatabaseHas('orders', ['id' => $order->id, 'paid_amount' => 0]);
         $this->assertNull($order->fresh()->payment_received_at);
+    }
+
+
+    public function test_expired_unpaid_manual_order_is_cancelled_before_a_late_payment_can_be_submitted(): void
+    {
+        $method = PaymentMethod::where('code', 'bkash')->firstOrFail();
+        $order = $this->order($method, 'bkash');
+        $order->update(['placed_at' => now()->subMinutes(31)]);
+
+        $this->postJson("/api/orders/{$order->id}/payment", [
+            'phone' => '01712345678', 'sender' => '01712345678', 'reference' => 'ab12-cd34',
+        ])->assertUnprocessable()->assertJsonValidationErrors('payment');
+        $this->assertSame('cancelled', $order->fresh()->status);
+    }
+
+    public function test_expiry_service_leaves_a_manual_order_with_submitted_details_open(): void
+    {
+        $method = PaymentMethod::where('code', 'bkash')->firstOrFail();
+        $order = $this->order($method, 'bkash');
+        $order->update(['placed_at' => now()->subMinutes(31), 'payment_sender' => '01712345678']);
+
+        $this->assertFalse(app(ManualPaymentExpiryService::class)->cancelIfExpired($order));
+        $this->assertSame('pending', $order->fresh()->status);
     }
 
     private function order(PaymentMethod $method, string $code): Order
