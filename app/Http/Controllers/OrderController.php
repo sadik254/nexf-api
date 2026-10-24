@@ -398,7 +398,7 @@ class OrderController extends Controller
             $paymentMethod = PaymentMethod::query()->active()->findOrFail($data['payment_method_id']);
             $shippingMethod = $preview['shippingMethod'];
             $shipping = $this->storeShipping->quote($shippingLines, $shippingMethod, $data['store_shipping_methods'] ?? [], $data['store_delivery_options'] ?? []);
-            $appliedDiscounts = $this->lockAppliedDiscounts($preview, $customer);
+            $appliedDiscounts = $this->lockAppliedDiscounts($preview, $customer, $data['shipping_phone']);
             $coupon = $appliedDiscounts[0]['coupon'] ?? null;
             $couponDiscount = round(array_sum(array_column($appliedDiscounts, 'amount')), 2);
             $manualDiscount = $coupon ? 0.0 : $this->manualDiscountAmount($subtotal, $data['manual_discount_kind'] ?? null, (float) ($data['manual_discount_value'] ?? 0));
@@ -899,7 +899,7 @@ class OrderController extends Controller
             }
 
             $shipping = $this->storeShipping->quote($shippingLines, $shippingMethod, $data['store_shipping_methods'] ?? [], $data['store_delivery_options'] ?? []);
-            $appliedDiscounts = $this->lockAppliedDiscounts($preview, $customer);
+            $appliedDiscounts = $this->lockAppliedDiscounts($preview, $customer, $data['shipping_phone']);
             $coupon = $appliedDiscounts[0]['coupon'] ?? null;
             $couponDiscount = round(array_sum(array_column($appliedDiscounts, 'amount')), 2);
             $manualDiscount = $exchangeReturn ? $subtotal : ($coupon ? 0.0 : $this->manualDiscountAmount($subtotal, $data['manual_discount_kind'] ?? null, (float) ($data['manual_discount_value'] ?? 0)));
@@ -999,14 +999,14 @@ class OrderController extends Controller
     }
 
     /** Lock and recheck every discount that contributed to a checkout quote. */
-    private function lockAppliedDiscounts(array $preview, ?Customer $customer): array
+    private function lockAppliedDiscounts(array $preview, ?Customer $customer, ?string $shippingPhone = null): array
     {
         $applied = [];
         foreach ($preview['applied_discounts'] ?? [] as $discount) {
             $coupon = Coupon::query()->lockForUpdate()->find($discount['coupon']->id);
             if (!$coupon) throw ValidationException::withMessages(['coupon_code' => ['A discount is no longer available.']]);
             if ($reason = $coupon->unusableReason()) throw ValidationException::withMessages(['coupon_code' => [$reason]]);
-            if ($customer && $coupon->per_customer_limit !== null && CouponRedemption::query()->where('coupon_id', $coupon->id)->where('customer_id', $customer->id)->count() >= $coupon->per_customer_limit) {
+            if (app(\App\Services\CouponUsageLimitService::class)->reached($coupon, $customer, $shippingPhone)) {
                 throw ValidationException::withMessages(['coupon_code' => ['Coupon usage limit reached for this customer.']]);
             }
             $applied[] = ['coupon' => $coupon, 'amount' => (float) $discount['amount']];

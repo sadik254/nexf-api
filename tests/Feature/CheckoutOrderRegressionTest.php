@@ -16,6 +16,7 @@ use App\Models\ShippingMethod;
 use App\Services\FraudGuardService;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class CheckoutOrderRegressionTest extends TestCase
@@ -83,6 +84,19 @@ class CheckoutOrderRegressionTest extends TestCase
         $this->withToken($token)->postJson('/api/customers/orders', $payload + ['shipping_name' => 'Buyer', 'shipping_phone' => '01712345678', 'shipping_address' => 'Dhaka'])->assertCreated()
             ->assertJsonPath('order.discount_total', '30.00');
         $this->assertDatabaseCount('coupon_redemptions', 2);
+    }
+
+    public function test_guest_coupon_limit_uses_the_normalized_shipping_phone(): void
+    {
+        [, $product, $payment, $inside] = $this->fixtures();
+        config(['services.turnstile.secret_key' => 'test-secret']);
+        Http::fake(['challenges.cloudflare.com/*' => Http::response(['success' => true])]);
+        Coupon::create(['code' => 'ONCE-GUEST', 'is_active' => true, 'per_customer_limit' => 1, 'discount_type' => 'fixed', 'discount_value' => 10]);
+        $payload = $this->payload($product, $payment, $inside) + ['coupon_code' => 'ONCE-GUEST', 'shipping_name' => 'Guest', 'shipping_phone' => '01712345678', 'shipping_address' => 'Dhaka', 'turnstile_token' => 'verified'];
+
+        $this->postJson('/api/guest/orders', $payload)->assertCreated();
+        $this->postJson('/api/guest/orders/preview', $payload)
+            ->assertUnprocessable()->assertJsonValidationErrors('coupon_code');
     }
 
 
