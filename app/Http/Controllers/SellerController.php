@@ -48,6 +48,13 @@ class SellerController extends Controller
             ->withSum(['orderItems as lifetime_units_sold' => fn($items) => $items->where('fulfillment_status', 'delivered')->whereHas('order', fn($orders) => $orders->whereIn('status', ['delivered', 'completed']))], 'quantity')
             ->withSum(['orderItems as units_sold' => $salesScope], 'quantity')
             ->withSum(['orderItems as revenue' => $salesScope], 'line_subtotal')
+            // This is derived from the actual courier timeline instead of the
+            // legacy nullable seller column, which was never kept in sync.
+            ->with(['orderItems' => fn ($items) => $items
+                ->select(['id', 'seller_id', 'fulfillment_status', 'shipped_at', 'delivered_at'])
+                ->where('fulfillment_status', 'delivered')
+                ->whereNotNull('shipped_at')
+                ->whereNotNull('delivered_at')])
             ->latest();
 
         if ($search !== '') {
@@ -68,6 +75,13 @@ class SellerController extends Controller
             $seller->setAttribute('lifetime_units_sold', (int) ($seller->lifetime_units_sold ?? 0));
             $seller->setAttribute('positive_rating_percentage', $seller->review_count > 0 ? round($seller->positive_review_count / $seller->review_count * 100, 1) : null);
             $seller->setAttribute('chat_response_percentage', $seller->customer_chat_count > 0 ? round($seller->replied_chat_count / $seller->customer_chat_count * 100, 1) : null);
+            $shipments = $seller->orderItems;
+            $seller->setAttribute('on_time_shipping_percentage', $shipments->isEmpty() ? null : round(
+                $shipments->filter(fn ($item) => $item->delivered_at->lessThanOrEqualTo($item->shipped_at->copy()->addDays(3)))->count() / $shipments->count() * 100,
+                1,
+            ));
+            // The supporting records are only used to calculate the metric.
+            $seller->unsetRelation('orderItems');
         }
         if (isset($period['from'], $period['to'])) {
             $from = \Carbon\CarbonImmutable::parse($period['from'])->startOfDay();

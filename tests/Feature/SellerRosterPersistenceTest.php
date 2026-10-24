@@ -3,6 +3,8 @@ namespace Tests\Feature;
 use App\Models\Admin;
 use App\Models\PasswordResetCode;
 use App\Models\Seller;
+use App\Models\Order;
+use App\Models\OrderItem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
@@ -50,6 +52,15 @@ class SellerRosterPersistenceTest extends TestCase {
    if($index===0)$chat->messages()->create(['author_type'=>'seller','author_id'=>$seller->id,'body'=>'Real seller reply']);
   }
   $updated=$this->getJson('/api/admin/sellers')->assertOk();$this->assertEquals(50,$updated->json('data.0.chat_response_percentage'));
+ }
+ public function test_seller_roster_calculates_on_time_shipping_from_delivered_items():void {
+  $admin=Admin::create(['name'=>'Shipping admin','email'=>'shipping-admin@example.test','password'=>'password123','role'=>'admin']);
+  $seller=Seller::create(['store_name'=>'Shipping store','store_slug'=>'shipping-store','email'=>'shipping-store@example.test','password'=>'password123','status'=>'approved','is_active'=>true]);
+  $order=Order::create(['order_number'=>'SHIP-ON-TIME','status'=>'delivered','payment_status'=>'paid','subtotal'=>100,'total'=>100,'shipping_name'=>'Buyer','shipping_phone'=>'01712345678','shipping_address'=>'Dhaka']);
+  OrderItem::create(['order_id'=>$order->id,'seller_id'=>$seller->id,'product_name'=>'On time','quantity'=>1,'unit_selling_price'=>100,'unit_buying_price'=>50,'line_subtotal'=>100,'line_cost'=>50,'line_profit'=>50,'fulfillment_status'=>'delivered','shipped_at'=>now()->subDays(2),'delivered_at'=>now()]);
+  $late=Order::create(['order_number'=>'SHIP-LATE','status'=>'delivered','payment_status'=>'paid','subtotal'=>100,'total'=>100,'shipping_name'=>'Buyer','shipping_phone'=>'01712345678','shipping_address'=>'Dhaka']);
+  OrderItem::create(['order_id'=>$late->id,'seller_id'=>$seller->id,'product_name'=>'Late','quantity'=>1,'unit_selling_price'=>100,'unit_buying_price'=>50,'line_subtotal'=>100,'line_cost'=>50,'line_profit'=>50,'fulfillment_status'=>'delivered','shipped_at'=>now()->subDays(5),'delivered_at'=>now()]);
+  $this->withToken($admin->createToken('test',['admin'])->plainTextToken)->getJson('/api/admin/sellers')->assertOk()->assertJsonPath('data.0.on_time_shipping_percentage',50);
  }
  public function test_admin_store_fields_persist_without_invented_identity_or_kyc():void {
   Mail::fake();$admin=Admin::create(['name'=>'Roster admin','email'=>'seller-roster@example.test','password'=>'password123','role'=>'admin']);
