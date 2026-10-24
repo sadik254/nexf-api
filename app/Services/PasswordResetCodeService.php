@@ -31,7 +31,7 @@ class PasswordResetCodeService
             'code_hash' => Hash::make($code),
             'expires_at' => now()->addMinutes(self::EXPIRES_MINUTES),
         ]);
-        Mail::to($account->email)->send(new PasswordResetCodeMail($code, $accountType));
+        Mail::to($account->email)->send(new PasswordResetCodeMail($code, $accountType, $account->email, $account->name ?? $account->seller_name ?? null));
     }
 
     public function consume(Model $account, string $accountType, string $code): bool

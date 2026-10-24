@@ -12,7 +12,14 @@ class PasswordResetCodeMail extends Mailable
 {
     use Queueable, SerializesModels;
 
-    public function __construct(public string $code, public string $accountType) {}
+    public function __construct(
+        public string $code,
+        public string $accountType,
+        public string $email,
+        public ?string $name = null,
+        public bool $invite = false,
+        public int $expiresMinutes = 10,
+    ) {}
 
     public function envelope(): Envelope
     {

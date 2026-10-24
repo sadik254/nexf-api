@@ -11,7 +11,13 @@ use Illuminate\Queue\SerializesModels;
 class OrderNotificationMail extends Mailable
 {
     use Queueable, SerializesModels;
-    public function __construct(public Order $order, public string $subjectLine, public string $messageLine) {}
+    public function __construct(
+        public Order $order,
+        public string $subjectLine,
+        public string $messageLine,
+        public string $audience = 'customer',
+        public ?int $sellerId = null,
+    ) {}
     public function envelope(): Envelope { return new Envelope(subject: $this->subjectLine); }
     public function content(): Content { return new Content(view: 'emails.order-notification'); }
 }

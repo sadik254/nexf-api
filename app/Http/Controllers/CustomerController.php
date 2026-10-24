@@ -305,7 +305,7 @@ class CustomerController extends Controller
         ]);
 
         Mail::to($email)->send(
-            new CustomerVerificationCodeMail($verification->code, $verification->type)
+            new CustomerVerificationCodeMail($verification->code, $verification->type, $email)
         );
     }
 

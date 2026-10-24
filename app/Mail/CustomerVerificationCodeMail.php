@@ -15,7 +15,7 @@ class CustomerVerificationCodeMail extends Mailable
     public string $code;
     public string $type;
 
-    public function __construct(string $code, string $type)
+    public function __construct(string $code, string $type, public ?string $email = null)
     {
         $this->code = $code;
         $this->type = $type;
