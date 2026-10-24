@@ -79,7 +79,7 @@ class HomepageLayoutController extends Controller
             if ($section['type'] === 'collection' && ($section['source'] ?? 'collection') === 'collection' && empty($section['collection_id']) && empty($section['sourceValue'])) {
                 throw ValidationException::withMessages(["sections.{$index}.collection_id" => 'Choose a collection for this section.']);
             }
-            if (str_starts_with($section['type'], 'offer') && !empty($section['offer_set_id'])) {
+            if (array_key_exists($section['type'], ['offerFour' => 'four', 'offerWide' => 'wide', 'offerTwo' => 'two', 'coupons' => 'coupons']) && !empty($section['offer_set_id'])) {
                 $set = \App\Models\HomepageOfferSet::find($section['offer_set_id']);
                 $expected = ['offerFour' => 'four', 'offerWide' => 'wide', 'offerTwo' => 'two', 'coupons' => 'coupons'][$section['type']];
                 if (!$set || $set->row_type !== $expected) throw ValidationException::withMessages(["sections.{$index}.offer_set_id" => 'Choose a matching offer set.']);

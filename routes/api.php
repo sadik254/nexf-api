@@ -184,6 +184,7 @@ Route::get('/homepage/trust-badges', [HomepageTrustBadgeController::class, 'publ
 Route::get('/homepage/category-cards', [HomepageCategoryCardController::class, 'publicIndex']);
 Route::get('/homepage/offer-blocks', [HomepageOfferBlockController::class, 'publicIndex']);
 Route::get('/store/promotions', [SellerPromotionController::class, 'publicIndex']);
+Route::get('/promotions', [SellerPromotionController::class, 'publicIndex']);
 Route::get('/homepage/layout/{section}/products', [StoreProductController::class, 'homepageProducts']);
 Route::get('/store/marketplace-stats', [StoreProductController::class, 'marketplaceStats']);
 Route::get('/homepage/layout', [HomepageLayoutController::class, 'show']);

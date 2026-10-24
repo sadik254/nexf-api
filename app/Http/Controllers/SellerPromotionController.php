@@ -17,7 +17,21 @@ class SellerPromotionController extends Controller
 
     public function publicIndex(): JsonResponse
     {
-        return response()->json(SellerPromotion::query()->where('status', 'approved')->whereHas('seller', fn ($q) => $q->where('is_active', true)->where('status', 'approved'))->with(self::WITH)->orderByDesc('pinned')->latest()->get());
+        $rows = SellerPromotion::query()->where('status', 'approved')
+            ->whereHas('seller', fn ($q) => $q->where('is_active', true)->where('status', 'approved'))
+            ->with(self::WITH)->orderByDesc('pinned')->latest()->get()
+            ->map(function (SellerPromotion $promotion): SellerPromotion {
+                if ($promotion->layout === 'coupons') {
+                    $promotion->blocks = collect($promotion->blocks ?? [])->filter(fn (array $block): bool =>
+                        empty($block['hidden'])
+                        && (empty($block['expires_at']) || $block['expires_at'] >= today()->toDateString())
+                    )->values()->all();
+                }
+                return $promotion;
+            })
+            ->filter(fn (SellerPromotion $promotion): bool => $promotion->layout !== 'coupons' || count($promotion->blocks ?? []) > 0)
+            ->values();
+        return response()->json($rows);
     }
     public function sellerIndex(Request $request): JsonResponse { return response()->json($this->seller($request)->promotions()->with(self::WITH)->latest()->get()); }
     public function sellerStore(Request $request): JsonResponse
@@ -36,7 +50,7 @@ class SellerPromotionController extends Controller
     {
         $this->owned($request, $promotion);
         if (!in_array($promotion->status, ['draft', 'rejected'], true)) throw ValidationException::withMessages(['status' => ['This offer is already with the NEXF team or live.']]);
-        $this->ensureComplete($promotion->blocks ?? []);
+        $this->ensureComplete($promotion->blocks ?? [], $promotion->layout);
         $promotion->update(['status' => 'pending', 'review_note' => null, 'reviewed_at' => null]);
         return response()->json($promotion->fresh()->load(self::WITH));
     }
@@ -45,14 +59,14 @@ class SellerPromotionController extends Controller
     public function adminStore(Request $request): JsonResponse
     {
         $this->admin($request); $data = $this->validated($request, null, true); $data['status'] = $data['status'] ?? 'approved';
-        if ($data['status'] === 'approved') $this->ensureComplete($data['blocks']); $data['reviewed_at'] = now();
+        if ($data['status'] === 'approved') $this->ensureComplete($data['blocks'], $data['layout']); $data['reviewed_at'] = now();
         return response()->json(SellerPromotion::create($data)->load(self::WITH), 201);
     }
     public function adminUpdate(Request $request, SellerPromotion $promotion): JsonResponse
     {
         $this->admin($request); $data = $this->validated($request, $promotion, true); $status = $data['status'] ?? $promotion->status;
         if ($status !== $promotion->status) $data['reviewed_at'] = now();
-        if ($status === 'approved') $this->ensureComplete($data['blocks'] ?? $promotion->blocks ?? []);
+        if ($status === 'approved') $this->ensureComplete($data['blocks'] ?? $promotion->blocks ?? [], $data['layout'] ?? $promotion->layout);
         if ($status !== 'rejected') $data['review_note'] = null;
         $promotion->update($data); return response()->json($promotion->fresh()->load(self::WITH));
     }
@@ -78,7 +92,16 @@ class SellerPromotionController extends Controller
         return $data;
     }
     private function block(array $block): array { $text = fn ($key) => isset($block[$key]) && trim((string) $block[$key]) !== '' ? trim((string) $block[$key]) : null; return ['title' => $text('title'), 'body' => $text('body'), 'cta' => $text('cta'), 'href' => $text('href'), 'image' => $text('image'), 'mobile_image' => $text('mobile_image'), 'theme' => $block['theme'] ?? 'blue', 'coupon_id' => $block['coupon_id'] ?? null, 'expires_at' => $block['expires_at'] ?? null, 'hidden' => (bool) ($block['hidden'] ?? false)]; }
-    private function ensureComplete(array $blocks): void { foreach ($blocks as $i => $block) if (empty($block['title']) || empty($block['image'])) throw ValidationException::withMessages(['blocks' => ['Block '.($i + 1).' needs a title and an image.']]); }
+    private function ensureComplete(array $blocks, string $layout): void
+    {
+        if ($layout === 'coupons' && $blocks === []) {
+            throw ValidationException::withMessages(['blocks' => ['Add at least one coupon card.']]);
+        }
+        foreach ($blocks as $i => $block) {
+            $complete = !empty($block['title']) && ($layout === 'coupons' ? !empty($block['cta']) : !empty($block['image']));
+            if (!$complete) throw ValidationException::withMessages(['blocks' => ['Block '.($i + 1).' needs '.($layout === 'coupons' ? 'a title and coupon code.' : 'a title and an image.')]]);
+        }
+    }
     private function seller(Request $request): Seller { $seller = $request->user(); abort_unless($seller instanceof Seller, 403); return $seller; }
     private function owned(Request $request, SellerPromotion $promotion): void { abort_unless($this->seller($request)->id === $promotion->seller_id, 404); }
     private function admin(Request $request): void { abort_unless($request->user() instanceof Admin, 403); }
