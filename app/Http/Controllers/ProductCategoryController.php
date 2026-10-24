@@ -66,7 +66,7 @@ class ProductCategoryController extends Controller
             'image' => ['nullable', 'url', 'starts_with:https://'],
             'menu_heading' => ['nullable', 'string', 'max:120'],
             'promo_image' => ['nullable', 'url', 'starts_with:https://'],
-            'promo_href' => ['nullable', 'url', 'starts_with:https://'],
+            'promo_href' => $this->promoHrefRules(),
             'promo_title' => ['nullable', 'string', 'max:120'], 'promo_caption' => ['nullable', 'string', 'max:255'],
             'is_active' => ['nullable', 'boolean'],
             'parent_id' => ['nullable', 'integer', 'exists:product_categories,id'],
@@ -107,7 +107,7 @@ class ProductCategoryController extends Controller
             'image' => ['sometimes', 'nullable', 'url', 'starts_with:https://'],
             'menu_heading' => ['sometimes', 'nullable', 'string', 'max:120'],
             'promo_image' => ['sometimes', 'nullable', 'url', 'starts_with:https://'],
-            'promo_href' => ['sometimes', 'nullable', 'url', 'starts_with:https://'],
+            'promo_href' => ['sometimes', ...$this->promoHrefRules()],
             'promo_title' => ['sometimes', 'nullable', 'string', 'max:120'], 'promo_caption' => ['sometimes', 'nullable', 'string', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
             'parent_id' => ['sometimes', 'nullable', 'integer', 'exists:product_categories,id'],
@@ -159,6 +159,20 @@ class ProductCategoryController extends Controller
         });
 
         return response()->json(['message' => 'Category deleted successfully.']);
+    }
+
+    /** The storefront accepts its own paths as well as safe external links. */
+    private function promoHrefRules(): array
+    {
+        return ['nullable', 'string', 'max:2048', function (string $attribute, mixed $value, \Closure $fail): void {
+            if ($value === null || $value === '') return;
+            $href = trim((string) $value);
+            $isInternal = str_starts_with($href, '/') && !str_starts_with($href, '//');
+            $scheme = parse_url($href, PHP_URL_SCHEME);
+            if (! $isInternal && ! in_array($scheme, ['http', 'https'], true)) {
+                $fail('The '.$attribute.' must be an internal path or an http(s) URL.');
+            }
+        }];
     }
 
     public function saveTaxonomy(Request $request, ?ProductCategory $category = null): JsonResponse
