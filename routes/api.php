@@ -45,6 +45,7 @@ use App\Http\Controllers\StoreLayoutController;
 use App\Http\Controllers\ManualPaymentController;
 use App\Http\Controllers\DeliveryGroupController;
 use App\Http\Controllers\HouseStoreController;
+use App\Http\Controllers\PartnerPayoutController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 
@@ -69,6 +70,12 @@ Route::prefix('resellers')->group(function () {
         Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show'])->middleware('perm:support.reply');
         Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply'])->middleware('perm:support.reply');
         Route::post('/support-attachments', [SupportTicketController::class, 'upload'])->middleware('perm:support.reply');
+        Route::get('/me/payouts', [PartnerPayoutController::class, 'resellerPayouts'])->middleware('perm:commission.view');
+        Route::post('/me/payouts/withdraw', [PartnerPayoutController::class, 'withdrawReseller'])->middleware('perm:commission.view');
+        Route::post('/me/payout-accounts', fn (\Illuminate\Http\Request $request) => app(PartnerPayoutController::class)->saveAccount($request, 'reseller'))->middleware('perm:commission.view');
+        Route::post('/me/payout-accounts/{account}', fn (\Illuminate\Http\Request $request, int $account) => app(PartnerPayoutController::class)->saveAccount($request, 'reseller', $account))->middleware('perm:commission.view');
+        Route::post('/me/payout-accounts/{account}/select', fn (\Illuminate\Http\Request $request, int $account) => app(PartnerPayoutController::class)->selectAccount($request, 'reseller', $account))->middleware('perm:commission.view');
+        Route::post('/me/payout-accounts/{account}/delete', fn (\Illuminate\Http\Request $request, int $account) => app(PartnerPayoutController::class)->deleteAccount($request, 'reseller', $account))->middleware('perm:commission.view');
     });
 });
 
@@ -316,6 +323,8 @@ Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {
     Route::get('/commissions', [ResellerController::class, 'commission'])->middleware('perm:commission.edit');
     Route::get('/withdrawals', [WithdrawalController::class, 'index'])->middleware('perm:withdrawals.settle');
     Route::post('/withdrawals/{withdrawal}', [WithdrawalController::class, 'update'])->middleware('perm:withdrawals.settle');
+    Route::get('/partner-withdrawals', [PartnerPayoutController::class, 'adminIndex'])->middleware('perm:withdrawals.settle');
+    Route::post('/partner-withdrawals/{partnerWithdrawal}', [PartnerPayoutController::class, 'adminUpdate'])->middleware('perm:withdrawals.settle');
     Route::get('/support-tickets', [SupportTicketController::class, 'index'])->middleware('perm:support.reply');
     Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show'])->middleware('perm:support.reply');
     Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply'])->middleware('perm:support.reply');
@@ -432,6 +441,12 @@ Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {
 });
 
 Route::prefix('seller')->middleware(['sanctum.type:seller','store.scope'])->group(function () {
+    Route::get('/payouts', [PartnerPayoutController::class, 'sellerPayouts'])->middleware('perm:dashboard.view');
+    Route::post('/payouts/withdraw', [PartnerPayoutController::class, 'withdrawSeller'])->middleware('perm:dashboard.view');
+    Route::post('/payout-accounts', fn (\Illuminate\Http\Request $request) => app(PartnerPayoutController::class)->saveAccount($request, 'seller'))->middleware('perm:dashboard.view');
+    Route::post('/payout-accounts/{account}', fn (\Illuminate\Http\Request $request, int $account) => app(PartnerPayoutController::class)->saveAccount($request, 'seller', $account))->middleware('perm:dashboard.view');
+    Route::post('/payout-accounts/{account}/select', fn (\Illuminate\Http\Request $request, int $account) => app(PartnerPayoutController::class)->selectAccount($request, 'seller', $account))->middleware('perm:dashboard.view');
+    Route::post('/payout-accounts/{account}/delete', fn (\Illuminate\Http\Request $request, int $account) => app(PartnerPayoutController::class)->deleteAccount($request, 'seller', $account))->middleware('perm:dashboard.view');
     Route::post('/store', [SellerController::class, 'updateStore'])->middleware('perm:store.profile');
     Route::get('/staff', [\App\Http\Controllers\SellerStaffController::class, 'index'])->middleware('perm:staff.manage');
     Route::post('/staff', [\App\Http\Controllers\SellerStaffController::class, 'store'])->middleware('perm:staff.manage');

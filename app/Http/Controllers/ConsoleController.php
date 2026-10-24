@@ -10,6 +10,7 @@ use App\Models\ReturnRequest;
 use App\Models\Seller;
 use App\Models\StoreChat;
 use App\Models\SupportTicket;
+use App\Models\PartnerWithdrawal;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -45,8 +46,11 @@ class ConsoleController extends Controller
         return response()->json([
             'support' => $support, 'returns' => $returns, 'chats' => $chats,
             'inventory' => $simple + $variations, 'payments' => $payments,
-            // These services have no persisted backend models yet.
-            'reports' => 0, 'withdrawals' => 0,
+            'reports' => 0,
+            'withdrawals' => $actor instanceof Admin
+                ? PartnerWithdrawal::where('status', 'requested')->count()
+                    + \App\Models\WithdrawalRequest::where('status', 'requested')->count()
+                : 0,
         ]);
     }
 }
