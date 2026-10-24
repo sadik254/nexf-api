@@ -224,10 +224,12 @@ class OrderController extends Controller
         if (!$request->user() instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
-        if (($request->has('paid_amount') || $request->has('payment_sender') || $request->has('payment_reference'))
+        $confirmsPayment = $request->has('paid_amount') || $request->has('payment_sender') || $request->has('payment_reference');
+        if ($confirmsPayment
             && ! $request->user()->hasPermission('payments.confirm')) {
             return response()->json(['message' => "You don't have access to this.", 'permission' => 'payments.confirm'], 403);
         }
+        if ($confirmsPayment) $request->attributes->set('audit_permission', 'payments.confirm');
         if ($request->exists('items') || $request->exists('payment_method_id') || $request->exists('shipping_method_id') || $request->exists('coupon_code') || $request->exists('customer_id')) {
             return $this->replacePendingAdminOrder($request, $order);
         }
