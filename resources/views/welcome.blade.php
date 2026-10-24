@@ -1,10 +1,26 @@
 @extends('layouts.page')
+
 @section('title', 'NEXF API')
+@section('heading', 'NEXF API')
+@section('description', "This server runs the NEXF store and console. There's nothing to browse here.")
+
+@section('icon')
+    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
+@endsection
+
+@php
+    $siteUrl = rtrim((string) config('app.frontend_url'), '/');
+@endphp
+
 @section('content')
-<div class="card">
-    <p class="eyebrow">NEXF Lifestyle</p>
-    <h1 class="title">NEXF API</h1>
-    @if (session('status'))<div class="success">{{ session('status') }}</div>@else<p class="lead">Your store is set up and the API is ready.</p>@endif
-    @if (config('app.frontend_url'))<div class="actions"><a class="button" href="{{ rtrim(config('app.frontend_url'), '/') }}/csxadmin">Sign in to the console</a>&nbsp;<a class="button" href="{{ config('app.frontend_url') }}">Go to the store</a></div>@endif
-</div>
+    @if (session('status'))
+        <p class="notice" role="status">{{ session('status') }}</p>
+    @endif
+
+    @if ($siteUrl)
+        <div class="stack">
+            <a href="{{ $siteUrl }}/dashboard" class="btn btn-primary">Sign in to the console</a>
+            <a href="{{ $siteUrl }}" class="btn btn-outline">Go to the store</a>
+        </div>
+    @endif
 @endsection
