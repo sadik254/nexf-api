@@ -12,7 +12,7 @@ class PasswordResetCodeService
 {
     private const EXPIRES_MINUTES = 10;
 
-    public function issue(Model $account, string $accountType, int $minutes = 10080): string
+    public function issue(Model $account, string $accountType, int $minutes = 1440): string
     {
         PasswordResetCode::query()->where('account_type', $accountType)->where('account_id', $account->getKey())->whereNull('used_at')->delete();
         $code = (string) random_int(100000, 999999);
@@ -51,6 +51,10 @@ class PasswordResetCodeService
     private function match(Model $account, string $accountType, string $code): ?PasswordResetCode
     {
         $reset = PasswordResetCode::query()->where('account_type', $accountType)->where('account_id', $account->getKey())->where('email', $account->email)->whereNull('used_at')->where('expires_at', '>', now())->latest()->first();
-        return $reset && Hash::check($code, $reset->code_hash) ? $reset : null;
+        if (! $reset) return null;
+        if (Hash::check($code, $reset->code_hash)) return $reset;
+        $attempts = $reset->failed_attempts + 1;
+        $reset->update(['failed_attempts' => $attempts, 'used_at' => $attempts >= 5 ? now() : null]);
+        return null;
     }
 }

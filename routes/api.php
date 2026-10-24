@@ -52,20 +52,20 @@ Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']
 Route::post('/analytics/events', [AnalyticsController::class, 'track'])->middleware('throttle:120,1,analytics-events');
 
 Route::prefix('resellers')->group(function () {
-    Route::post('/login', [ResellerController::class, 'login']);
-    Route::post('/forgot-password', [ResellerController::class, 'forgotPassword']);
-    Route::post('/reset-password', [ResellerController::class, 'resetPassword']);
-    Route::post('/check-reset-code', \App\Http\Controllers\PasswordResetCheckController::class)->defaults('accountType', 'reseller')->middleware('throttle:10,1');
+    Route::post('/login', [ResellerController::class, 'login'])->middleware('throttle:auth-login');
+    Route::post('/forgot-password', [ResellerController::class, 'forgotPassword'])->middleware('throttle:auth-forgot');
+    Route::post('/reset-password', [ResellerController::class, 'resetPassword'])->middleware('throttle:auth-reset');
+    Route::post('/check-reset-code', \App\Http\Controllers\PasswordResetCheckController::class)->defaults('accountType', 'reseller')->middleware('throttle:auth-reset');
     Route::middleware('sanctum.type:reseller')->group(function () {
         Route::get('/me', [ResellerController::class, 'me']);
         Route::post('/me', [ResellerController::class, 'updateMe']);
         Route::get('/me/commission-period', [ResellerController::class, 'commissionPeriod'])->middleware('perm:commission.view');
         Route::post('/me/password', [ResellerController::class, 'updatePassword']);
-        Route::post('/me/email/send-current', [ResellerController::class, 'sendCurrentEmailCode']);
-        Route::post('/me/email/verify-current', [ResellerController::class, 'verifyCurrentEmail']);
-        Route::post('/me/email', [ResellerController::class, 'requestEmailChange']);
-        Route::post('/me/email/verify-new', [ResellerController::class, 'verifyNewEmail']);
-        Route::post('/me/email/resend', [ResellerController::class, 'resendEmailChangeCode']);
+        Route::post('/me/email/send-current', [ResellerController::class, 'sendCurrentEmailCode'])->middleware('throttle:auth-resend');
+        Route::post('/me/email/verify-current', [ResellerController::class, 'verifyCurrentEmail'])->middleware('throttle:auth-verify');
+        Route::post('/me/email', [ResellerController::class, 'requestEmailChange'])->middleware('throttle:auth-resend');
+        Route::post('/me/email/verify-new', [ResellerController::class, 'verifyNewEmail'])->middleware('throttle:auth-verify');
+        Route::post('/me/email/resend', [ResellerController::class, 'resendEmailChangeCode'])->middleware('throttle:auth-resend');
         Route::post('/logout', [ResellerController::class, 'logout']);
         Route::get('/support-tickets', [SupportTicketController::class, 'index'])->middleware('perm:support.reply');
         Route::post('/support-tickets', [SupportTicketController::class, 'store'])->middleware('perm:support.reply');
@@ -85,12 +85,12 @@ Route::prefix('resellers')->group(function () {
     // Route::post('/admin/create', [AdminController::class, 'store']);
 Route::prefix('customers')->group(function () {
     Route::post('/', [CustomerController::class, 'store']);
-    Route::post('/login', [CustomerController::class, 'login']);
-    Route::post('/verify-email', [CustomerController::class, 'verifyEmail']);
-    Route::post('/resend-verification', [CustomerController::class, 'resendVerificationEmail']);
-    Route::post('/forgot-password', [CustomerController::class, 'forgotPassword']);
-    Route::post('/reset-password', [CustomerController::class, 'resetPassword']);
-    Route::post('/check-reset-code', \App\Http\Controllers\PasswordResetCheckController::class)->defaults('accountType', 'customer')->middleware('throttle:10,1');
+    Route::post('/login', [CustomerController::class, 'login'])->middleware('throttle:auth-login');
+    Route::post('/verify-email', [CustomerController::class, 'verifyEmail'])->middleware('throttle:auth-verify');
+    Route::post('/resend-verification', [CustomerController::class, 'resendVerificationEmail'])->middleware('throttle:auth-resend');
+    Route::post('/forgot-password', [CustomerController::class, 'forgotPassword'])->middleware('throttle:auth-forgot');
+    Route::post('/reset-password', [CustomerController::class, 'resetPassword'])->middleware('throttle:auth-reset');
+    Route::post('/check-reset-code', \App\Http\Controllers\PasswordResetCheckController::class)->defaults('accountType', 'customer')->middleware('throttle:auth-reset');
 
     Route::middleware('sanctum.type:customer,customer:basic')->group(function () {
         Route::post('/me', [CustomerController::class, 'update']);
@@ -114,11 +114,11 @@ Route::prefix('customers')->group(function () {
         Route::post('/addresses/{address}/default', [\App\Http\Controllers\CustomerAddressController::class, 'makeDefault']);
         Route::post('/addresses/{address}/delete', [\App\Http\Controllers\CustomerAddressController::class, 'destroy']);
         Route::post('/me/password', [CustomerController::class, 'updatePassword']);
-        Route::post('/me/email/send-current', [CustomerController::class, 'sendCurrentEmailCode']);
-        Route::post('/me/email/verify-current', [CustomerController::class, 'verifyCurrentEmail']);
-        Route::post('/me/email', [CustomerController::class, 'requestEmailChange']);
-        Route::post('/me/email/verify-new', [CustomerController::class, 'verifyNewEmail']);
-        Route::post('/me/email/resend', [CustomerController::class, 'resendEmailChangeCode']);
+        Route::post('/me/email/send-current', [CustomerController::class, 'sendCurrentEmailCode'])->middleware('throttle:auth-resend');
+        Route::post('/me/email/verify-current', [CustomerController::class, 'verifyCurrentEmail'])->middleware('throttle:auth-verify');
+        Route::post('/me/email', [CustomerController::class, 'requestEmailChange'])->middleware('throttle:auth-resend');
+        Route::post('/me/email/verify-new', [CustomerController::class, 'verifyNewEmail'])->middleware('throttle:auth-verify');
+        Route::post('/me/email/resend', [CustomerController::class, 'resendEmailChangeCode'])->middleware('throttle:auth-resend');
         Route::post('/logout', [CustomerController::class, 'logout']);
         Route::get('/orders', [OrderController::class, 'indexCustomer']);
         Route::post('/orders/preview', [OrderController::class, 'preview']);
@@ -202,21 +202,21 @@ Route::get('/orders/{order}/payment', [ManualPaymentController::class, 'show'])-
 Route::post('/orders/{order}/payment', [ManualPaymentController::class, 'submit'])->middleware('throttle:10,1,order-payment-submit');
 
 Route::prefix('admin')->group(function () {
-    Route::post('/login', [AdminController::class, 'login']);
-    Route::post('/forgot-password', [AdminController::class, 'forgotPassword']);
-    Route::post('/reset-password', [AdminController::class, 'resetPassword']);
-    Route::post('/check-reset-code', \App\Http\Controllers\PasswordResetCheckController::class)->defaults('accountType', 'admin')->middleware('throttle:10,1');
+    Route::post('/login', [AdminController::class, 'login'])->middleware('throttle:auth-login');
+    Route::post('/forgot-password', [AdminController::class, 'forgotPassword'])->middleware('throttle:auth-forgot');
+    Route::post('/reset-password', [AdminController::class, 'resetPassword'])->middleware('throttle:auth-reset');
+    Route::post('/check-reset-code', \App\Http\Controllers\PasswordResetCheckController::class)->defaults('accountType', 'admin')->middleware('throttle:auth-reset');
     Route::middleware('sanctum.type:admin')->post('/logout', [AdminController::class, 'logout']);
     // Temporarily disable admin creation endpoint to prevent accidental creation of multiple admins during testing
     Route::middleware(['sanctum.type:admin','perm:admins.manage'])->post('/create', [AdminController::class, 'store']);
     Route::middleware('sanctum.type:admin')->get('/me', function (\Illuminate\Http\Request $request) { $admin=$request->user(); $admin->setAttribute('store_id', null)->setAttribute('permissions', $admin->permissions()); return response()->json($admin); });
     Route::middleware('sanctum.type:admin')->post('/me', [AdminController::class, 'updateProfile']);
     Route::middleware('sanctum.type:admin')->post('/me/password', [AdminController::class, 'updatePassword']);
-    Route::middleware('sanctum.type:admin')->post('/me/email/send-current', [AdminController::class, 'sendCurrentEmailCode']);
-    Route::middleware('sanctum.type:admin')->post('/me/email/verify-current', [AdminController::class, 'verifyCurrentEmail']);
-    Route::middleware('sanctum.type:admin')->post('/me/email', [AdminController::class, 'requestEmailChange']);
-    Route::middleware('sanctum.type:admin')->post('/me/email/verify-new', [AdminController::class, 'verifyNewEmail']);
-    Route::middleware('sanctum.type:admin')->post('/me/email/resend', [AdminController::class, 'resendEmailChangeCode']);
+    Route::middleware(['sanctum.type:admin','throttle:auth-resend'])->post('/me/email/send-current', [AdminController::class, 'sendCurrentEmailCode']);
+    Route::middleware(['sanctum.type:admin','throttle:auth-verify'])->post('/me/email/verify-current', [AdminController::class, 'verifyCurrentEmail']);
+    Route::middleware(['sanctum.type:admin','throttle:auth-resend'])->post('/me/email', [AdminController::class, 'requestEmailChange']);
+    Route::middleware(['sanctum.type:admin','throttle:auth-verify'])->post('/me/email/verify-new', [AdminController::class, 'verifyNewEmail']);
+    Route::middleware(['sanctum.type:admin','throttle:auth-resend'])->post('/me/email/resend', [AdminController::class, 'resendEmailChangeCode']);
     Route::middleware(['sanctum.type:admin','perm:admins.manage'])->get('/roles', [\App\Http\Controllers\RolePermissionController::class, 'index']);
     Route::middleware(['sanctum.type:admin','perm:admins.manage'])->post('/roles', [\App\Http\Controllers\RolePermissionController::class, 'save']);
     Route::middleware(['sanctum.type:admin','perm:admins.manage'])->get('/admins', [AdminController::class, 'index']);
@@ -264,26 +264,26 @@ Route::prefix('admin')->group(function () {
 
 Route::prefix('sellers')->group(function () {
     Route::post('/onboard', [SellerController::class, 'onboard']);
-    Route::post('/login', [SellerController::class, 'login']);
-    Route::post('/forgot-password', [SellerController::class, 'forgotPassword']);
-    Route::post('/reset-password', [SellerController::class, 'resetPassword']);
-    Route::post('/check-reset-code', \App\Http\Controllers\PasswordResetCheckController::class)->defaults('accountType', 'seller')->middleware('throttle:10,1');
+    Route::post('/login', [SellerController::class, 'login'])->middleware('throttle:auth-login');
+    Route::post('/forgot-password', [SellerController::class, 'forgotPassword'])->middleware('throttle:auth-forgot');
+    Route::post('/reset-password', [SellerController::class, 'resetPassword'])->middleware('throttle:auth-reset');
+    Route::post('/check-reset-code', \App\Http\Controllers\PasswordResetCheckController::class)->defaults('accountType', 'seller')->middleware('throttle:auth-reset');
     Route::middleware('sanctum.type:seller')->post('/logout', [SellerController::class, 'logout']);
     Route::middleware('sanctum.type:seller')->get('/me', function (\Illuminate\Http\Request $request) { $seller=$request->user(); $staff=$request->attributes->get('seller_staff'); $actor=$staff ?: $seller; $seller->setAttribute('role',$actor->rbacRole())->setAttribute('store_id',$seller->id)->setAttribute('permissions',$actor->permissions())->setAttribute('staff',$staff); return response()->json($seller); });
     Route::middleware('sanctum.type:seller')->post('/me', [SellerController::class, 'updateProfile']);
     Route::middleware('sanctum.type:seller')->post('/me/password', [SellerController::class, 'updatePassword']);
-    Route::middleware('sanctum.type:seller')->post('/me/email/send-current', [SellerController::class, 'sendCurrentEmailCode']);
-    Route::middleware('sanctum.type:seller')->post('/me/email/verify-current', [SellerController::class, 'verifyCurrentEmail']);
-    Route::middleware('sanctum.type:seller')->post('/me/email', [SellerController::class, 'requestEmailChange']);
-    Route::middleware('sanctum.type:seller')->post('/me/email/verify-new', [SellerController::class, 'verifyNewEmail']);
-    Route::middleware('sanctum.type:seller')->post('/me/email/resend', [SellerController::class, 'resendEmailChangeCode']);
+    Route::middleware(['sanctum.type:seller','throttle:auth-resend'])->post('/me/email/send-current', [SellerController::class, 'sendCurrentEmailCode']);
+    Route::middleware(['sanctum.type:seller','throttle:auth-verify'])->post('/me/email/verify-current', [SellerController::class, 'verifyCurrentEmail']);
+    Route::middleware(['sanctum.type:seller','throttle:auth-resend'])->post('/me/email', [SellerController::class, 'requestEmailChange']);
+    Route::middleware(['sanctum.type:seller','throttle:auth-verify'])->post('/me/email/verify-new', [SellerController::class, 'verifyNewEmail']);
+    Route::middleware(['sanctum.type:seller','throttle:auth-resend'])->post('/me/email/resend', [SellerController::class, 'resendEmailChangeCode']);
     Route::middleware('sanctum.type:seller')->post('/staff/me', [\App\Http\Controllers\SellerStaffController::class, 'me']);
     Route::middleware('sanctum.type:seller')->post('/staff/me/password', [\App\Http\Controllers\SellerStaffController::class, 'password']);
-    Route::middleware('sanctum.type:seller')->post('/staff/me/email/send-current', [\App\Http\Controllers\SellerStaffController::class, 'emailCurrent']);
-    Route::middleware('sanctum.type:seller')->post('/staff/me/email/verify-current', [\App\Http\Controllers\SellerStaffController::class, 'emailVerifyCurrent']);
-    Route::middleware('sanctum.type:seller')->post('/staff/me/email', [\App\Http\Controllers\SellerStaffController::class, 'emailRequest']);
-    Route::middleware('sanctum.type:seller')->post('/staff/me/email/verify-new', [\App\Http\Controllers\SellerStaffController::class, 'emailVerifyNew']);
-    Route::middleware('sanctum.type:seller')->post('/staff/me/email/resend', [\App\Http\Controllers\SellerStaffController::class, 'emailResend']);
+    Route::middleware(['sanctum.type:seller','throttle:auth-resend'])->post('/staff/me/email/send-current', [\App\Http\Controllers\SellerStaffController::class, 'emailCurrent']);
+    Route::middleware(['sanctum.type:seller','throttle:auth-verify'])->post('/staff/me/email/verify-current', [\App\Http\Controllers\SellerStaffController::class, 'emailVerifyCurrent']);
+    Route::middleware(['sanctum.type:seller','throttle:auth-resend'])->post('/staff/me/email', [\App\Http\Controllers\SellerStaffController::class, 'emailRequest']);
+    Route::middleware(['sanctum.type:seller','throttle:auth-verify'])->post('/staff/me/email/verify-new', [\App\Http\Controllers\SellerStaffController::class, 'emailVerifyNew']);
+    Route::middleware(['sanctum.type:seller','throttle:auth-resend'])->post('/staff/me/email/resend', [\App\Http\Controllers\SellerStaffController::class, 'emailResend']);
 });
 
 Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {

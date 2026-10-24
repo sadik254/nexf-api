@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class PasswordResetCode extends Model
 {
-    protected $fillable = ['account_type', 'account_id', 'email', 'code_hash', 'expires_at', 'used_at'];
+    protected $fillable = ['account_type', 'account_id', 'email', 'code_hash', 'failed_attempts', 'expires_at', 'used_at'];
 
     protected function casts(): array
     {
