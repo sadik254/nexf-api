@@ -1,6 +1,7 @@
 <?php
 namespace Tests\Feature;
 use App\Models\Admin;
+use App\Models\PasswordResetCode;
 use App\Models\Seller;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
@@ -55,14 +56,15 @@ class SellerRosterPersistenceTest extends TestCase {
   $this->withToken($admin->createToken('test',['admin:basic'])->plainTextToken);
   $input=['store_name'=>'Isolated roster store','sku_prefix'=>'ISO1','email'=>'isolated-store@example.test','phone'=>'01712345678','address_line'=>'House 1','address_area'=>'Banani','address_district'=>'Dhaka','commission_rate'=>8];
   $id=$this->postJson('/api/admin/sellers',$input)->assertCreated()->assertJsonPath('sku_prefix','ISO1')->assertJsonPath('commission_rate','8.00')->assertJsonPath('kyc_number',null)->assertJsonPath('seller_name',null)->json('id');
-  $seller=Seller::findOrFail($id);$this->assertTrue($seller->is_active);$this->assertNull($seller->email_verified_at);$this->assertSame('House 1, Banani, Dhaka',$seller->store_address);
+  $seller=Seller::findOrFail($id);$this->assertTrue($seller->is_active);$this->assertNull($seller->email_verified_at);$this->assertNull($seller->password);$this->assertSame('House 1, Banani, Dhaka',$seller->store_address);
+  $invite=PasswordResetCode::where('account_type','seller')->where('account_id',$seller->id)->firstOrFail();$this->assertTrue($invite->expires_at->between(now()->addDays(6),now()->addDays(8)));
   $token=$seller->createToken('old',['seller:basic']);$seller->update(['email_verified_at'=>now()]);
   $this->postJson('/api/admin/sellers/'.$id,array_replace($input,['email'=>'changed-store@example.test','commission_rate'=>0]))->assertOk()->assertJsonPath('commission_rate','0.00')->assertJsonPath('email_verified_at',null);
   $this->assertDatabaseMissing('personal_access_tokens',['id'=>$token->accessToken->id]);
   $this->postJson('/api/admin/sellers',array_replace($input,['email'=>'second-store@example.test','phone'=>'01812345678']))->assertUnprocessable()->assertJsonValidationErrors('sku_prefix');
   $moderator=Admin::create(['name'=>'Moderator','email'=>'seller-mod@example.test','password'=>'password123','role'=>'moderator']);
   $this->withToken($moderator->createToken('test',['admin:basic'])->plainTextToken)->postJson('/api/admin/sellers',$input)->assertForbidden();
-  Mail::assertNothingSent();
+  Mail::assertSent(\App\Mail\SellerApprovedMail::class, 1);
  }
 
  public function test_admin_store_update_keeps_owner_and_kyc_when_blank_values_are_sent():void {

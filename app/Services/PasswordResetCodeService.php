@@ -12,7 +12,11 @@ class PasswordResetCodeService
 {
     private const EXPIRES_MINUTES = 10;
 
-    public function issue(Model $account, string $accountType, int $minutes = 1440): string
+    /**
+     * Issue a one-time code for an account invitation. Normal password-reset
+     * codes continue to use the short expiry in send().
+     */
+    public function issue(Model $account, string $accountType, int $minutes = 60 * 24 * 7): string
     {
         PasswordResetCode::query()->where('account_type', $accountType)->where('account_id', $account->getKey())->whereNull('used_at')->delete();
         $code = (string) random_int(100000, 999999);

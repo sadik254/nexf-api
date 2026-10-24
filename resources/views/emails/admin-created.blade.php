@@ -19,5 +19,5 @@
     @if ($url)
         @include('emails.partials.button', ['url' => $url, 'label' => 'Create password'])
     @endif
-    <p style="margin:0;font-size:13px;line-height:20px;color:#6b7280;">This link works for one day. After that, use Forgot password on the admin sign-in page with this email. If you weren't expecting this, you can ignore this email.</p>
+    <p style="margin:0;font-size:13px;line-height:20px;color:#6b7280;">This link works for seven days. After that, use Forgot password on the admin sign-in page with this email. If you weren't expecting this, you can ignore this email.</p>
 @endsection

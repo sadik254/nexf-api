@@ -137,6 +137,7 @@ class SellerController extends Controller
         if ($request->hasFile('store_logo')) $logo = $this->uploadToCdn($request->file('store_logo'));
         if ($request->hasFile('kyc_document')) $data['kyc_document_url'] = $this->uploadToCdn($request->file('kyc_document'));
         unset($data['store_logo'], $data['clear_store_logo'], $data['kyc_document']); $data['store_logo'] = $logo;
+        $created = $seller === null;
         $saved = \Illuminate\Support\Facades\DB::transaction(function () use ($seller, $data, $actor) {
             if ($seller) {
                 $locked = Seller::query()->lockForUpdate()->findOrFail($seller->id);
@@ -149,11 +150,17 @@ class SellerController extends Controller
             }
             return Seller::create($data + [
                 'store_slug' => $this->uniqueStoreSlug($data['store_name']),
-                'password' => Str::random(64),
+                // The seller chooses this through the invitation link; no
+                // generated password is ever emailed or retained for use.
+                'password' => null,
                 'status' => 'approved', 'is_active' => true,
                 'approved_by' => $actor->id, 'approved_at' => now(),
             ]);
         });
+        if ($created) {
+            $code = $this->passwordResets->issue($saved, 'seller');
+            Mail::to($saved->email)->send(new SellerApprovedMail($saved, $code));
+        }
         return response()->json($saved, $seller ? 200 : 201);
     }
 
