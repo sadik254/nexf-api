@@ -223,6 +223,7 @@ Route::prefix('admin')->group(function () {
     Route::middleware(['sanctum.type:admin','perm:admins.manage'])->get('/user-roster', [AdminController::class, 'userRoster']);
     Route::middleware(['sanctum.type:admin','perm:admins.manage'])->get('/admins/{admin}', [AdminController::class, 'show']);
     Route::middleware(['sanctum.type:admin','perm:admins.manage'])->post('/admins/{admin}', [AdminController::class, 'updateAdmin']);
+    Route::middleware(['sanctum.type:admin','perm:admins.manage'])->post('/admins/{admin}/reset-password', [AdminController::class, 'sendPasswordReset']);
     Route::middleware(['sanctum.type:admin','perm:admins.manage'])->post('/admins/{admin}/delete', [AdminController::class, 'destroy']);
 
     Route::middleware(['sanctum.type:admin','perm:payment_methods.manage'])->post('/payment-methods', [PaymentMethodController::class, 'store']);

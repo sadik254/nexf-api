@@ -46,6 +46,7 @@ class ResellerController extends Controller
         if (!$reseller || !$this->passwordResets->consume($reseller, 'reseller', $data['code'])) return response()->json(['message' => 'Invalid or expired code.'], 422);
         $reseller->forceFill(['password' => $data['password']])->save();
         $reseller->tokens()->delete();
+        app(\App\Services\AccountSecurityMailService::class)->passwordChanged($reseller, 'reset', $request->ip());
         return response()->json(['message' => 'Password set successfully.']);
     }
 
@@ -100,6 +101,7 @@ class ResellerController extends Controller
         if ($data['current_password'] === $data['new_password']) return response()->json(['message' => 'New password must be different from current password.'], 422);
         $reseller->forceFill(['password' => $data['new_password']])->save();
         $reseller->tokens()->delete();
+        app(\App\Services\AccountSecurityMailService::class)->passwordChanged($reseller, 'settings', $request->ip());
         return response()->json(['message' => 'Password updated successfully.']);
     }
 

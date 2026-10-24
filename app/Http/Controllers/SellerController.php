@@ -384,6 +384,7 @@ class SellerController extends Controller
             'password' => Hash::make($newPassword),
         ])->save();
         $seller->tokens()->delete();
+        app(\App\Services\AccountSecurityMailService::class)->passwordChanged($seller, 'settings', $request->ip());
 
         return response()->json(['message' => 'Password updated successfully.']);
     }
@@ -414,6 +415,7 @@ class SellerController extends Controller
         $seller = Seller::where('email', $data['email'])->first(); $staff = !$seller ? SellerStaff::where('email', $data['email'])->first() : null; $account = $staff ?: $seller; $type = $staff ? 'seller_staff' : 'seller';
         if (!$account || !$this->passwordResets->consume($account, $type, $data['code'])) return response()->json(['message' => 'Invalid or expired code.'], 422);
         $account->forceFill(['password' => $data['password']])->save(); $account->tokens()->delete();
+        app(\App\Services\AccountSecurityMailService::class)->passwordChanged($account, 'reset', $request->ip());
         return response()->json(['message' => 'Password reset successfully.']);
     }
 

@@ -282,6 +282,7 @@ class CustomerController extends Controller
         ])->save();
 
         $customer->tokens()->delete();
+        app(\App\Services\AccountSecurityMailService::class)->passwordChanged($customer, 'reset', $request->ip());
 
         return response()->json(['message' => 'Password reset successfully.']);
     }
@@ -420,6 +421,7 @@ class CustomerController extends Controller
             'password' => Hash::make($newPassword),
         ])->save();
         $customer->tokens()->delete();
+        app(\App\Services\AccountSecurityMailService::class)->passwordChanged($customer, 'settings', $request->ip());
 
         return response()->json(['message' => 'Password updated successfully.']);
     }

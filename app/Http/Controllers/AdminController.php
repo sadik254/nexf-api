@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Uploadcare\Api;
 use Uploadcare\Configuration;
 use App\Mail\AdminCreatedMail;
+use App\Mail\AdminPasswordResetMail;
 use App\Services\PasswordResetCodeService;
 
 class AdminController extends Controller
@@ -301,6 +302,17 @@ class AdminController extends Controller
         return response()->json(['message' => 'Admin soft-deleted successfully.']);
     }
 
+    public function sendPasswordReset(Admin $admin, Request $request): JsonResponse
+    {
+        /** @var Admin|null $actor */
+        $actor = $request->user();
+        if (! $actor || $actor->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
+        if (! $admin->is_active) return response()->json(['message' => 'Inactive admins cannot receive a reset link.'], 422);
+        $code = $this->passwordResets->issue($admin, 'admin');
+        Mail::to($admin->email)->send(new AdminPasswordResetMail($admin, $code));
+        return response()->json(['message' => 'Password reset link sent.']);
+    }
+
     private function activeSuperAdminCount(): int
     {
         return Admin::query()->where('role', 'super_admin')->where('is_active', true)->count();
@@ -395,6 +407,7 @@ class AdminController extends Controller
             'password' => Hash::make($newPassword),
         ])->save();
         $admin->tokens()->delete();
+        app(\App\Services\AccountSecurityMailService::class)->passwordChanged($admin, 'settings', $request->ip());
 
         return response()->json(['message' => 'Password updated successfully.']);
     }
@@ -413,6 +426,7 @@ class AdminController extends Controller
         $admin = Admin::where('email', $data['email'])->first();
         if (!$admin || !$this->passwordResets->consume($admin, 'admin', $data['code'])) return response()->json(['message' => 'Invalid or expired code.'], 422);
         $admin->forceFill(['password' => $data['password']])->save(); $admin->tokens()->delete();
+        app(\App\Services\AccountSecurityMailService::class)->passwordChanged($admin, 'reset', $request->ip());
         return response()->json(['message' => 'Password reset successfully.']);
     }
 
