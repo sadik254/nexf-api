@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Admin;
 use App\Models\Seller;
 use App\Models\SellerPromotion;
+use App\Models\Coupon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -63,7 +64,16 @@ class SellerPromotionController extends Controller
         $rules = ['title' => [$creating ? 'required' : 'sometimes', 'string', 'max:120'], 'layout' => [$creating ? 'required' : 'sometimes', Rule::in(array_keys(SellerPromotion::LAYOUTS))], 'blocks' => ['sometimes', 'array'], 'blocks.*.title' => ['nullable', 'string', 'max:160'], 'blocks.*.body' => ['nullable', 'string', 'max:2000'], 'blocks.*.cta' => ['nullable', 'string', 'max:80'], 'blocks.*.href' => ['nullable', 'string', 'max:500', 'regex:/^\/(?![\/\\\\])/'], 'blocks.*.image' => ['nullable', 'string', 'max:1000', 'regex:/^(\/|https:\/\/)/'], 'blocks.*.mobile_image' => ['nullable', 'string', 'max:1000', 'regex:/^(\/|https:\/\/)/'], 'blocks.*.theme' => ['nullable', Rule::in(SellerPromotion::THEMES)], 'blocks.*.coupon_id' => ['nullable', 'integer', 'exists:coupons,id'], 'blocks.*.expires_at' => ['nullable', 'date'], 'blocks.*.hidden' => ['sometimes', 'boolean']];
         if ($admin) { $rules['seller_id'] = [$creating ? 'required' : 'sometimes', 'integer', 'exists:sellers,id']; $rules['pinned'] = ['sometimes', 'boolean']; $rules['status'] = ['sometimes', Rule::in(SellerPromotion::STATUSES)]; $rules['review_note'] = ['nullable', 'string', 'max:500', 'required_if:status,rejected']; }
         $data = $request->validate($rules); $layout = $data['layout'] ?? $promotion?->layout; $count = SellerPromotion::LAYOUTS[$layout];
-        if (array_key_exists('blocks', $data)) { if ($count !== null && count($data['blocks']) !== $count) throw ValidationException::withMessages(['blocks' => ["This layout takes {$count} ".($count === 1 ? 'block' : 'blocks').'.']]); $data['blocks'] = array_map(fn ($block) => $this->block($block), array_values($data['blocks'])); }
+        if (array_key_exists('blocks', $data)) {
+            if ($count !== null && count($data['blocks']) !== $count) throw ValidationException::withMessages(['blocks' => ["This layout takes {$count} ".($count === 1 ? 'block' : 'blocks').'.']]);
+            $sellerId = $admin ? ($data['seller_id'] ?? $promotion?->seller_id) : $this->seller($request)->id;
+            foreach ($data['blocks'] as $index => $block) {
+                if (!empty($block['coupon_id']) && !Coupon::query()->whereKey($block['coupon_id'])->where('seller_id', $sellerId)->exists()) {
+                    throw ValidationException::withMessages(["blocks.{$index}.coupon_id" => ['Choose a coupon from this store.']]);
+                }
+            }
+            $data['blocks'] = array_map(fn ($block) => $this->block($block), array_values($data['blocks']));
+        }
         elseif ($count !== null && ($creating || count($promotion->blocks ?? []) !== $count)) { $kept = array_slice($promotion?->blocks ?? [], 0, $count); $data['blocks'] = array_map(fn ($i) => $this->block($kept[$i] ?? []), range(0, $count - 1)); }
         return $data;
     }

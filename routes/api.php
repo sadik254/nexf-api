@@ -46,8 +46,10 @@ use App\Http\Controllers\ManualPaymentController;
 use App\Http\Controllers\DeliveryGroupController;
 use App\Http\Controllers\HouseStoreController;
 use App\Http\Controllers\PartnerPayoutController;
+use App\Http\Controllers\AnalyticsController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
+Route::post('/analytics/events', [AnalyticsController::class, 'track'])->middleware('throttle:120,1,analytics-events');
 
 Route::prefix('resellers')->group(function () {
     Route::post('/login', [ResellerController::class, 'login']);
@@ -368,6 +370,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {
     Route::post('/sellers/{seller}/delivery-rates', [SellerShippingRateController::class, 'adminUpdate'])->middleware('perm:delivery_charges.edit');
     Route::get('/console-summary', [\App\Http\Controllers\ConsoleController::class, 'summary'])->middleware('perm:dashboard.view');
     Route::get('/dashboard', [DashboardController::class, 'admin'])->middleware('perm:dashboard.view');
+    Route::get('/analytics', [AnalyticsController::class, 'admin'])->middleware('perm:analytics.view');
     Route::get('/homepage/banners', [HomepageBannerController::class, 'indexAdmin'])->middleware('perm:storefront.edit');
     Route::get('/homepage/notices', [HomepageNoticeController::class, 'index'])->middleware('perm:storefront.edit');
     Route::post('/homepage/notices', [HomepageNoticeController::class, 'store'])->middleware('perm:storefront.edit');
@@ -496,6 +499,7 @@ Route::prefix('seller')->middleware(['sanctum.type:seller','store.scope'])->grou
     Route::post('/delivery-rates', [SellerShippingRateController::class, 'sellerUpdate'])->middleware('perm:delivery_charges.edit');
     Route::get('/console-summary', [\App\Http\Controllers\ConsoleController::class, 'summary'])->middleware('perm:dashboard.view');
     Route::get('/dashboard', [DashboardController::class, 'seller'])->middleware('perm:dashboard.view');
+    Route::get('/analytics', [AnalyticsController::class, 'seller'])->middleware('perm:analytics.view');
     Route::get('/product-reviews', [ProductEngagementController::class, 'reviewsForSeller'])->middleware('perm:reviews.reply');
     Route::post('/product-reviews/{review}/moderate', [ProductEngagementController::class, 'moderateReviewForSeller'])->middleware('perm:reviews.reply');
     Route::post('/product-reviews/{review}/respond', [ProductEngagementController::class, 'respondToReview'])->middleware('perm:reviews.reply');
