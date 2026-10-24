@@ -14,7 +14,18 @@ class EmailChangeService
     private function codes(Model $a) { return CustomerVerificationCode::query()->where('account_type',$this->type($a))->where('account_id',$a->getKey()); }
     private function valid(Model $a,string $email,string $type,string $code): ?CustomerVerificationCode { return $this->codes($a)->where('email',$email)->where('type',$type)->where('code',$code)->whereNull('used_at')->where('expires_at','>',now())->latest()->first(); }
     private function confirmed(Model $a): bool { return !$a->email || $this->codes($a)->where('type','email_change_current')->where('email',$a->email)->where('used_at','>',now()->subMinutes(self::WINDOW))->exists(); }
-    private function taken(Model $a,string $email): bool { return $a->newQuery()->where('email',$email)->whereKeyNot($a->getKey())->exists(); }
+    private function taken(Model $a,string $email): bool
+    {
+        if ($a instanceof \App\Models\SellerStaff) {
+            return \App\Models\SellerStaff::query()->where('email', $email)->whereKeyNot($a->getKey())->exists()
+                || \App\Models\Seller::query()->where('email', $email)->exists();
+        }
+        if ($a instanceof \App\Models\Seller) {
+            return \App\Models\Seller::query()->where('email', $email)->whereKeyNot($a->getKey())->exists()
+                || \App\Models\SellerStaff::query()->where('email', $email)->exists();
+        }
+        return $a->newQuery()->where('email',$email)->whereKeyNot($a->getKey())->exists();
+    }
     private function send(Model $a,string $email,string $type): void { $this->codes($a)->where('type',$type)->whereNull('used_at')->delete(); $code=(string)random_int(100000,999999); CustomerVerificationCode::create(['customer_id'=>$a instanceof \App\Models\Customer ? $a->id : null,'account_type'=>$this->type($a),'account_id'=>$a->id,'email'=>$email,'code'=>$code,'type'=>$type,'expires_at'=>now()->addMinutes(10)]); Mail::to($email)->send(new CustomerVerificationCodeMail($code,$type,$email)); }
     public function sendCurrent(Model $a): array { if (!$a->email) return ['message'=>'No current email to confirm.','step'=>'enter']; $this->codes($a)->whereIn('type',['email_change_current','email_change_new'])->delete(); $a->forceFill(['pending_email'=>null])->save(); $this->send($a,$a->email,'email_change_current'); return ['message'=>'Code sent.','step'=>'current']; }
     public function verifyCurrent(Model $a,string $code): array { if (!$a->email || !($row=$this->valid($a,$a->email,'email_change_current',$code))) throw ValidationException::withMessages(['code'=>['Invalid or expired code.']]); $row->update(['used_at'=>now()]); return ['message'=>'Email confirmed.','step'=>'enter']; }

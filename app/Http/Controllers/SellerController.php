@@ -126,6 +126,7 @@ class SellerController extends Controller
             'clear_store_logo' => ['sometimes', 'boolean'],
             'is_featured' => ['sometimes', 'boolean'],
         ]);
+        $this->assertNoStaffEmail($data['email']);
         $data['store_address'] = implode(', ', [$data['address_line'], $data['address_area'], $data['address_district']]);
         $data['city'] = $data['address_district'];
         // Optional owner/KYC fields must not erase existing details when the console sends blanks.
@@ -161,6 +162,7 @@ class SellerController extends Controller
         $seller = $request->user(); abort_unless($seller instanceof Seller && !$request->attributes->has('seller_staff'), 403);
         $request->merge(['email'=>strtolower(trim((string)$request->input('email')))]);
         $data=$request->validate(['store_name'=>['required','string','max:255'],'email'=>['required','email','max:255',\Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],'phone'=>['required','regex:/^01[3-9][0-9]{8}$/',\Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],'address_line'=>['required','string','max:255'],'address_area'=>['required','string','max:255'],'address_district'=>['required','string','max:255'],'support_email'=>['sometimes','nullable','email','max:255'],'support_phone'=>['sometimes','nullable','string','max:32'],'store_logo'=>['nullable','file','image','max:5120'],'clear_store_logo'=>['sometimes','boolean']]);
+        $this->assertNoStaffEmail($data['email']);
         $logo=$request->boolean('clear_store_logo')?null:$seller->store_logo;if($request->hasFile('store_logo')){$api=new Api(Configuration::create(config('services.uploadcare.public_key'),config('services.uploadcare.secret_key')));$logo='https://ucarecdn.com/'.$api->uploader()->fromPath($request->file('store_logo')->getPathname())->getUuid().'/-/preview/';}unset($data['store_logo'],$data['clear_store_logo']);$data['store_logo']=$logo;$data['store_address']=implode(', ',[$data['address_line'],$data['address_area'],$data['address_district']]);$data['city']=$data['address_district'];$seller->update($data);return response()->json(['message'=>'Store updated.','seller'=>$seller->fresh()]);
     }
 
@@ -209,7 +211,7 @@ class SellerController extends Controller
             'country' => ['nullable', 'string', 'max:255'],
         ]);
 
-        if (Seller::where('email', $data['email'])->exists()) {
+        if (Seller::where('email', $data['email'])->exists() || SellerStaff::where('email', $data['email'])->exists()) {
             return response()->json(['message' => 'Email already taken.'], 422);
         }
         if (!empty($data['phone']) && Seller::where('phone', $data['phone'])->exists()) {
@@ -354,6 +356,7 @@ class SellerController extends Controller
             'image' => ['sometimes', 'file', 'image', 'max:5120'],
             'clear_image' => ['sometimes', 'boolean'],
         ]);
+        if (isset($data['email'])) $this->assertNoStaffEmail($data['email']);
         if (array_key_exists('email', $data) && strcasecmp((string) $data['email'], (string) $seller->email) !== 0) throw ValidationException::withMessages(['email' => ['Verify the new email to change it.']]);
         unset($data['email']);
         if (!empty($data['clear_image'])) $data['seller_image'] = null;
@@ -485,6 +488,13 @@ class SellerController extends Controller
         }
 
         return $slug;
+    }
+
+    private function assertNoStaffEmail(string $email): void
+    {
+        if (SellerStaff::query()->where('email', strtolower($email))->exists()) {
+            throw ValidationException::withMessages(['email' => ['Email already taken.']]);
+        }
     }
 
     protected function emailChangeKey(): string { return 'seller'; }

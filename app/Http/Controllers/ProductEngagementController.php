@@ -136,7 +136,9 @@ class ProductEngagementController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
         $data = $request->validate(['answer' => ['required', 'string', 'min:2', 'max:2000']]);
-        $question->update(['answer' => $data['answer'], 'answered_by_type' => $actor instanceof Seller ? 'seller' : 'admin', 'answered_by_id' => $actor->id, 'answered_at' => now()]);
+        $staff = $request->attributes->get('seller_staff');
+        $answeredBy = $staff ?? $actor;
+        $question->update(['answer' => $data['answer'], 'answered_by_type' => $staff ? 'seller_staff' : ($actor instanceof Seller ? 'seller' : 'admin'), 'answered_by_id' => $answeredBy->id, 'answered_by_name' => $staff?->name, 'answered_at' => now()]);
         return response()->json(['message' => 'Answer saved successfully.', 'question' => $this->questionPayload($question->fresh('customer:id,name'))]);
     }
 
@@ -167,6 +169,7 @@ class ProductEngagementController extends Controller
     {
         $answeredBy = null;
         if ($question->answered_by_type === 'seller') $answeredBy = Seller::find($question->answered_by_id)?->store_name;
+        if ($question->answered_by_type === 'seller_staff') $answeredBy = $question->answered_by_name;
         if ($question->answered_by_type === 'admin') $answeredBy = Admin::find($question->answered_by_id)?->name ?? 'NEXF Lifestyle';
         return ['id' => $question->id, 'question' => $question->question, 'customer_name' => $question->customer?->name, 'answer' => $question->answer, 'answered_by' => $answeredBy, 'created_at' => $question->created_at?->toDateString(), 'answered_at' => $question->answered_at?->toDateString(), 'status' => $question->status, 'rejection_note' => $question->rejection_note, 'moderated_at' => $question->moderated_at?->toDateString()];
     }
@@ -233,9 +236,16 @@ class ProductEngagementController extends Controller
         $answer = trim($data['answer'] ?? '');
         $actor = $request->user();
         $patch = ['question' => $data['question'], 'answer' => $answer ?: null];
-        if (($question->answer ?? '') !== $answer) $patch += [
-            'answered_by_type' => $answer ? ($actor instanceof Seller ? 'seller' : 'admin') : null,
-            'answered_by_id' => $answer ? $actor->id : null, 'answered_at' => $answer ? now() : null];
+        if (($question->answer ?? '') !== $answer) {
+            $staff = $request->attributes->get('seller_staff');
+            $answeredBy = $staff ?? $actor;
+            $patch += [
+                'answered_by_type' => $answer ? ($staff ? 'seller_staff' : ($actor instanceof Seller ? 'seller' : 'admin')) : null,
+                'answered_by_id' => $answer ? $answeredBy->id : null,
+                'answered_by_name' => $answer ? $staff?->name : null,
+                'answered_at' => $answer ? now() : null,
+            ];
+        }
         $question->update($patch);
         return response()->json(['message' => 'Question updated.', 'question' => $this->questionPayload($question->fresh('customer:id,name'))]);
     }
@@ -272,7 +282,7 @@ class ProductEngagementController extends Controller
         $seller=$request->user();abort_unless($seller instanceof Seller && (int)$review->product()->value('seller_id')===(int)$seller->id,403);
         abort_unless($review->status==='approved',422,'Only published reviews can receive a public response.');
         $data=$request->validate(['seller_response'=>['nullable','string','max:2000']]);
-        $text=trim($data['seller_response']??'');$review->update(['seller_response'=>$text?:null,'seller_responded_at'=>$text?now():null]);
+        $text=trim($data['seller_response']??'');$staff=$request->attributes->get('seller_staff');$review->update(['seller_response'=>$text?:null,'seller_responded_at'=>$text?now():null,'seller_responded_by_name'=>$text?($staff?->name):null]);
         return response()->json(['message'=>'Response saved.','review'=>$review->fresh()]);
     }
     public function likeReview(Request $request, Review $review): JsonResponse

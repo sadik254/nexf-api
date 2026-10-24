@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ProductQuestion extends Model
 {
-    protected $fillable = ['product_id', 'customer_id', 'question', 'answer', 'answered_by_type', 'answered_by_id', 'answered_at', 'status', 'rejection_note', 'moderated_at'];
+    protected $fillable = ['product_id', 'customer_id', 'question', 'answer', 'answered_by_type', 'answered_by_id', 'answered_by_name', 'answered_at', 'status', 'rejection_note', 'moderated_at'];
 
     protected function casts(): array
     {

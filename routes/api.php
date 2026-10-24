@@ -446,6 +446,14 @@ Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {
 });
 
 Route::prefix('seller')->middleware(['sanctum.type:seller','store.scope'])->group(function () {
+    // Staff own-account routes must precede `/staff/{staff}` below.
+    Route::post('/staff/me', [\App\Http\Controllers\SellerStaffController::class, 'me']);
+    Route::post('/staff/me/password', [\App\Http\Controllers\SellerStaffController::class, 'password']);
+    Route::middleware('throttle:auth-resend')->post('/staff/me/email/send-current', [\App\Http\Controllers\SellerStaffController::class, 'emailCurrent']);
+    Route::middleware('throttle:auth-verify')->post('/staff/me/email/verify-current', [\App\Http\Controllers\SellerStaffController::class, 'emailVerifyCurrent']);
+    Route::middleware('throttle:auth-resend')->post('/staff/me/email', [\App\Http\Controllers\SellerStaffController::class, 'emailRequest']);
+    Route::middleware('throttle:auth-verify')->post('/staff/me/email/verify-new', [\App\Http\Controllers\SellerStaffController::class, 'emailVerifyNew']);
+    Route::middleware('throttle:auth-resend')->post('/staff/me/email/resend', [\App\Http\Controllers\SellerStaffController::class, 'emailResend']);
     Route::get('/payouts', [PartnerPayoutController::class, 'sellerPayouts'])->middleware('perm:dashboard.view');
     Route::post('/payouts/withdraw', [PartnerPayoutController::class, 'withdrawSeller'])->middleware('perm:dashboard.view');
     Route::post('/payout-accounts', fn (\Illuminate\Http\Request $request) => app(PartnerPayoutController::class)->saveAccount($request, 'seller'))->middleware('perm:dashboard.view');
