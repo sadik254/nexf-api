@@ -44,4 +44,23 @@ class TurnstileTest extends TestCase
         $order(['turnstile_token' => 'bad'])->assertUnprocessable()->assertJsonValidationErrors('turnstile_token');
         $order(['turnstile_token' => 'good'])->assertCreated();
     }
+
+    public function test_customer_registration_needs_a_valid_turnstile_token_once_configured(): void
+    {
+        config(['services.turnstile.secret_key' => 'secret']);
+        Http::fake(['challenges.cloudflare.com/*' => Http::sequence()
+            ->push(['success' => false])
+            ->push(['success' => true])]);
+
+        $registration = fn (array $extra = []) => $this->postJson('/api/customers', $extra + [
+            'name' => 'New customer',
+            'email' => 'new@example.test',
+            'phone' => '01712345678',
+            'password' => 'password123',
+        ]);
+
+        $registration()->assertUnprocessable()->assertJsonValidationErrors('turnstile_token');
+        $registration(['turnstile_token' => 'bad'])->assertUnprocessable()->assertJsonValidationErrors('turnstile_token');
+        $registration(['turnstile_token' => 'good'])->assertStatus(202);
+    }
 }

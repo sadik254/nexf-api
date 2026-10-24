@@ -8,8 +8,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Cloudflare Turnstile - the "are you human?" check on checkout. Does nothing
- * until TURNSTILE_SECRET_KEY is set; then every order needs a valid token.
+ * Cloudflare Turnstile - the "are you human?" check on checkout and customer
+ * registration. Does nothing until TURNSTILE_SECRET_KEY is set.
  */
 class TurnstileService
 {

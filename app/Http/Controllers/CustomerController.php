@@ -13,6 +13,7 @@ use Illuminate\Validation\ValidationException;
 use App\Models\CustomerVerificationCode;
 use App\Models\PendingCustomerRegistration;
 use App\Services\PasswordResetCodeService;
+use App\Services\TurnstileService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -25,7 +26,10 @@ class CustomerController extends Controller
     use \App\Http\Controllers\Concerns\HandlesEmailChange;
     private const CODE_EXPIRES_MINUTES = 10;
 
-    public function __construct(private PasswordResetCodeService $passwordResets) {}
+    public function __construct(
+        private PasswordResetCodeService $passwordResets,
+        private TurnstileService $turnstile,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -101,6 +105,10 @@ class CustomerController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        // Keep registration usable in environments where Turnstile has not yet
+        // been configured. Once it is configured, a fresh valid token is required.
+        $this->turnstile->assertHuman($request);
+
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255'],
