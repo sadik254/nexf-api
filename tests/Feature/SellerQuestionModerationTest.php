@@ -37,7 +37,7 @@ class SellerQuestionModerationTest extends TestCase
             ->assertJsonPath('question.status', 'approved')
             ->assertJsonPath('question.rejection_note', null);
         $this->withToken($token)->postJson("/api/seller/product-questions/{$foreign->id}/moderate", ['status' => 'rejected'])
-            ->assertForbidden();
+            ->assertNotFound();
     }
 
     private function seller(string $email, string $storeName, string $slug, string $suffix): Seller

@@ -18,6 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'sanctum.type' => \App\Http\Middleware\SanctumTypeMiddleware::class,
             'perm' => \App\Http\Middleware\PermissionMiddleware::class,
+            'store.scope' => \App\Http\Middleware\EnsureSellerOwnsRouteModels::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

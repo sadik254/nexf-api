@@ -242,14 +242,11 @@ class AdminController extends Controller
             }
         }
 
-        if ($request->filled('role')) {
-            $requestedRole = $data['role'];
-            if ($admin->role === 'super_admin' && $requestedRole !== 'super_admin') {
-                return response()->json(['message' => 'Cannot change role of super admin.'], 422);
-            }
-            if ($admin->role !== 'super_admin' && $requestedRole === 'super_admin') {
-                return response()->json(['message' => 'Super admin cannot be reassigned.'], 422);
-            }
+        if (array_key_exists('role', $data) && $admin->role === 'super_admin' && $data['role'] !== 'super_admin' && $this->activeSuperAdminCount() < 2) {
+            return response()->json(['message' => 'At least one active super admin is required.'], 422);
+        }
+        if (array_key_exists('is_active', $data) && ! $data['is_active'] && $admin->role === 'super_admin' && $this->activeSuperAdminCount() < 2) {
+            return response()->json(['message' => 'At least one active super admin is required.'], 422);
         }
 
         $imageUrl = $admin->image;
@@ -292,13 +289,21 @@ class AdminController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        if ($admin->role === 'super_admin') {
-            return response()->json(['message' => 'Cannot delete super admin.'], 422);
+        if ($admin->id === $actor->id) {
+            return response()->json(['message' => 'You cannot delete yourself.'], 422);
+        }
+        if ($admin->role === 'super_admin' && $admin->is_active && $this->activeSuperAdminCount() < 2) {
+            return response()->json(['message' => 'At least one active super admin is required.'], 422);
         }
 
         $admin->delete();
 
         return response()->json(['message' => 'Admin soft-deleted successfully.']);
+    }
+
+    private function activeSuperAdminCount(): int
+    {
+        return Admin::query()->where('role', 'super_admin')->where('is_active', true)->count();
     }
 
     public function updateProfile(Request $request): JsonResponse

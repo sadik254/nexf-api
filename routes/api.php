@@ -56,7 +56,7 @@ Route::prefix('resellers')->group(function () {
     Route::middleware('sanctum.type:reseller')->group(function () {
         Route::get('/me', [ResellerController::class, 'me']);
         Route::post('/me', [ResellerController::class, 'updateMe']);
-        Route::get('/me/commission-period', [ResellerController::class, 'commissionPeriod']);
+        Route::get('/me/commission-period', [ResellerController::class, 'commissionPeriod'])->middleware('perm:commission.view');
         Route::post('/me/password', [ResellerController::class, 'updatePassword']);
         Route::post('/me/email/send-current', [ResellerController::class, 'sendCurrentEmailCode']);
         Route::post('/me/email/verify-current', [ResellerController::class, 'verifyCurrentEmail']);
@@ -64,11 +64,11 @@ Route::prefix('resellers')->group(function () {
         Route::post('/me/email/verify-new', [ResellerController::class, 'verifyNewEmail']);
         Route::post('/me/email/resend', [ResellerController::class, 'resendEmailChangeCode']);
         Route::post('/logout', [ResellerController::class, 'logout']);
-        Route::get('/support-tickets', [SupportTicketController::class, 'index']);
-        Route::post('/support-tickets', [SupportTicketController::class, 'store']);
-        Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show']);
-        Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);
-        Route::post('/support-attachments', [SupportTicketController::class, 'upload']);
+        Route::get('/support-tickets', [SupportTicketController::class, 'index'])->middleware('perm:support.reply');
+        Route::post('/support-tickets', [SupportTicketController::class, 'store'])->middleware('perm:support.reply');
+        Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show'])->middleware('perm:support.reply');
+        Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply'])->middleware('perm:support.reply');
+        Route::post('/support-attachments', [SupportTicketController::class, 'upload'])->middleware('perm:support.reply');
     });
 });
 
@@ -154,12 +154,12 @@ Route::prefix('customers')->group(function () {
     });
 });
 
-Route::prefix('admin')->middleware(['sanctum.type:admin','perm:customers.view'])->group(function () {
-    Route::get('/customers', [CustomerController::class, 'index']);
-    Route::post('/customers', [CustomerController::class, 'adminSaveContact']);
-    Route::post('/customers/{customer}/delete', [CustomerController::class, 'adminDeleteContact']);
-    Route::post('/customers/{customer}', [CustomerController::class, 'adminSaveContact']);
-    Route::get('/customers/{customer}', [CustomerController::class, 'show']);
+Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {
+    Route::get('/customers', [CustomerController::class, 'index'])->middleware('perm:customers.view');
+    Route::post('/customers', [CustomerController::class, 'adminSaveContact'])->middleware('perm:customers.manage');
+    Route::post('/customers/{customer}/delete', [CustomerController::class, 'adminDeleteContact'])->middleware('perm:customers.manage');
+    Route::post('/customers/{customer}', [CustomerController::class, 'adminSaveContact'])->middleware('perm:customers.manage');
+    Route::get('/customers/{customer}', [CustomerController::class, 'show'])->middleware('perm:customers.view');
 });
 
 Route::post('/test', function() {
@@ -231,15 +231,15 @@ Route::prefix('admin')->group(function () {
     Route::middleware(['sanctum.type:admin','perm:discounts.manage'])->post('/coupons/{coupon}', [CouponController::class, 'update']);
     Route::middleware(['sanctum.type:admin','perm:discounts.manage'])->post('/coupons/{coupon}/delete', [CouponController::class, 'destroy']);
 
-    Route::middleware(['sanctum.type:admin','perm:orders.manage'])->get('/orders', [OrderController::class, 'indexAdmin']);
+    Route::middleware(['sanctum.type:admin','perm:orders.view'])->get('/orders', [OrderController::class, 'indexAdmin']);
     Route::middleware(['sanctum.type:admin','perm:orders.manage'])->post('/orders/preview', [OrderController::class, 'previewAdmin']);
     Route::middleware(['sanctum.type:admin','perm:orders.manage'])->post('/orders', [OrderController::class, 'storeAdmin']);
-    Route::middleware(['sanctum.type:admin','perm:orders.manage'])->post('/orders/{order}/payment/delete', [ManualPaymentController::class, 'clear']);
-    Route::middleware(['sanctum.type:admin','perm:orders.manage'])->get('/returns', [OrderReturnController::class, 'index']);
-    Route::middleware(['sanctum.type:admin','perm:orders.manage'])->get('/return-requests', [ReturnRequestController::class, 'index']);
-    Route::middleware(['sanctum.type:admin','perm:orders.manage'])->get('/return-requests/{returnRequest}', [ReturnRequestController::class, 'show']);
-    Route::middleware(['sanctum.type:admin','perm:orders.manage'])->post('/return-requests/{returnRequest}', [ReturnRequestController::class, 'update']);
-    Route::middleware(['sanctum.type:admin','perm:orders.manage'])->post('/return-requests/{returnRequest}/restock', [ReturnRequestController::class, 'restock']);
+    Route::middleware(['sanctum.type:admin','perm:payments.delete'])->post('/orders/{order}/payment/delete', [ManualPaymentController::class, 'clear']);
+    Route::middleware(['sanctum.type:admin','perm:returns.manage'])->get('/returns', [OrderReturnController::class, 'index']);
+    Route::middleware(['sanctum.type:admin','perm:returns.manage'])->get('/return-requests', [ReturnRequestController::class, 'index']);
+    Route::middleware(['sanctum.type:admin','perm:returns.manage'])->get('/return-requests/{returnRequest}', [ReturnRequestController::class, 'show']);
+    Route::middleware(['sanctum.type:admin','perm:returns.manage'])->post('/return-requests/{returnRequest}', [ReturnRequestController::class, 'update']);
+    Route::middleware(['sanctum.type:admin','perm:returns.manage'])->post('/return-requests/{returnRequest}/restock', [ReturnRequestController::class, 'restock']);
     Route::middleware(['sanctum.type:admin','perm:orders.manage'])->post('/orders/bulk-ship', [OrderController::class, 'bulkShipAdmin']);
     Route::middleware(['sanctum.type:admin','perm:orders.manage'])->get('/orders/{order}', [OrderController::class, 'showAdmin']);
     Route::middleware(['sanctum.type:admin','perm:orders.manage'])->post('/orders/{order}', [OrderController::class, 'updateStatus']);
@@ -277,24 +277,24 @@ Route::prefix('sellers')->group(function () {
     Route::middleware('sanctum.type:seller')->post('/staff/me/email/resend', [\App\Http\Controllers\SellerStaffController::class, 'emailResend']);
 });
 
-Route::prefix('admin')->middleware(['sanctum.type:admin','perm:stores.view'])->group(function () {
+Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {
     Route::middleware('perm:storefront.edit')->get('/house-store', [HouseStoreController::class, 'show']);
     Route::middleware('perm:storefront.edit')->post('/house-store', [HouseStoreController::class, 'save']);
-    Route::middleware('sanctum.type:admin')->post('/sellers/{seller}/approve', [SellerController::class, 'approve']);
-    Route::middleware('sanctum.type:admin')->post('/sellers/{seller}/reject', [SellerController::class, 'reject']);
-    Route::middleware('sanctum.type:admin')->post('/sellers/{seller}/delete', [SellerController::class, 'archive']);
-    Route::middleware('sanctum.type:admin')->post('/sellers', [SellerController::class, 'adminSave']);
-    Route::middleware('sanctum.type:admin')->post('/sellers/{seller}', [SellerController::class, 'adminSave']);
-    Route::middleware('sanctum.type:admin')->post('/sellers/{seller}/status', [SellerController::class, 'updateStatus']);
-    Route::middleware('sanctum.type:admin')->get('/seller-staff', [\App\Http\Controllers\SellerStaffController::class, 'adminIndex']);
-    Route::middleware('sanctum.type:admin')->post('/sellers/{seller}/staff', [\App\Http\Controllers\SellerStaffController::class, 'adminStore']);
-    Route::middleware('sanctum.type:admin')->post('/seller-staff/{staff}', [\App\Http\Controllers\SellerStaffController::class, 'adminUpdate']);
-    Route::middleware('sanctum.type:admin')->post('/seller-staff/{staff}/delete', [\App\Http\Controllers\SellerStaffController::class, 'adminDestroy']);
-    Route::middleware('sanctum.type:admin')->get('/sellers', [SellerController::class, 'index']);
-    Route::middleware('sanctum.type:admin')->get('/sellers/{seller}', [SellerController::class, 'show']);
+    Route::post('/sellers/{seller}/approve', [SellerController::class, 'approve'])->middleware('perm:stores.manage');
+    Route::post('/sellers/{seller}/reject', [SellerController::class, 'reject'])->middleware('perm:stores.manage');
+    Route::post('/sellers/{seller}/delete', [SellerController::class, 'archive'])->middleware('perm:stores.delete');
+    Route::post('/sellers', [SellerController::class, 'adminSave'])->middleware('perm:stores.manage');
+    Route::post('/sellers/{seller}', [SellerController::class, 'adminSave'])->middleware('perm:stores.manage');
+    Route::post('/sellers/{seller}/status', [SellerController::class, 'updateStatus'])->middleware('perm:stores.manage');
+    Route::get('/seller-staff', [\App\Http\Controllers\SellerStaffController::class, 'adminIndex'])->middleware('perm:staff.manage');
+    Route::post('/sellers/{seller}/staff', [\App\Http\Controllers\SellerStaffController::class, 'adminStore'])->middleware('perm:staff.manage');
+    Route::post('/seller-staff/{staff}', [\App\Http\Controllers\SellerStaffController::class, 'adminUpdate'])->middleware('perm:staff.manage');
+    Route::post('/seller-staff/{staff}/delete', [\App\Http\Controllers\SellerStaffController::class, 'adminDestroy'])->middleware('perm:staff.manage');
+    Route::get('/sellers', [SellerController::class, 'index'])->middleware('perm:stores.view');
+    Route::get('/sellers/{seller}', [SellerController::class, 'show'])->middleware('perm:stores.view');
 });
 
-Route::prefix('admin')->middleware(['sanctum.type:admin','perm:dashboard.view'])->group(function () {
+Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {
     Route::get('/seller-promotions', [SellerPromotionController::class, 'adminIndex'])->middleware('perm:offers.review');
     Route::post('/seller-promotions', [SellerPromotionController::class, 'adminStore'])->middleware('perm:offers.review');
     Route::post('/seller-promotions/{promotion}', [SellerPromotionController::class, 'adminUpdate'])->middleware('perm:offers.review');
@@ -321,7 +321,7 @@ Route::prefix('admin')->middleware(['sanctum.type:admin','perm:dashboard.view'])
     Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply'])->middleware('perm:support.reply');
     Route::post('/support-tickets/{ticket}/resolve', [SupportTicketController::class, 'resolve'])->middleware('perm:support.reply');
     Route::post('/support-attachments', [SupportTicketController::class, 'upload'])->middleware('perm:support.reply');
-    Route::post('/chat-attachments', [SupportTicketController::class, 'upload']);
+    Route::post('/chat-attachments', [SupportTicketController::class, 'upload'])->middleware('perm:chats.reply');
     Route::get('/chats', [StoreChatController::class, 'index'])->middleware('perm:chats.reply');
     Route::get('/chats/{chat}', [StoreChatController::class, 'show'])->middleware('perm:chats.reply');
     Route::post('/chats/{chat}/messages', [StoreChatController::class, 'reply'])->middleware('perm:chats.reply');
@@ -355,8 +355,8 @@ Route::prefix('admin')->middleware(['sanctum.type:admin','perm:dashboard.view'])
     Route::post('/delivery-groups/{deliveryGroup}/delete', [DeliveryGroupController::class, 'destroy'])->middleware('perm:delivery_charges.edit');
     Route::get('/platform-delivery-rates', [SellerShippingRateController::class, 'platformIndex'])->middleware('perm:delivery_charges.edit');
     Route::post('/platform-delivery-rates', [SellerShippingRateController::class, 'platformUpdate'])->middleware('perm:delivery_charges.edit');
-    Route::get('/sellers/{seller}/delivery-rates', [SellerShippingRateController::class, 'adminIndex']);
-    Route::post('/sellers/{seller}/delivery-rates', [SellerShippingRateController::class, 'adminUpdate']);
+    Route::get('/sellers/{seller}/delivery-rates', [SellerShippingRateController::class, 'adminIndex'])->middleware('perm:delivery_charges.edit');
+    Route::post('/sellers/{seller}/delivery-rates', [SellerShippingRateController::class, 'adminUpdate'])->middleware('perm:delivery_charges.edit');
     Route::get('/console-summary', [\App\Http\Controllers\ConsoleController::class, 'summary'])->middleware('perm:dashboard.view');
     Route::get('/dashboard', [DashboardController::class, 'admin'])->middleware('perm:dashboard.view');
     Route::get('/homepage/banners', [HomepageBannerController::class, 'indexAdmin'])->middleware('perm:storefront.edit');
@@ -414,11 +414,11 @@ Route::prefix('admin')->middleware(['sanctum.type:admin','perm:dashboard.view'])
 
     Route::get('/products', [ProductController::class, 'indexAdminStore'])->middleware('perm:products.edit');
     Route::post('/products', [ProductController::class, 'store'])->middleware('perm:products.edit');
-    Route::get('/products/{product}', [ProductController::class, 'show'])->middleware('perm:products.edit');
+    Route::get('/products/{product}', [ProductController::class, 'show'])->middleware('perm:products.view');
     Route::post('/products/{product}', [ProductController::class, 'update'])->middleware('perm:products.edit');
     Route::post('/products/{product}/delete', [ProductController::class, 'destroy'])->middleware('perm:products.edit');
 
-    Route::get('/products/{product}/variations', [ProductVariationController::class, 'index'])->middleware('perm:products.edit');
+    Route::get('/products/{product}/variations', [ProductVariationController::class, 'index'])->middleware('perm:products.view');
     Route::post('/products/{product}/variations/matrix', [ProductVariationController::class, 'syncMatrix'])->middleware('perm:products.edit');
     Route::post('/products/{product}/variations', [ProductVariationController::class, 'store'])->middleware('perm:products.edit');
     Route::post('/products/{product}/variations/{variation}', [ProductVariationController::class, 'update'])->middleware('perm:products.edit');
@@ -431,7 +431,7 @@ Route::prefix('admin')->middleware(['sanctum.type:admin','perm:dashboard.view'])
     Route::post('/products/{product}/variations/{variation}/consume', [ProductConsumptionController::class, 'consumeVariation'])->middleware('perm:products.edit');
 });
 
-Route::prefix('seller')->middleware(['sanctum.type:seller','perm:dashboard.view'])->group(function () {
+Route::prefix('seller')->middleware(['sanctum.type:seller','store.scope'])->group(function () {
     Route::post('/store', [SellerController::class, 'updateStore'])->middleware('perm:store.profile');
     Route::get('/staff', [\App\Http\Controllers\SellerStaffController::class, 'index'])->middleware('perm:staff.manage');
     Route::post('/staff', [\App\Http\Controllers\SellerStaffController::class, 'store'])->middleware('perm:staff.manage');
@@ -441,23 +441,23 @@ Route::prefix('seller')->middleware(['sanctum.type:seller','perm:dashboard.view'
     Route::post('/coupons', [CouponController::class, 'storeSeller'])->middleware('perm:discounts.manage');
     Route::get('/coupons/{coupon}', [CouponController::class, 'showSeller'])->middleware('perm:discounts.manage');
     Route::post('/coupons/{coupon}', [CouponController::class, 'updateSeller'])->middleware('perm:discounts.manage');
-    Route::post('/coupons/{coupon}/delete', [CouponController::class, 'destroySeller'])->middleware('perm:discounts.manage');
+    Route::post('/coupons/{coupon}/delete', [CouponController::class, 'destroySeller'])->middleware('perm:products.delete');
     Route::get('/promotions', [SellerPromotionController::class, 'sellerIndex'])->middleware('perm:store_layout.edit');
     Route::post('/promotions', [SellerPromotionController::class, 'sellerStore'])->middleware('perm:store_layout.edit');
     Route::post('/promotions/{promotion}', [SellerPromotionController::class, 'sellerUpdate'])->middleware('perm:store_layout.edit');
     Route::post('/promotions/{promotion}/submit', [SellerPromotionController::class, 'sellerSubmit'])->middleware('perm:store_layout.edit');
     Route::get('/store-layout', [StoreLayoutController::class, 'sellerShow'])->middleware('perm:store_layout.edit');
     Route::post('/store-layout', [StoreLayoutController::class, 'sellerSave'])->middleware('perm:store_layout.edit');
-    Route::post('/promotions/{promotion}/delete', [SellerPromotionController::class, 'sellerDestroy'])->middleware('perm:discounts.manage');
-    Route::post('/product-tags', [CatalogTermController::class, 'storeProductTag']);
-    Route::post('/product-brands', [CatalogTermController::class, 'storeProductBrand']);
-    Route::post('/product-category-options', [ProductCategoryController::class, 'storeProductCategory']);
+    Route::post('/promotions/{promotion}/delete', [SellerPromotionController::class, 'sellerDestroy'])->middleware('perm:products.delete');
+    Route::post('/product-tags', [CatalogTermController::class, 'storeProductTag'])->middleware('perm:taxonomy.manage');
+    Route::post('/product-brands', [CatalogTermController::class, 'storeProductBrand'])->middleware('perm:taxonomy.manage');
+    Route::post('/product-category-options', [ProductCategoryController::class, 'storeProductCategory'])->middleware('perm:taxonomy.manage');
     Route::get('/support-tickets', [SupportTicketController::class, 'index'])->middleware('perm:support.reply');
     Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show'])->middleware('perm:support.reply');
     Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply'])->middleware('perm:support.reply');
     Route::post('/support-tickets/{ticket}/resolve', [SupportTicketController::class, 'resolve'])->middleware('perm:support.reply');
     Route::post('/support-attachments', [SupportTicketController::class, 'upload'])->middleware('perm:support.reply');
-    Route::post('/chat-attachments', [SupportTicketController::class, 'upload']);
+    Route::post('/chat-attachments', [SupportTicketController::class, 'upload'])->middleware('perm:chats.reply');
     Route::get('/chats', [StoreChatController::class, 'index'])->middleware('perm:chats.reply');
     Route::get('/chats/{chat}', [StoreChatController::class, 'show'])->middleware('perm:chats.reply');
     Route::post('/chats/{chat}/messages', [StoreChatController::class, 'reply'])->middleware('perm:chats.reply');
@@ -469,18 +469,18 @@ Route::prefix('seller')->middleware(['sanctum.type:seller','perm:dashboard.view'
     Route::post('/media', [MediaAssetController::class, 'store'])->middleware('perm:media.manage');
     Route::post('/media/link', [MediaAssetController::class, 'link'])->middleware('perm:media.manage');
     Route::post('/media/{asset}', [MediaAssetController::class, 'update'])->middleware('perm:media.manage');
-    Route::post('/media/{asset}/delete', [MediaAssetController::class, 'destroy'])->middleware('perm:media.manage');
+    Route::post('/media/{asset}/delete', [MediaAssetController::class, 'destroy'])->middleware('perm:products.delete');
     Route::get('/collection-products', [ProductCollectionController::class, 'candidates'])->middleware('perm:collections.manage');
     Route::get('/collections', [ProductCollectionController::class, 'index'])->middleware('perm:collections.manage');
     Route::post('/collections', [ProductCollectionController::class, 'store'])->middleware('perm:collections.manage');
     Route::get('/collections/{collection}', [ProductCollectionController::class, 'show'])->middleware('perm:collections.manage');
     Route::post('/collections/{collection}', [ProductCollectionController::class, 'update'])->middleware('perm:collections.manage');
-    Route::post('/collections/{collection}/delete', [ProductCollectionController::class, 'destroy'])->middleware('perm:collections.manage');
+    Route::post('/collections/{collection}/delete', [ProductCollectionController::class, 'destroy'])->middleware('perm:products.delete');
     Route::get('/delivery-group', [DeliveryGroupController::class, 'sellerGroup'])->middleware('perm:delivery_charges.edit');
     Route::get('/delivery-rates', [SellerShippingRateController::class, 'sellerIndex'])->middleware('perm:delivery_charges.edit');
     Route::post('/delivery-rates', [SellerShippingRateController::class, 'sellerUpdate'])->middleware('perm:delivery_charges.edit');
-    Route::get('/console-summary', [\App\Http\Controllers\ConsoleController::class, 'summary']);
-    Route::get('/dashboard', [DashboardController::class, 'seller']);
+    Route::get('/console-summary', [\App\Http\Controllers\ConsoleController::class, 'summary'])->middleware('perm:dashboard.view');
+    Route::get('/dashboard', [DashboardController::class, 'seller'])->middleware('perm:dashboard.view');
     Route::get('/product-reviews', [ProductEngagementController::class, 'reviewsForSeller'])->middleware('perm:reviews.reply');
     Route::post('/product-reviews/{review}/moderate', [ProductEngagementController::class, 'moderateReviewForSeller'])->middleware('perm:reviews.reply');
     Route::post('/product-reviews/{review}/respond', [ProductEngagementController::class, 'respondToReview'])->middleware('perm:reviews.reply');
@@ -488,7 +488,7 @@ Route::prefix('seller')->middleware(['sanctum.type:seller','perm:dashboard.view'
     Route::post('/product-questions/{question}/moderate', [ProductEngagementController::class, 'moderateQuestion'])->middleware('perm:questions.answer');
     Route::post('/product-questions/{question}/answer', [ProductEngagementController::class, 'answer'])->middleware('perm:questions.answer');
     Route::post('/product-questions/{question}', [ProductEngagementController::class, 'editQuestion'])->middleware('perm:questions.answer');
-    Route::post('/product-questions/{question}/delete', [ProductEngagementController::class, 'deleteQuestion'])->middleware('perm:questions.answer');
+    Route::post('/product-questions/{question}/delete', [ProductEngagementController::class, 'deleteQuestion'])->middleware('perm:products.delete');
     Route::get('/inventory', [InventoryController::class, 'indexSeller'])->middleware('perm:inventory.adjust');
     Route::get('/inventory/history', [InventoryController::class, 'historySeller'])->middleware('perm:inventory.adjust');
     Route::post('/inventory/counts', [ProductLotController::class, 'setAvailable'])->middleware('perm:inventory.adjust');
@@ -496,35 +496,35 @@ Route::prefix('seller')->middleware(['sanctum.type:seller','perm:dashboard.view'
     Route::get('/size-charts', [SizeChartController::class, 'indexSeller'])->middleware('perm:size_charts.manage');
     Route::post('/size-charts', [SizeChartController::class, 'storeSeller'])->middleware('perm:size_charts.manage');
     Route::post('/size-charts/{sizeChart}', [SizeChartController::class, 'updateSeller'])->middleware('perm:size_charts.manage');
-    Route::post('/size-charts/{sizeChart}/delete', [SizeChartController::class, 'destroySeller'])->middleware('perm:size_charts.manage');
+    Route::post('/size-charts/{sizeChart}/delete', [SizeChartController::class, 'destroySeller'])->middleware('perm:products.delete');
 
     Route::get('/orders', [OrderController::class, 'indexSeller'])->middleware('perm:orders.view');
     Route::get('/orders/{order}', [OrderController::class, 'showSeller'])->middleware('perm:orders.view');
-    Route::post('/orders/{order}/items/{item}/fulfillment', [OrderController::class, 'fulfillSellerItem'])->middleware('perm:orders.view');
-    Route::get('/products', [ProductController::class, 'indexSellerSelf'])->middleware('perm:products.edit');
+    Route::post('/orders/{order}/items/{item}/fulfillment', [OrderController::class, 'fulfillSellerItem'])->middleware('perm:orders.manage');
+    Route::get('/products', [ProductController::class, 'indexSellerSelf'])->middleware('perm:products.view');
     Route::post('/products', [ProductController::class, 'store'])->middleware('perm:products.edit');
     Route::get('/products/{product}', [ProductController::class, 'show'])->middleware('perm:products.edit');
     Route::post('/products/{product}', [ProductController::class, 'update'])->middleware('perm:products.edit');
-    Route::post('/products/{product}/delete', [ProductController::class, 'destroy'])->middleware('perm:products.edit');
+    Route::post('/products/{product}/delete', [ProductController::class, 'destroy'])->middleware('perm:products.delete');
 
     Route::get('/products/{product}/variations', [ProductVariationController::class, 'index'])->middleware('perm:products.edit');
     Route::post('/products/{product}/variations/matrix', [ProductVariationController::class, 'syncMatrix'])->middleware('perm:products.edit');
     Route::post('/products/{product}/variations', [ProductVariationController::class, 'store'])->middleware('perm:products.edit');
     Route::post('/products/{product}/variations/{variation}', [ProductVariationController::class, 'update'])->middleware('perm:products.edit');
-    Route::post('/products/{product}/variations/{variation}/delete', [ProductVariationController::class, 'destroy'])->middleware('perm:products.edit');
+    Route::post('/products/{product}/variations/{variation}/delete', [ProductVariationController::class, 'destroy'])->middleware('perm:products.delete');
 
-    Route::post('/products/{product}/lots', [ProductLotController::class, 'storeForProduct'])->middleware('perm:products.edit');
-    Route::post('/products/{product}/variations/{variation}/lots', [ProductLotController::class, 'storeForVariation'])->middleware('perm:products.edit');
+    Route::post('/products/{product}/lots', [ProductLotController::class, 'storeForProduct'])->middleware('perm:inventory.adjust');
+    Route::post('/products/{product}/variations/{variation}/lots', [ProductLotController::class, 'storeForVariation'])->middleware('perm:inventory.adjust');
 
-    Route::post('/products/{product}/consume', [ProductConsumptionController::class, 'consumeProduct'])->middleware('perm:products.edit');
-    Route::post('/products/{product}/variations/{variation}/consume', [ProductConsumptionController::class, 'consumeVariation'])->middleware('perm:products.edit');
+    Route::post('/products/{product}/consume', [ProductConsumptionController::class, 'consumeProduct'])->middleware('perm:inventory.adjust');
+    Route::post('/products/{product}/variations/{variation}/consume', [ProductConsumptionController::class, 'consumeVariation'])->middleware('perm:inventory.adjust');
 });
 
-Route::prefix('admin')->middleware(['sanctum.type:admin','perm:dashboard.view'])->group(function () {
-    Route::get('/sellers/{seller}/products', [ProductController::class, 'indexSellerProductsForAdmin']);
-    Route::get('/sellers/{seller}/products/{product}', [ProductController::class, 'showSellerProductForAdmin']);
-    Route::post('/sellers/{seller}/products/{product}', [ProductController::class, 'updateSellerProductForSuperAdmin']);
-    Route::post('/sellers/{seller}/products/{product}/delete', [ProductController::class, 'destroySellerProductForSuperAdmin']);
+Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {
+    Route::get('/sellers/{seller}/products', [ProductController::class, 'indexSellerProductsForAdmin'])->middleware('perm:products.view');
+    Route::get('/sellers/{seller}/products/{product}', [ProductController::class, 'showSellerProductForAdmin'])->middleware('perm:products.view');
+    Route::post('/sellers/{seller}/products/{product}', [ProductController::class, 'updateSellerProductForSuperAdmin'])->middleware('perm:products.edit');
+    Route::post('/sellers/{seller}/products/{product}/delete', [ProductController::class, 'destroySellerProductForSuperAdmin'])->middleware('perm:products.delete');
 });
 
 Route::prefix('store')->group(function () {
