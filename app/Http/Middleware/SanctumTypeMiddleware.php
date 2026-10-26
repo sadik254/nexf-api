@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Laravel\Sanctum\PersonalAccessToken;
 use App\Models\SellerStaff;
+use App\Models\Customer;
 use Symfony\Component\HttpFoundation\Response;
 
 class SanctumTypeMiddleware
@@ -39,6 +40,12 @@ class SanctumTypeMiddleware
         }
 
         if (isset($tokenable->is_active) && ! $tokenable->is_active) return response()->json(['message' => 'Account is inactive.'], 403);
+        if ($tokenable instanceof Customer && $tokenable->crm_status === 'suspended') {
+            return response()->json([
+                'message' => 'Your account is suspended. Please contact support.',
+                'code' => 'account_suspended',
+            ], 403);
+        }
         if ($tokenable instanceof SellerStaff && $tokenable->status === 'suspended') return response()->json(['message' => 'Account is suspended.'], 403);
         if ($staffSeller) { $seller = $tokenable->seller; if (!$seller) return response()->json(['message' => 'Forbidden.'], 403); $request->attributes->set('seller_staff', $tokenable); $request->setUserResolver(fn () => $seller); Auth::setUser($seller); } else { $request->setUserResolver(fn () => $tokenable); Auth::setUser($tokenable); }
 

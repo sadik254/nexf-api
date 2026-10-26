@@ -65,7 +65,7 @@ class CustomerController extends Controller
             'street' => ['nullable', 'string', 'max:500'],
             'area' => ['nullable', 'string', 'max:150'],
             'district' => ['nullable', 'string', 'max:100'],
-            'crm_status' => ['required', Rule::in(['new', 'active', 'vip'])],
+            'crm_status' => ['required', Rule::in(['new', 'active', 'vip', 'suspended'])],
             'is_risky' => ['sometimes', 'boolean'],
         ]);
         $created = $customer === null;
@@ -84,6 +84,7 @@ class CustomerController extends Controller
             // A contact record grants no verified account or known login password.
             if (!$record->exists) $record->password = Str::random(64);
             $record->save();
+            if ($record->crm_status === 'suspended') $record->tokens()->delete();
             return $record;
         });
         return response()->json($result, $created ? 201 : 200);
@@ -93,9 +94,11 @@ class CustomerController extends Controller
     {
         abort_unless($request->user() instanceof Admin, 403);
         abort_if($customer->roster_archived_at !== null, 404);
-        // Hide the roster entry while preserving the customer's actual orders and wallet.
-        $customer->forceFill(['roster_archived_at' => now()])->save();
-        return response()->json(['message' => 'Customer removed from the roster.']);
+        // Kept for backwards compatibility with older console clients. Customers
+        // are never removed from the roster: deletion now means suspension.
+        $customer->forceFill(['crm_status' => 'suspended', 'roster_archived_at' => null])->save();
+        $customer->tokens()->delete();
+        return response()->json(['message' => 'Customer suspended.']);
     }
 
     public function show(Customer $customer): JsonResponse
@@ -122,10 +125,15 @@ class CustomerController extends Controller
         if (($data['phone'] ?? null) !== null && $phone === null) {
             throw ValidationException::withMessages(['phone' => ['Enter a valid Bangladesh mobile number.']]);
         }
-        if (Customer::where('email', $email)->exists()) {
+        $existingEmail = Customer::query()->where('email', $email)->first();
+        $existingPhone = $phone === null ? null : Customer::query()->where('phone', $phone)->first();
+        if ($existingEmail?->crm_status === 'suspended' || $existingPhone?->crm_status === 'suspended') {
+            return $this->suspendedResponse();
+        }
+        if ($existingEmail) {
             return response()->json(['message' => 'Email already taken.'], 422);
         }
-        if ($phone !== null && Customer::where('phone', $phone)->exists()) {
+        if ($existingPhone) {
             return response()->json(['message' => 'Phone already taken.'], 422);
         }
         $referralCode = isset($data['referral_code']) ? strtoupper(trim($data['referral_code'])) : null;
@@ -162,6 +170,8 @@ class CustomerController extends Controller
         ]);
 
         $customer = Customer::where('email', $data['email'])->first();
+
+        if ($customer?->crm_status === 'suspended') return $this->suspendedResponse();
 
         if (!$customer || !Hash::check($data['password'], $customer->password)) {
             return response()->json(['message' => 'Invalid credentials.'], 401);
@@ -259,6 +269,7 @@ class CustomerController extends Controller
         ]);
 
         $customer = Customer::where('email', $data['email'])->first();
+        if ($customer?->crm_status === 'suspended') return $this->suspendedResponse();
         if ($customer) {
             $this->passwordResets->send($customer, 'customer');
         }
@@ -277,6 +288,7 @@ class CustomerController extends Controller
         ]);
 
         $customer = Customer::where('email', $data['email'])->first();
+        if ($customer?->crm_status === 'suspended') return $this->suspendedResponse();
         if (!$customer) {
             return response()->json(['message' => 'Invalid code.'], 422);
         }
@@ -293,6 +305,14 @@ class CustomerController extends Controller
         app(\App\Services\AccountSecurityMailService::class)->passwordChanged($customer, 'reset', $request->ip());
 
         return response()->json(['message' => 'Password reset successfully.']);
+    }
+
+    private function suspendedResponse(): JsonResponse
+    {
+        return response()->json([
+            'message' => 'Your account is suspended. Please contact support.',
+            'code' => 'account_suspended',
+        ], 403);
     }
 
     private function sendVerificationCode(string $email, string $type, ?int $customerId = null): void
