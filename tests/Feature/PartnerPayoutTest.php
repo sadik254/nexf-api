@@ -24,6 +24,9 @@ class PartnerPayoutTest extends TestCase
         ])->assertCreated()->assertJsonPath('isSelected', true)->json('id');
         $this->withToken($sellerToken)->getJson('/api/seller/payouts')->assertOk()
             ->assertJsonPath('rules.min_amount', 500)->assertJsonPath('accounts.0.id', $account);
+        $this->withToken($sellerToken)->postJson('/api/seller/payout-accounts', [
+            'provider' => 'upay', 'account' => '01800000000',
+        ])->assertCreated()->assertJsonPath('provider', 'upay');
 
         $withdrawal = PartnerWithdrawal::create(['seller_id' => $seller->id, 'partner_payout_account_id' => $account, 'amount' => 500, 'reference' => 'PAY-00001']);
         $admin = Admin::create(['name' => 'Admin', 'email' => 'payout-admin@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);
