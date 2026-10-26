@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\OrderItem;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class SteadfastService
@@ -45,13 +44,12 @@ class SteadfastService
             ->acceptJson()->withHeaders(['Api-Key' => $apiKey, 'Secret-Key' => $secretKey])
             ->post(rtrim(config('services.steadfast.base_url'), '/') . '/create_order/bulk-order', ['data' => json_encode(array_values($payload))]);
 
-        // STEADFAST_LOGGING: keep the courier response visible in Laravel's
-        // application log. Comment out this block later if it is no longer needed.
-        Log::info('Steadfast bulk consignment response', [
-            'http_status' => $response->status(),
-            'invoices' => array_keys($payload),
-            'response' => $response->json() ?? $response->body(),
-        ]);
+        // Steadfast response logging intentionally disabled after integration.
+        // Log::info('Steadfast bulk consignment response', [
+        //     'http_status' => $response->status(),
+        //     'invoices' => array_keys($payload),
+        //     'response' => $response->json() ?? $response->body(),
+        // ]);
 
         if (!$response->successful()) throw ValidationException::withMessages(['courier' => ['SteadFast bulk request failed.']]);
         $results = $response->json('data', $response->json());
@@ -91,14 +89,13 @@ class SteadfastService
             ->withHeaders(['Api-Key' => $apiKey, 'Secret-Key' => $secretKey])
             ->post(rtrim(config('services.steadfast.base_url'), '/') . '/create_order', $payload);
 
-        // STEADFAST_LOGGING: keep the courier response visible in Laravel's
-        // application log. Comment out this block later if it is no longer needed.
-        Log::info('Steadfast consignment response', [
-            'order_item_id' => $item->id,
-            'invoice' => $invoice,
-            'http_status' => $response->status(),
-            'response' => $response->json() ?? $response->body(),
-        ]);
+        // Steadfast response logging intentionally disabled after integration.
+        // Log::info('Steadfast consignment response', [
+        //     'order_item_id' => $item->id,
+        //     'invoice' => $invoice,
+        //     'http_status' => $response->status(),
+        //     'response' => $response->json() ?? $response->body(),
+        // ]);
 
         if (!$response->successful()) {
             throw ValidationException::withMessages(['courier' => ['SteadFast rejected the consignment request.']]);
