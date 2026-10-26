@@ -30,6 +30,7 @@ class OrderItem extends Model
         'awaiting_stock',
         'fulfillment_status',
         'tracking_number',
+        'courier_tracking_url',
         'courier_provider',
         'courier_consignment_id',
         'courier_invoice',

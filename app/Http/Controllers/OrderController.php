@@ -303,6 +303,7 @@ class OrderController extends Controller
                         $item->update([
                             'fulfillment_status' => 'shipped',
                             'tracking_number' => $result['tracking_code'],
+                            'courier_tracking_url' => $result['tracking_link'] ?? $result['tracking_url'] ?? null,
                             'courier_provider' => 'steadfast',
                             'courier_consignment_id' => (string) ($result['consignment_id'] ?? ''),
                             'courier_invoice' => $result['invoice'] ?? $invoice,
@@ -558,7 +559,7 @@ class OrderController extends Controller
                     $failed[] = $item->id;
                     continue;
                 }
-                $item->update(['fulfillment_status' => 'shipped', 'tracking_number' => $result['tracking_code'], 'courier_provider' => 'steadfast', 'courier_consignment_id' => (string) ($result['consignment_id'] ?? ''), 'courier_invoice' => $result['invoice'] ?? $invoice, 'courier_status' => $result['status'] ?? 'in_review', 'shipped_at' => now(), 'courier_created_at' => $result['created_at'] ?? now(), 'courier_updated_at' => $result['updated_at'] ?? now(), 'courier_error' => null]);
+                $item->update(['fulfillment_status' => 'shipped', 'tracking_number' => $result['tracking_code'], 'courier_tracking_url' => $result['tracking_link'] ?? $result['tracking_url'] ?? null, 'courier_provider' => 'steadfast', 'courier_consignment_id' => (string) ($result['consignment_id'] ?? ''), 'courier_invoice' => $result['invoice'] ?? $invoice, 'courier_status' => $result['status'] ?? 'in_review', 'shipped_at' => now(), 'courier_created_at' => $result['created_at'] ?? now(), 'courier_updated_at' => $result['updated_at'] ?? now(), 'courier_error' => null]);
                 $this->refreshOrderStatus($item->order);
                 $successful[] = $item->id;
             }
@@ -665,6 +666,7 @@ class OrderController extends Controller
             $lockedItem->update([
                 'fulfillment_status' => $nextStatus,
                 'tracking_number' => $courier['tracking_code'] ?? ($data['tracking_number'] ?? $lockedItem->tracking_number),
+                'courier_tracking_url' => $courier['tracking_url'] ?? $lockedItem->courier_tracking_url,
                 'courier_provider' => $courier['provider'] ?? ($data['courier_provider'] ?? $lockedItem->courier_provider),
                 'courier_consignment_id' => $courier['consignment_id'] ?? $lockedItem->courier_consignment_id,
                 'courier_invoice' => $courier['invoice'] ?? $lockedItem->courier_invoice,

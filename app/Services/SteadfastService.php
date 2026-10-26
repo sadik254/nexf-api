@@ -115,6 +115,7 @@ class SteadfastService
             'consignment_id' => (string) ($consignment['consignment_id'] ?? ''),
             'invoice' => (string) ($consignment['invoice'] ?? $invoice),
             'tracking_code' => (string) $consignment['tracking_code'],
+            'tracking_url' => isset($consignment['tracking_link']) ? (string) $consignment['tracking_link'] : null,
             'status' => (string) ($consignment['status'] ?? 'in_review'),
             'created_at' => $consignment['created_at'] ?? null,
             'updated_at' => $consignment['updated_at'] ?? null,

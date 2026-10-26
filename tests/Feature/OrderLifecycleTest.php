@@ -453,9 +453,9 @@ class OrderLifecycleTest extends TestCase
         Http::fake(function ($request) {
             if (str_contains($request->url(), 'bulk-order')) {
                 $items = json_decode($request['data'], true);
-                return Http::response(['data' => collect($items)->map(fn ($item) => ['invoice' => $item['invoice'], 'consignment_id' => 1, 'tracking_code' => 'PACK-TRACK', 'status' => 'in_review'])->all()], 200);
+                return Http::response(['data' => collect($items)->map(fn ($item) => ['invoice' => $item['invoice'], 'consignment_id' => 1, 'tracking_code' => 'PACK-TRACK', 'tracking_link' => 'https://steadfast.test/tl/pack-link', 'status' => 'in_review'])->all()], 200);
             }
-            return Http::response(['status' => 200, 'consignment' => ['consignment_id' => 1, 'invoice' => 'PACK-1', 'tracking_code' => 'PACK-TRACK', 'status' => 'in_review']], 200);
+            return Http::response(['status' => 200, 'consignment' => ['consignment_id' => 1, 'invoice' => 'PACK-1', 'tracking_code' => 'PACK-TRACK', 'tracking_link' => 'https://steadfast.test/tl/pack-link', 'status' => 'in_review']], 200);
         });
         [$customer, $product] = $this->checkoutFixtures(1);
         $order = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
@@ -476,6 +476,7 @@ class OrderLifecycleTest extends TestCase
             ->assertJsonPath('order.status', 'shipped')
             ->assertJsonPath('order.items.0.fulfillment_status', 'shipped')
             ->assertJsonPath('order.items.0.courier_provider', 'steadfast')
+            ->assertJsonPath('order.items.0.courier_tracking_url', 'https://steadfast.test/tl/pack-link')
             ->assertJsonPath('order.packed_at', fn ($value) => is_string($value) && $value !== '');
     }
 
