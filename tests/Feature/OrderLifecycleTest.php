@@ -272,16 +272,15 @@ class OrderLifecycleTest extends TestCase
         $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'shipped'])
             ->assertUnprocessable();
         $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'packed'])
-            ->assertOk()->assertJsonPath('order.items.0.fulfillment_status', 'packed');
-        $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'shipped'])
-            ->assertOk()->assertJsonPath('order.items.0.courier_provider', 'steadfast')
+            ->assertOk()->assertJsonPath('order.items.0.fulfillment_status', 'shipped')
+            ->assertJsonPath('order.items.0.courier_provider', 'steadfast')
             ->assertJsonPath('order.items.0.tracking_number', 'DIRECT-TRACK');
 
         $bulkOrder = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
         $bulkItemId = $bulkOrder['items'][0]['id'];
         $this->withToken($token)->postJson("/api/admin/orders/{$bulkOrder['id']}/items/{$bulkItemId}/fulfillment", ['status' => 'confirmed'])->assertOk();
         $this->withToken($token)->postJson('/api/admin/orders/bulk-ship', ['order_item_ids' => [$bulkItemId]])->assertUnprocessable();
-        $this->withToken($token)->postJson("/api/admin/orders/{$bulkOrder['id']}/items/{$bulkItemId}/fulfillment", ['status' => 'packed'])->assertOk();
+        OrderItem::findOrFail($bulkItemId)->update(['fulfillment_status' => 'packed']); // retries a previously failed packing submission
         $this->withToken($token)->postJson('/api/admin/orders/bulk-ship', ['order_item_ids' => [$bulkItemId]])
             ->assertOk()->assertJsonPath('successful_item_ids.0', $bulkItemId);
         $this->assertDatabaseHas('order_items', ['id' => $bulkItemId, 'fulfillment_status' => 'shipped', 'courier_provider' => 'steadfast']);
@@ -448,8 +447,16 @@ class OrderLifecycleTest extends TestCase
             ->assertNotFound();
     }
 
-    public function test_admin_can_persist_the_reference_packed_stage_after_confirmation(): void
+    public function test_admin_packing_submits_to_steadfast_and_marks_the_item_shipped_on_success(): void
     {
+        config(['services.steadfast.api_key' => 'test-key', 'services.steadfast.secret_key' => 'test-secret', 'services.steadfast.base_url' => 'https://steadfast.test/api/v1']);
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), 'bulk-order')) {
+                $items = json_decode($request['data'], true);
+                return Http::response(['data' => collect($items)->map(fn ($item) => ['invoice' => $item['invoice'], 'consignment_id' => 1, 'tracking_code' => 'PACK-TRACK', 'status' => 'in_review'])->all()], 200);
+            }
+            return Http::response(['status' => 200, 'consignment' => ['consignment_id' => 1, 'invoice' => 'PACK-1', 'tracking_code' => 'PACK-TRACK', 'status' => 'in_review']], 200);
+        });
         [$customer, $product] = $this->checkoutFixtures(1);
         $order = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
         $admin = Admin::create([
@@ -466,8 +473,9 @@ class OrderLifecycleTest extends TestCase
         $this->withToken($token)
             ->postJson("/api/admin/orders/{$order['id']}", ['packed' => true])
             ->assertOk()
-            ->assertJsonPath('order.status', 'packed')
-            ->assertJsonPath('order.items.0.fulfillment_status', 'packed')
+            ->assertJsonPath('order.status', 'shipped')
+            ->assertJsonPath('order.items.0.fulfillment_status', 'shipped')
+            ->assertJsonPath('order.items.0.courier_provider', 'steadfast')
             ->assertJsonPath('order.packed_at', fn ($value) => is_string($value) && $value !== '');
     }
 
@@ -480,10 +488,6 @@ class OrderLifecycleTest extends TestCase
 
         $this->withToken($token)
             ->postJson("/api/admin/orders/{$order['id']}/items/{$order['items'][0]['id']}/fulfillment", ['status' => 'confirmed'])
-            ->assertOk();
-
-        $this->withToken($token)
-            ->postJson("/api/admin/orders/{$order['id']}", ['packed' => true])
             ->assertOk();
 
         $this->withToken($token)

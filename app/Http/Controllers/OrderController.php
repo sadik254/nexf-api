@@ -285,7 +285,34 @@ class OrderController extends Controller
                     if ($locked->status !== 'confirmed' || $items->isEmpty() || $items->contains(fn (OrderItem $item) => $item->fulfillment_status !== 'confirmed')) {
                         throw ValidationException::withMessages(['packed' => ['An order must be fully confirmed before it can be packed.']]);
                     }
-                    $locked->items()->update(['fulfillment_status' => 'packed']);
+
+                    // Packing a house/admin order hands it to Steadfast.  Do not
+                    // mark a line shipped until the courier has accepted it.
+                    $byInvoice = collect($this->steadfast->createBulkConsignments($items))->keyBy('invoice');
+                    foreach ($items as $item) {
+                        $invoice = $locked->order_number . '-ITEM-' . $item->id;
+                        $result = $byInvoice->get($invoice);
+                        if (!$result || ($result['status'] ?? null) === 'error' || empty($result['tracking_code'])) {
+                            $item->update([
+                                'fulfillment_status' => 'packed',
+                                'courier_error' => $result['message'] ?? $item->fresh()->courier_error ?? 'SteadFast did not create this consignment.',
+                            ]);
+                            continue;
+                        }
+
+                        $item->update([
+                            'fulfillment_status' => 'shipped',
+                            'tracking_number' => $result['tracking_code'],
+                            'courier_provider' => 'steadfast',
+                            'courier_consignment_id' => (string) ($result['consignment_id'] ?? ''),
+                            'courier_invoice' => $result['invoice'] ?? $invoice,
+                            'courier_status' => $result['status'] ?? 'in_review',
+                            'shipped_at' => now(),
+                            'courier_created_at' => $result['created_at'] ?? now(),
+                            'courier_updated_at' => $result['updated_at'] ?? now(),
+                            'courier_error' => null,
+                        ]);
+                    }
                 } elseif ($locked->status === 'packed' && $items->every(fn (OrderItem $item) => $item->fulfillment_status === 'packed')) {
                     $locked->items()->update(['fulfillment_status' => 'confirmed']);
                 } else {
@@ -626,12 +653,17 @@ class OrderController extends Controller
             }
 
             $courier = null;
-            if ($sellerId === null && $data['status'] === 'shipped' && !$lockedItem->courier_consignment_id) {
+            // For house/admin fulfilment, selecting Packed submits the parcel
+            // to Steadfast. A successful response advances it straight to
+            // Shipped; a rejected response aborts this transition.
+            if ($sellerId === null && $data['status'] === 'packed' && !$lockedItem->courier_consignment_id) {
                 $courier = $this->steadfast->createConsignment($lockedItem);
             }
 
+            $nextStatus = $courier ? 'shipped' : $data['status'];
+
             $lockedItem->update([
-                'fulfillment_status' => $data['status'],
+                'fulfillment_status' => $nextStatus,
                 'tracking_number' => $courier['tracking_code'] ?? ($data['tracking_number'] ?? $lockedItem->tracking_number),
                 'courier_provider' => $courier['provider'] ?? ($data['courier_provider'] ?? $lockedItem->courier_provider),
                 'courier_consignment_id' => $courier['consignment_id'] ?? $lockedItem->courier_consignment_id,
@@ -639,7 +671,7 @@ class OrderController extends Controller
                 'courier_status' => $courier['status'] ?? $lockedItem->courier_status,
                 'courier_created_at' => $courier['created_at'] ?? $lockedItem->courier_created_at,
                 'courier_updated_at' => $courier['updated_at'] ?? $lockedItem->courier_updated_at,
-                'shipped_at' => $data['status'] === 'shipped' ? now() : $lockedItem->shipped_at,
+                'shipped_at' => $nextStatus === 'shipped' ? now() : $lockedItem->shipped_at,
                 'delivered_at' => $data['status'] === 'delivered' ? now() : $lockedItem->delivered_at,
             ]);
 
