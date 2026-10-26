@@ -15,10 +15,12 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use App\Services\MediaUploadService;
+use App\Services\TurnstileService;
+use App\Services\ContactMessageCooldownService;
 
 class SupportTicketController extends Controller
 {
-    public function __construct(private MediaUploadService $uploads) {}
+    public function __construct(private MediaUploadService $uploads, private TurnstileService $turnstile, private ContactMessageCooldownService $contactCooldown) {}
 
     public function contact(Request $request): JsonResponse
     {
@@ -27,10 +29,21 @@ class SupportTicketController extends Controller
             'email' => ['required', 'email', 'max:255'],
             'subject' => ['required', 'string', 'max:180'],
             'message' => ['required', 'string', 'max:5000'],
+            'turnstile_token' => ['nullable', 'string', 'max:2048'],
         ]);
-        $ticket = DB::transaction(function () use ($data) {
+        $this->turnstile->assertHuman($request, false);
+        $email = strtolower(trim($data['email']));
+        $retryAfter = $this->contactCooldown->retryAfter((string) $request->ip(), $email);
+        if ($retryAfter > 0) {
+            return response()->json([
+                'message' => 'Too many tries. Please try again later.',
+                'retry_after' => $retryAfter,
+            ], 429)->header('Retry-After', (string) $retryAfter);
+        }
+
+        $ticket = DB::transaction(function () use ($data, $email, $request) {
             $ticket = SupportTicket::create([
-                'guest_name' => trim($data['name']), 'guest_email' => strtolower(trim($data['email'])),
+                'guest_name' => trim($data['name']), 'guest_email' => $email, 'contact_ip' => $request->ip(),
                 'category' => 'Contact', 'subject' => trim($data['subject']),
             ]);
             $ticket->update(['reference' => 'SUP-' . str_pad((string) $ticket->id, 5, '0', STR_PAD_LEFT)]);

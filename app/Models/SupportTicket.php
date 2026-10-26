@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class SupportTicket extends Model
 {
-    protected $fillable = ['reference', 'customer_id', 'seller_id', 'reseller_id', 'order_id', 'category', 'subject', 'guest_name', 'guest_phone', 'guest_email', 'no_store', 'status', 'resolved_at'];
+    protected $fillable = ['reference', 'customer_id', 'seller_id', 'reseller_id', 'order_id', 'category', 'subject', 'guest_name', 'guest_phone', 'guest_email', 'contact_ip', 'no_store', 'status', 'resolved_at'];
     protected function casts(): array { return ['no_store' => 'boolean', 'resolved_at' => 'datetime']; }
     public function customer(): BelongsTo { return $this->belongsTo(Customer::class); }
     public function seller(): BelongsTo { return $this->belongsTo(Seller::class); }
