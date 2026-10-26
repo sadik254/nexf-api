@@ -330,6 +330,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {
     Route::get('/partner-withdrawals', [PartnerPayoutController::class, 'adminIndex'])->middleware('perm:withdrawals.settle');
     Route::post('/partner-withdrawals/{partnerWithdrawal}', [PartnerPayoutController::class, 'adminUpdate'])->middleware('perm:withdrawals.settle');
     Route::get('/support-tickets', [SupportTicketController::class, 'index'])->middleware('perm:support.reply');
+    Route::post('/support-tickets', [SupportTicketController::class, 'storeConsole'])->middleware('perm:support.reply');
     Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show'])->middleware('perm:support.reply');
     Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply'])->middleware('perm:support.reply');
     Route::post('/support-tickets/{ticket}/resolve', [SupportTicketController::class, 'resolve'])->middleware('perm:support.reply');
@@ -481,6 +482,7 @@ Route::prefix('seller')->middleware(['sanctum.type:seller','store.scope'])->grou
     Route::post('/product-brands', [CatalogTermController::class, 'storeProductBrand'])->middleware('perm:taxonomy.manage');
     Route::post('/product-category-options', [ProductCategoryController::class, 'storeProductCategory'])->middleware('perm:taxonomy.manage');
     Route::get('/support-tickets', [SupportTicketController::class, 'index'])->middleware('perm:support.reply');
+    Route::post('/support-tickets', [SupportTicketController::class, 'storeConsole'])->middleware('perm:support.reply');
     Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show'])->middleware('perm:support.reply');
     Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply'])->middleware('perm:support.reply');
     Route::post('/support-tickets/{ticket}/resolve', [SupportTicketController::class, 'resolve'])->middleware('perm:support.reply');

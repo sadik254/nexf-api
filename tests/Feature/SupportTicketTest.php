@@ -6,6 +6,9 @@ use App\Models\Admin;
 use App\Models\Customer;
 use App\Models\Seller;
 use App\Models\Reseller;
+use App\Models\Order;
+use App\Models\OrderItem;
+use App\Models\SellerStaff;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -55,5 +58,33 @@ class SupportTicketTest extends TestCase
             ->getJson("/api/resellers/support-tickets/{$ticketId}")->assertNotFound();
         $this->withToken($token)->postJson("/api/resellers/support-tickets/{$ticketId}/messages", ['body' => 'Following up.'])
             ->assertOk()->assertJsonCount(2, 'messages')->assertJsonPath('messages.1.author_type', 'reseller');
+    }
+
+    public function test_console_staff_can_open_customer_and_guest_tickets_with_the_right_store_scope(): void
+    {
+        $customer = Customer::create(['name' => 'Suspended buyer', 'email' => 'suspended-ticket@example.test', 'phone' => '01766666666', 'password' => 'password123', 'crm_status' => 'suspended']);
+        $seller = Seller::create(['seller_name' => 'Seller', 'email' => 'console-seller@example.test', 'store_name' => 'Console Store', 'store_slug' => 'console-store', 'kyc_type' => 'nid', 'kyc_number' => '11', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
+        $otherSeller = Seller::create(['seller_name' => 'Other', 'email' => 'console-other@example.test', 'store_name' => 'Other Store', 'store_slug' => 'console-other-store', 'kyc_type' => 'nid', 'kyc_number' => '12', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
+        $admin = Admin::create(['name' => 'Admin', 'email' => 'console-ticket-admin@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);
+
+        $this->withToken($admin->createToken('test', ['admin:basic'])->plainTextToken)
+            ->postJson('/api/admin/support-tickets', ['customer_id' => $customer->id, 'no_store' => true, 'category' => 'Account', 'subject' => 'Account help', 'body' => 'Opened by the support team.'])
+            ->assertCreated()->assertJsonPath('customer_id', $customer->id)->assertJsonPath('no_store', true)->assertJsonPath('seller_id', null)->assertJsonPath('reference', 'SUP-00001')->assertJsonPath('messages.0.author_type', 'admin');
+
+        $guest = $this->withToken($admin->createToken('test2', ['admin:basic'])->plainTextToken)
+            ->postJson('/api/admin/support-tickets', ['guest_name' => 'Guest caller', 'guest_phone' => '01777777777', 'guest_email' => 'caller@example.test', 'seller_id' => $seller->id, 'no_store' => true, 'category' => 'Delivery', 'subject' => 'Delivery issue', 'body' => 'Opened for a caller.'])
+            ->assertCreated()->assertJsonPath('guest_phone', '01777777777')->assertJsonPath('seller_id', $seller->id)->assertJsonPath('no_store', false);
+
+        $order = Order::create(['order_number' => 'SUP-ORDER', 'status' => 'pending', 'subtotal' => 100, 'total' => 100, 'shipping_name' => 'Buyer', 'shipping_phone' => '01766666666', 'shipping_address' => 'Dhaka']);
+        OrderItem::create(['order_id' => $order->id, 'seller_id' => $seller->id, 'product_name' => 'Store item', 'quantity' => 1, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 100, 'line_cost' => 50, 'line_profit' => 50]);
+        $staff = SellerStaff::create(['seller_id' => $seller->id, 'name' => 'Store helper', 'email' => 'store-helper@example.test', 'password' => 'password123', 'status' => 'active']);
+        $staffToken = $staff->createToken('test', ['seller:basic'])->plainTextToken;
+        $this->withToken($staffToken)->postJson('/api/seller/support-tickets', ['guest_name' => 'Guest', 'guest_phone' => '01788888888', 'order_id' => $order->id, 'category' => 'Order', 'subject' => 'Parcel query', 'body' => 'Opened by store staff.'])
+            ->assertCreated()->assertJsonPath('seller_id', $seller->id)->assertJsonPath('messages.0.author_type', 'seller_staff')->assertJsonPath('messages.0.author_name', 'Store helper');
+
+        $otherOrder = Order::create(['order_number' => 'OTHER-ORDER', 'status' => 'pending', 'subtotal' => 100, 'total' => 100, 'shipping_name' => 'Buyer', 'shipping_phone' => '01766666666', 'shipping_address' => 'Dhaka']);
+        OrderItem::create(['order_id' => $otherOrder->id, 'seller_id' => $otherSeller->id, 'product_name' => 'Other item', 'quantity' => 1, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 100, 'line_cost' => 50, 'line_profit' => 50]);
+        $this->withToken($staffToken)->postJson('/api/seller/support-tickets', ['guest_name' => 'Guest', 'guest_phone' => '01788888888', 'order_id' => $otherOrder->id, 'category' => 'Order', 'subject' => 'Not ours', 'body' => 'This must not be created.'])
+            ->assertUnprocessable()->assertJsonValidationErrors('order_id');
     }
 }

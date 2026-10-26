@@ -105,6 +105,60 @@ class SupportTicketController extends Controller
         return response()->json($ticket->load(['customer:id,name,email', 'seller:id,store_name,store_slug', 'reseller:id,name,email', 'order:id,order_number', 'messages']), 201);
     }
 
+    /** Create a console ticket for a customer account or a guest contact. */
+    public function storeConsole(Request $request): JsonResponse
+    {
+        $actor = $this->actor($request);
+        abort_unless($actor instanceof Admin || $actor instanceof Seller, 403);
+        $staff = $request->attributes->get('seller_staff');
+        $data = $request->validate([
+            'customer_id' => ['nullable', 'integer', 'exists:customers,id'],
+            'guest_name' => ['required_without:customer_id', 'nullable', 'string', 'max:150'],
+            'guest_phone' => ['required_without:customer_id', 'nullable', 'string', 'regex:/^01[3-9][0-9]{8}$/'],
+            'guest_email' => ['nullable', 'email', 'max:255'],
+            'seller_id' => ['nullable', 'integer', 'exists:sellers,id'],
+            'no_store' => ['sometimes', 'boolean'],
+            'order_id' => ['nullable', 'integer', 'exists:orders,id'],
+            'category' => ['required', 'string', 'max:60'],
+            'subject' => ['required', 'string', 'max:180'],
+            'body' => ['required', 'string', 'max:5000'],
+            'attachments' => ['sometimes', 'array', 'max:6'],
+            'attachments.*' => ['required', 'url', 'max:1000', 'regex:/^https:\/\//'],
+        ]);
+
+        $sellerId = $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null);
+        $orderId = $data['order_id'] ?? null;
+        if ($actor instanceof Seller && $orderId && !Order::query()->whereKey($orderId)->whereHas('items', fn ($items) => $items->where('seller_id', $actor->id))->exists()) {
+            throw ValidationException::withMessages(['order_id' => ['The selected order does not contain an item from your store.']]);
+        }
+
+        $ticket = DB::transaction(function () use ($actor, $staff, $data, $sellerId, $orderId) {
+            $ticket = SupportTicket::create([
+                'customer_id' => $data['customer_id'] ?? null,
+                'seller_id' => $sellerId,
+                'order_id' => $orderId,
+                'guest_name' => empty($data['customer_id']) ? trim((string) ($data['guest_name'] ?? '')) : null,
+                'guest_phone' => empty($data['customer_id']) ? ($data['guest_phone'] ?? null) : null,
+                'guest_email' => empty($data['customer_id']) ? ($data['guest_email'] ?? null) : null,
+                // seller_id takes priority; null without this flag represents the house store.
+                'no_store' => $actor instanceof Admin && !$sellerId && (bool) ($data['no_store'] ?? false),
+                'category' => trim($data['category']),
+                'subject' => trim($data['subject']),
+            ]);
+            $ticket->update(['reference' => 'SUP-' . str_pad((string) $ticket->id, 5, '0', STR_PAD_LEFT)]);
+            $ticket->messages()->create([
+                'author_type' => $staff instanceof SellerStaff ? 'seller_staff' : ($actor instanceof Seller ? 'seller' : 'admin'),
+                'author_id' => $staff?->id ?? $actor->id,
+                'author_name' => $staff?->name,
+                'body' => trim($data['body']),
+                'attachments' => $data['attachments'] ?? [],
+            ]);
+            return $ticket;
+        });
+
+        return response()->json($ticket->load(['customer:id,name,email', 'seller:id,store_name,store_slug', 'reseller:id,name,email', 'order:id,order_number', 'messages']), 201);
+    }
+
     public function reply(Request $request, SupportTicket $ticket): JsonResponse
     {
         $actor = $this->actor($request);
