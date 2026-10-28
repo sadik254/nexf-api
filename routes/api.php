@@ -201,6 +201,7 @@ Route::get('/guest-orders/pending-count', [CustomerController::class, 'pendingGu
 Route::get('/payment-accounts', [ManualPaymentController::class, 'accounts']);
 Route::get('/orders/{order}/payment', [ManualPaymentController::class, 'show'])->middleware('throttle:60,1,order-payment-read');
 Route::post('/orders/{order}/payment', [ManualPaymentController::class, 'submit'])->middleware('throttle:10,1,order-payment-submit');
+Route::post('/orders/{order}/payment/cod', [ManualPaymentController::class, 'switchToCod'])->middleware('throttle:10,1,order-payment-submit');
 
 Route::prefix('admin')->group(function () {
     Route::post('/login', [AdminController::class, 'login'])->middleware('throttle:auth-login');
@@ -246,6 +247,7 @@ Route::prefix('admin')->group(function () {
     Route::middleware(['sanctum.type:admin','perm:orders.manage'])->post('/orders/preview', [OrderController::class, 'previewAdmin']);
     Route::middleware(['sanctum.type:admin','perm:orders.manage'])->post('/orders', [OrderController::class, 'storeAdmin']);
     Route::middleware(['sanctum.type:admin','perm:payments.delete'])->post('/orders/{order}/payment/delete', [ManualPaymentController::class, 'clear']);
+    Route::middleware(['sanctum.type:admin','perm:payments.confirm'])->post('/orders/{order}/payment/reject', [ManualPaymentController::class, 'reject']);
     Route::middleware(['sanctum.type:admin','perm:returns.manage'])->get('/returns', [OrderReturnController::class, 'index']);
     Route::middleware(['sanctum.type:admin','perm:returns.manage'])->get('/return-requests', [ReturnRequestController::class, 'index']);
     Route::middleware(['sanctum.type:admin','perm:returns.manage'])->get('/return-requests/{returnRequest}', [ReturnRequestController::class, 'show']);

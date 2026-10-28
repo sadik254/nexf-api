@@ -12,6 +12,8 @@ class CouponRedemption extends Model
         'customer_id',
         'order_id',
         'coupon_code',
+        'coupon_name',
+        'is_automatic',
         'order_subtotal',
         'discount_amount',
     ];
@@ -21,6 +23,7 @@ class CouponRedemption extends Model
         return [
             'order_subtotal' => 'decimal:2',
             'discount_amount' => 'decimal:2',
+            'is_automatic' => 'boolean',
         ];
     }
 

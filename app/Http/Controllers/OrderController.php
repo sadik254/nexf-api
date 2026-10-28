@@ -128,6 +128,8 @@ class OrderController extends Controller
             ])->values(),
             'shipping_groups' => $preview['shipping_groups'],
             'shipping_charge' => $preview['shipping_charge'], 'total' => $preview['total'],
+            'wallet_amount' => $preview['wallet_amount'] ?? 0,
+            'payable' => $preview['payable'] ?? $preview['total'],
         ]);
     }
 
@@ -137,7 +139,7 @@ class OrderController extends Controller
         $customer = $request->user();
         if ((int) $order->customer_id !== (int) $customer->id) return response()->json(['message' => 'Forbidden.'], 403);
         if ($order->status !== 'pending') return response()->json(['message' => 'Only pending orders can be cancelled by customers.'], 422);
-        $order = $this->cancelOrder($order, $customer);
+        $order = $this->cancelOrder($order, $customer, 'customer');
         $this->notifications->cancelled($order);
         return response()->json(['message' => 'Order cancelled and inventory restored successfully.', 'order' => $order]);
     }
@@ -181,7 +183,7 @@ class OrderController extends Controller
     {
         if (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
         if (!$order->items()->where('seller_id', $seller->id)->exists()) return response()->json(['message' => 'Order does not contain items from this seller.'], 404);
-        $order = $this->cancelOrder($order, $request->user());
+        $order = $this->cancelOrder($order, $request->user(), 'admin');
         $this->notifications->cancelled($order);
         return response()->json(['message' => 'Seller order cancelled and inventory restored successfully.', 'order' => $order]);
     }
@@ -373,11 +375,10 @@ class OrderController extends Controller
             // Requote only after the old lot allocations are restored, so unchanged quantities remain available.
             $preview = $this->checkout->preview($customer, $data);
 
-            $oldRedemption = CouponRedemption::query()->where('order_id', $locked->id)->lockForUpdate()->first();
-            if ($oldRedemption) {
-                Coupon::query()->whereKey($oldRedemption->coupon_id)->decrement('used_count');
+            CouponRedemption::query()->where('order_id', $locked->id)->lockForUpdate()->get()->each(function (CouponRedemption $oldRedemption): void {
+                if ($oldRedemption->coupon_id) Coupon::query()->whereKey($oldRedemption->coupon_id)->decrement('used_count');
                 $oldRedemption->delete();
-            }
+            });
             $locked->items()->delete();
             $locked->storeGroups()->delete();
 
@@ -415,8 +416,9 @@ class OrderController extends Controller
                     'product_name' => $product->name, 'product_slug' => $product->slug, 'product_thumbnail' => $product->thumbnail,
                     'product_gallery' => $product->gallery, 'product_image_variants' => $product->image_variants,
                     'sku' => $variation?->sku, 'variation_attributes' => $variation?->attributes, 'quantity' => $quantity,
+                    'variation_labels' => $this->variationLabels($product, $variation), 'variation_image' => $variation?->image_url,
                     'unit_selling_price' => round($lineSubtotal / $quantity, 2), 'unit_buying_price' => round($lineCost / $quantity, 2),
-                    'line_subtotal' => $lineSubtotal, 'line_cost' => $lineCost, 'line_profit' => (float) $result['totals']['profit'],
+                    'line_subtotal' => $lineSubtotal, 'line_cost' => $lineCost, 'line_profit' => (float) $result['totals']['profit'], 'commission_rate' => $product->seller?->commission_rate,
                     'lot_allocations' => $result['allocations'], 'fulfillment_status' => $itemFulfillmentState, 'awaiting_stock' => $keepRequest,
                 ]);
                 $subtotal = round($subtotal + $lineSubtotal, 2);
@@ -451,7 +453,7 @@ class OrderController extends Controller
             foreach ($appliedDiscounts as $appliedDiscount) {
                 $appliedCoupon = $appliedDiscount['coupon'];
                 $appliedCoupon->increment('used_count');
-                CouponRedemption::create(['coupon_id' => $appliedCoupon->id, 'customer_id' => $customer?->id, 'order_id' => $locked->id, 'coupon_code' => $appliedCoupon->code, 'order_subtotal' => $subtotal, 'discount_amount' => $appliedDiscount['amount']]);
+                CouponRedemption::create(['coupon_id' => $appliedCoupon->id, 'customer_id' => $customer?->id, 'order_id' => $locked->id, 'coupon_code' => $appliedCoupon->code, 'coupon_name' => $appliedCoupon->name, 'is_automatic' => $appliedCoupon->is_automatic, 'order_subtotal' => $subtotal, 'discount_amount' => $appliedDiscount['amount']]);
             }
             return $locked->fresh()->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
@@ -466,7 +468,7 @@ class OrderController extends Controller
         }
 
         if (in_array($order->status, ['pending', 'confirmed'], true)) {
-            $order = $this->cancelOrder($order, $request->user());
+            $order = $this->cancelOrder($order, $request->user(), 'admin');
             $this->notifications->cancelled($order);
         }
 
@@ -524,7 +526,7 @@ class OrderController extends Controller
             $this->inventory->restoreOrderItem($lockedItem, $request->user(), 'return_reconciliation');
             $lockedItem->update(['fulfillment_status' => 'returned']);
             if (!$lockedOrder->items()->whereNotIn('fulfillment_status', ['returned', 'cancelled'])->exists()) {
-                $lockedOrder->update(['status' => 'cancelled', 'cancelled_at' => $lockedOrder->cancelled_at ?? now()]);
+                $lockedOrder->update(['status' => 'cancelled', 'cancelled_at' => $lockedOrder->cancelled_at ?? now(), 'cancelled_by' => $lockedOrder->cancelled_by ?? 'admin']);
             }
             return $lockedOrder->load(['customer', 'items', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
@@ -576,7 +578,7 @@ class OrderController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        $order = $this->cancelOrder($order, $admin);
+        $order = $this->cancelOrder($order, $admin, 'admin');
         $this->notifications->cancelled($order);
 
         return response()->json([
@@ -585,9 +587,9 @@ class OrderController extends Controller
         ]);
     }
 
-    private function cancelOrder(Order $order, $actor): Order
+    public function cancelOrder(Order $order, $actor, string $cancelledBy = 'admin', array $extra = []): Order
     {
-        return DB::transaction(function () use ($order, $actor) {
+        return DB::transaction(function () use ($order, $actor, $cancelledBy, $extra) {
             $lockedOrder = Order::query()->lockForUpdate()->findOrFail($order->id);
 
             if ($lockedOrder->status === 'cancelled') {
@@ -604,10 +606,11 @@ class OrderController extends Controller
                 $item->update(['fulfillment_status' => 'cancelled']);
             }
 
-            $lockedOrder->update([
+            $lockedOrder->update(array_merge([
                 'status' => 'cancelled',
                 'cancelled_at' => now(),
-            ]);
+                'cancelled_by' => $cancelledBy,
+            ], $extra));
             app(WalletLedgerService::class)->cancellationCredit($lockedOrder);
 
             return $lockedOrder->load(['customer', 'items', 'paymentMethod', 'shippingMethod', 'coupon']);
@@ -718,7 +721,7 @@ class OrderController extends Controller
         }
 
         if ($statuses->every(fn (string $status) => in_array($status, ['returned', 'cancelled'], true))) {
-            $order->update(['status' => 'cancelled', 'cancelled_at' => $order->cancelled_at ?? now()]);
+            $order->update(['status' => 'cancelled', 'cancelled_at' => $order->cancelled_at ?? now(), 'cancelled_by' => $order->cancelled_by ?? 'system']);
             return;
         }
 
@@ -795,22 +798,28 @@ class OrderController extends Controller
 
             $shippingMethod = $preview['shippingMethod'];
 
-            if ($paymentMethod->code === 'wallet') {
+            $useWallet = $paymentMethod->code === 'wallet' || !empty($data['use_wallet']);
+            $walletAmount = 0.0;
+            if ($useWallet) {
                 if (!$customer) throw ValidationException::withMessages(['payment_method_id' => ['NEXF Balance is available only to signed-in customers.']]);
                 Customer::whereKey($customer->id)->lockForUpdate()->firstOrFail();
-                if (app(WalletBalanceService::class)->balance($customer->id, true) < (float) $preview['total']) {
+                $balance = app(WalletBalanceService::class)->balance($customer->id, true);
+                if ($paymentMethod->code === 'wallet' && $balance < (float) $preview['total']) {
                     throw ValidationException::withMessages(['payment_method_id' => ['Your NEXF Balance is not enough for this order.']]);
                 }
+                $walletAmount = min($balance, (float) $preview['total']);
             }
 
             $order = Order::create([
                 'order_number' => $this->generateOrderNumber($exchangeReturn ? 'EXC' : $this->orderPrefixForCart($data['items'])),
                 'customer_id' => $customer?->id,
                 'reseller_id' => $customer?->reseller_id,
+                'reseller_commission_rate' => $customer?->reseller?->commission_rate,
+                'reseller_monthly_target' => $customer?->reseller?->monthly_target,
                 'payment_method_id' => $paymentMethod->id,
                 'shipping_method_id' => $shippingMethod->id,
                 'status' => $exchangeReturn ? 'confirmed' : 'pending',
-                'payment_status' => ($exchangeReturn || $paymentMethod->code === 'wallet') ? 'paid' : 'unpaid',
+                'payment_status' => ($exchangeReturn || $paymentMethod->code === 'wallet' || $walletAmount >= (float) $preview['total']) ? 'paid' : 'unpaid',
                 'payment_method_code' => $exchangeReturn ? 'exchange' : $paymentMethod->code,
                 'payment_method_name' => $exchangeReturn ? 'Exchange - no charge' : $paymentMethod->name,
                 'shipping_method_code' => $exchangeReturn ? 'manual' : $shippingMethod->code,
@@ -821,6 +830,7 @@ class OrderController extends Controller
                 'discount_total' => 0,
                 'total' => 0,
                 'paid_amount' => $data['paid_amount'] ?? null,
+                'wallet_amount' => $walletAmount,
                 'manual_ship' => (bool) $exchangeReturn,
                 'stock_request' => !$exchangeReturn && !empty($data['stock_request']),
                 'exchange_for' => $exchangeReturn ? (string) $exchangeReturn->id : null,
@@ -844,8 +854,8 @@ class OrderController extends Controller
             $subtotal = 0.0;
             $shippingLines = [];
 
-            if ($paymentMethod->code === 'wallet') {
-                CustomerWalletTransaction::create(['customer_id' => $customer->id, 'order_id' => $order->id, 'type' => 'debit', 'kind' => 'spend', 'amount' => $preview['total'], 'description' => "Payment for order {$order->order_number}"]);
+            if ($walletAmount > 0) {
+                CustomerWalletTransaction::create(['customer_id' => $customer->id, 'order_id' => $order->id, 'type' => 'debit', 'kind' => 'spend', 'amount' => $walletAmount, 'source_key' => "order:{$order->id}:wallet", 'description' => "Payment for order {$order->order_number}"]);
             }
 
             foreach ($data['items'] as $itemData) {
@@ -918,12 +928,15 @@ class OrderController extends Controller
                     'product_image_variants' => $product->image_variants,
                     'sku' => $variation?->sku,
                     'variation_attributes' => $variation?->attributes,
+                    'variation_labels' => $this->variationLabels($product, $variation),
+                    'variation_image' => $variation?->image_url,
                     'quantity' => $quantity,
                     'unit_selling_price' => $unitSellingPrice,
                     'unit_buying_price' => $unitBuyingPrice,
                     'line_subtotal' => $lineSubtotal,
                     'line_cost' => $lineCost,
                     'line_profit' => $lineProfit,
+                    'commission_rate' => $product->seller?->commission_rate,
                     'lot_allocations' => $result['allocations'],
                     'awaiting_stock' => $order->stock_request,
                 ]);
@@ -964,6 +977,8 @@ class OrderController extends Controller
                 'manual_discount_value' => $data['manual_discount_value'] ?? null,
                 'shipping_charge' => $shipping['total'],
                 'total' => $total,
+                'wallet_amount' => min($walletAmount, $total),
+                'payment_status' => $walletAmount >= $total ? 'paid' : $order->payment_status,
             ])->save();
 
             foreach ($appliedDiscounts as $appliedDiscount) {
@@ -974,6 +989,8 @@ class OrderController extends Controller
                     'customer_id' => $customer?->id,
                     'order_id' => $order->id,
                     'coupon_code' => $appliedCoupon->code,
+                    'coupon_name' => $appliedCoupon->name,
+                    'is_automatic' => $appliedCoupon->is_automatic,
                     'order_subtotal' => $subtotal,
                     'discount_amount' => $appliedDiscount['amount'],
                 ]);
@@ -1067,7 +1084,23 @@ class OrderController extends Controller
             'shipping_area' => ['sometimes', 'nullable', 'string', 'max:150'],
             'shipping_district' => ['sometimes', 'nullable', 'string', 'max:150'],
             'stock_request' => ['sometimes', 'boolean'],
+            'use_wallet' => ['sometimes', 'boolean'],
         ];
+    }
+
+    private function variationLabels(Product $product, ?ProductVariation $variation): ?array
+    {
+        if (!$variation) return null;
+        $attributes = $variation->attributes ?? [];
+        $labels = [];
+        foreach ($product->option_groups ?? [] as $group) {
+            $key = (string) ($group['key'] ?? '');
+            if ($key === '' || !array_key_exists($key, $attributes)) continue;
+            $selected = collect($group['values'] ?? [])->first(fn (array $value) => (string) ($value['value'] ?? '') === (string) $attributes[$key]);
+            $labels[] = ['group' => $group['label'] ?? $key, 'value' => $selected['label'] ?? (string) $attributes[$key], 'swatch' => $selected['swatch'] ?? null];
+        }
+        foreach ($attributes as $key => $value) if (!collect($labels)->contains('group', $key) && !collect($labels)->contains('value', (string) $value)) $labels[] = ['group' => (string) $key, 'value' => (string) $value, 'swatch' => null];
+        return $labels;
     }
 
     private function assertGuestPhone(string $phone): void

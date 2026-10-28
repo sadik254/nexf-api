@@ -25,7 +25,7 @@ class ProductEngagementController extends Controller
         return response()->json(Review::query()
             ->where('customer_id', $customer->id)
             ->when($request->filled('product_id'),fn($q)=>$q->where('product_id',(int)$request->query('product_id')))
-            ->with(['product:id,name,slug,thumbnail,gallery,seller_id,owner_unassigned','product.seller:id,store_name','orderItem:id,variation_attributes,seller_id,order_id','orderItem.seller:id,store_name','orderItem.order:id','orderItem.order.storeGroups:id,order_id,seller_id,store_name'])->withCount('likes')
+            ->with(['product:id,name,slug,thumbnail,gallery,seller_id,owner_unassigned','product.seller:id,store_name','orderItem:id,variation_attributes,variation_labels,variation_image,product_name,product_thumbnail,seller_id,order_id','orderItem.seller:id,store_name','orderItem.order:id','orderItem.order.storeGroups:id,order_id,seller_id,store_name'])->withCount('likes')
             ->latest()->paginate($perPage)->through(function ($review) {
                 $item = $review->orderItem;
                 $group = $item?->order?->storeGroups?->first(fn($group) => $group->seller_id === $item->seller_id);
@@ -179,7 +179,7 @@ class ProductEngagementController extends Controller
         $status = $request->validate(['status' => ['sometimes', 'in:pending,approved,rejected,all']])['status'] ?? 'pending';
         $perPage = max(1, min((int) $request->query('per_page', 25), 100));
         $reviews = Review::query()->withCount('likes')
-            ->with(['customer:id,name,profile_picture', 'product:id,name,slug,thumbnail,seller_id', 'product.seller:id,store_name,store_slug', 'orderItem:id,variation_attributes'])
+            ->with(['customer:id,name,profile_picture', 'product:id,name,slug,thumbnail,seller_id', 'product.seller:id,store_name,store_slug', 'orderItem:id,variation_attributes,variation_labels,variation_image,product_name,product_thumbnail'])
             ->when($status !== 'all', fn ($query) => $query->where('status', $status))
             ->whereHas('product', fn ($query) => $sellerId === -1
                 ? $query
@@ -306,7 +306,7 @@ class ProductEngagementController extends Controller
 
         return response()->json([
             'message' => "Review {$data['status']} successfully.",
-            'review' => $review->fresh(['customer:id,name,profile_picture', 'product:id,name,slug,thumbnail,seller_id', 'product.seller:id,store_name,store_slug', 'orderItem:id,variation_attributes']),
+            'review' => $review->fresh(['customer:id,name,profile_picture', 'product:id,name,slug,thumbnail,seller_id', 'product.seller:id,store_name,store_slug', 'orderItem:id,variation_attributes,variation_labels,variation_image,product_name,product_thumbnail']),
         ]);
     }
 }

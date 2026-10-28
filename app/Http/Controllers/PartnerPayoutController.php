@@ -164,13 +164,13 @@ class PartnerPayoutController extends Controller
     {
         if ($type === 'seller') {
             return OrderItem::query()->where('seller_id', $owner->id)->where('fulfillment_status', 'delivered')->whereNotNull('delivered_at')->orderByDesc('delivered_at')->get()
-                ->map(fn (OrderItem $item) => ['id' => 'item-' . $item->id, 'date' => $item->delivered_at->toDateString(), 'order_item_id' => $item->id, 'amount' => round((float) $item->line_subtotal * (1 - ((float) $owner->commission_rate / 100)), 2), 'state' => $item->delivered_at->lte(now()->subDays(self::HOLD_DAYS)) ? 'settled' : 'settling'])->all();
+                ->map(fn (OrderItem $item) => ['id' => 'item-' . $item->id, 'date' => $item->delivered_at->toDateString(), 'order_item_id' => $item->id, 'amount' => round((float) $item->line_subtotal * (1 - ((float) ($item->commission_rate ?? $owner->commission_rate) / 100)), 2), 'state' => $item->delivered_at->lte(now()->subDays(self::HOLD_DAYS)) ? 'settled' : 'settling'])->all();
         }
         $months = [];
         for ($month = now()->copy()->startOfMonth()->subMonths(11); $month->lte(now()->copy()->startOfMonth()); $month->addMonth()) {
             $from = $month->copy()->startOfMonth(); $to = $month->copy()->endOfMonth();
-            $totals = OrderItem::query()->whereHas('order', fn ($query) => $query->where('reseller_id', $owner->id)->whereBetween('created_at', [$from, $to])->whereIn('status', ['delivered', 'completed']))->selectRaw('COALESCE(SUM(quantity), 0) units, COALESCE(SUM(line_subtotal), 0) sales')->first();
-            $amount = (int) $totals->units >= (int) $owner->monthly_target ? round((float) $totals->sales * (float) $owner->commission_rate / 100, 2) : 0;
+            $totals = OrderItem::query()->join('orders', 'orders.id', '=', 'order_items.order_id')->where('orders.reseller_id', $owner->id)->whereBetween('orders.created_at', [$from, $to])->whereIn('orders.status', ['delivered', 'completed'])->selectRaw('COALESCE(SUM(order_items.quantity), 0) units, COALESCE(SUM(order_items.line_subtotal), 0) sales, COALESCE(SUM(order_items.line_subtotal * COALESCE(orders.reseller_commission_rate, ?)/100), 0) commission, COALESCE(MAX(orders.reseller_monthly_target), ?) target', [$owner->commission_rate, $owner->monthly_target])->first();
+            $amount = (int) $totals->units >= (int) $totals->target ? round((float) $totals->commission, 2) : 0;
             if ($amount > 0) $months[] = ['id' => 'month-' . $from->format('Y-m'), 'month' => $from->format('Y-m'), 'amount' => $amount, 'state' => $from->lt(now()->startOfMonth()) ? 'settled' : 'settling'];
         }
         return array_reverse($months);

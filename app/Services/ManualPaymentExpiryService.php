@@ -33,7 +33,8 @@ class ManualPaymentExpiryService
                 app(InventoryService::class)->restoreOrderItem($item, $locked->customer, 'manual_payment_timeout');
                 $item->update(['fulfillment_status' => 'cancelled']);
             }
-            $locked->update(['status' => 'cancelled', 'cancelled_at' => now()]);
+            $locked->update(['status' => 'cancelled', 'cancelled_at' => now(), 'cancelled_by' => 'system']);
+            app(WalletLedgerService::class)->cancellationCredit($locked);
 
             return true;
         });

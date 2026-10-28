@@ -79,7 +79,7 @@ class ResellerController extends Controller
                 'sales' => (float) $row->sales_this_month,
                 'target_met' => (bool) $row->target_met,
                 'commission_earned' => (float) $row->commission_earned,
-                'potential_commission' => round((float) $row->sales_this_month * (float) $row->commission_rate / 100, 2),
+                'potential_commission' => (float) $row->potential_commission,
             ];
         }
         return response()->json([
@@ -186,13 +186,15 @@ class ResellerController extends Controller
 
     private function withMonth(Reseller $reseller, $from, $to): Reseller
     {
-        $totals = OrderItem::query()->whereHas('order', fn ($q) => $q->where('reseller_id', $reseller->id)->whereBetween('created_at', [$from, $to])->whereIn('status', ['delivered', 'completed']))
-            ->selectRaw('COALESCE(SUM(quantity), 0) units, COALESCE(SUM(line_subtotal), 0) sales')->first();
+        $totals = OrderItem::query()->join('orders', 'orders.id', '=', 'order_items.order_id')->where('orders.reseller_id', $reseller->id)->whereBetween('orders.created_at', [$from, $to])->whereIn('orders.status', ['delivered', 'completed'])
+            ->selectRaw('COALESCE(SUM(order_items.quantity), 0) units, COALESCE(SUM(order_items.line_subtotal), 0) sales, COALESCE(SUM(order_items.line_subtotal * COALESCE(orders.reseller_commission_rate, ?)/100), 0) commission, COALESCE(MAX(orders.reseller_monthly_target), ?) target', [$reseller->commission_rate, $reseller->monthly_target])->first();
         $units = (int) $totals->units; $sales = (float) $totals->sales;
         $reseller->setAttribute('units_this_month', $units);
         $reseller->setAttribute('sales_this_month', round($sales, 2));
-        $reseller->setAttribute('target_met', $units >= $reseller->monthly_target);
-        $reseller->setAttribute('commission_earned', $units >= $reseller->monthly_target ? round($sales * (float) $reseller->commission_rate / 100, 2) : 0);
+        $reseller->setAttribute('potential_commission', round((float) $totals->commission, 2));
+        $target = (int) $totals->target;
+        $reseller->setAttribute('target_met', $units >= $target);
+        $reseller->setAttribute('commission_earned', $units >= $target ? round((float) $totals->commission, 2) : 0);
         return $reseller;
     }
 

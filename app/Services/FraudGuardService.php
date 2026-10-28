@@ -11,6 +11,15 @@ use Illuminate\Validation\ValidationException;
 
 class FraudGuardService
 {
+    public function assertCodAllowed(?string $phone, float $total): void
+    {
+        foreach (FraudGuardRule::query()->where('is_active', true)->where('rule_type', 'cod_block')->get() as $rule) {
+            $config = $rule->configuration ?? [];
+            if (isset($config['threshold']) && $total >= (float) $config['threshold']) {
+                throw ValidationException::withMessages(['payment' => ['Orders to this number need to be paid before delivery.']]);
+            }
+        }
+    }
     public function assertAllowed(?Customer $customer, array $checkout, float $total): void
     {
         // Do not turn on a new checkout restriction merely by deploying its

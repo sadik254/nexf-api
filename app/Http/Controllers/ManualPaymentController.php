@@ -11,6 +11,8 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use App\Services\ManualPaymentExpiryService;
+use App\Services\FraudGuardService;
+use App\Http\Controllers\OrderController;
 
 /**
  * Persists the details for offline bKash, Nagad, Rocket and bank transfers.
@@ -76,6 +78,7 @@ class ManualPaymentController extends Controller
             $this->expiry->cancelIfExpired($order);
             throw ValidationException::withMessages(['payment' => ['This order is closed.']]);
         }
+        abort_if($order->payment_received_at, 422, 'This payment is already confirmed.');
 
         // A pending COD order may be paid in advance if the shopper picks an
         // enabled manual method in the payment window.
@@ -111,13 +114,13 @@ class ManualPaymentController extends Controller
             'sender' => $order->payment_method_code === 'bank'
                 ? ['required', 'string', 'min:2', 'max:40']
                 : ['required', 'string', 'regex:/^(\+?88)?01[3-9]\d{8}$/'],
-            'amount' => ['nullable', 'numeric', 'min:1', 'max:'.$order->total],
+            'amount' => ['nullable', 'numeric', 'min:1', 'max:'.$this->payable($order)],
         ]);
 
         $order->forceFill([
             'payment_reference' => isset($data['reference']) ? strtoupper($data['reference']) : null,
             'payment_sender' => $data['sender'],
-            'payment_amount' => $data['amount'] ?? $order->total,
+            'payment_amount' => $data['amount'] ?? $this->payable($order),
             'payment_submitted_at' => now(),
         ])->save();
 
@@ -142,6 +145,39 @@ class ManualPaymentController extends Controller
         ]);
     }
 
+    public function reject(Request $request, Order $order): JsonResponse
+    {
+        $admin = $request->user();
+        abort_unless($admin instanceof Admin, 403);
+        abort_unless($order->status === 'pending'
+            && in_array($order->payment_method_code, self::METHODS, true)
+            && (filled($order->payment_reference) || filled($order->payment_sender))
+            && (float) ($order->paid_amount ?? 0) <= 0,
+            422,
+            'Only an unpaid submitted manual payment can be rejected.');
+
+        $cancelled = app(OrderController::class)->cancelOrder($order, $admin, 'admin', ['payment_rejected_at' => now()]);
+        app(\App\Services\OrderNotificationService::class)->paymentRejected($cancelled);
+        return response()->json(['message' => 'Payment rejected and order cancelled.', 'order' => $cancelled]);
+    }
+
+    public function switchToCod(Request $request, Order $order): JsonResponse
+    {
+        $this->authorizeByPhone($request, $order);
+        abort_unless($order->status === 'pending' && in_array($order->payment_method_code, self::METHODS, true), 422, 'This order cannot be changed to Cash on Delivery.');
+        abort_if(filled($order->payment_reference) || filled($order->payment_sender) || (float) ($order->paid_amount ?? 0) > 0, 422, 'A submitted or confirmed payment cannot be changed to Cash on Delivery.');
+        abort_if($order->stock_request || $order->items()->where('awaiting_stock', true)->exists(), 422, 'Cash on Delivery is not available for stock requests.');
+        $method = PaymentMethod::query()->active()->where('code', 'cod')->first();
+        abort_unless($method, 422, 'Cash on Delivery is not available right now.');
+        app(FraudGuardService::class)->assertCodAllowed($order->shipping_phone, (float) $order->total);
+        $order->forceFill([
+            'payment_method_id' => $method->id,
+            'payment_method_code' => $method->code,
+            'payment_method_name' => $method->name,
+        ])->save();
+        return response()->json($this->state($order->fresh()));
+    }
+
     private function authorizeByPhone(Request $request, Order $order): void
     {
         $digits = fn (?string $phone): string => substr(preg_replace('/\\D/', '', (string) $phone), -10);
@@ -160,12 +196,20 @@ class ManualPaymentController extends Controller
             'payment_method_code' => $order->payment_method_code,
             'payment_method_name' => $order->payment_method_name,
             'total' => $order->total,
+            'wallet_amount' => $order->wallet_amount,
+            'payable' => $this->payable($order),
             'paid_amount' => $order->paid_amount,
             'payment_reference' => $order->payment_reference,
             'payment_sender' => $order->payment_sender,
             'payment_amount' => $order->payment_amount,
             'payment_submitted_at' => $order->payment_submitted_at,
             'payment_received_at' => $order->payment_received_at,
+            'payment_rejected_at' => $order->payment_rejected_at,
         ];
+    }
+
+    private function payable(Order $order): float
+    {
+        return max(0, round((float) $order->total - (float) ($order->wallet_amount ?? 0), 2));
     }
 }

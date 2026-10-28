@@ -10,6 +10,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Order extends Model
 {
     use SoftDeletes;
+    protected $with = ['couponRedemptions'];
+    protected $appends = ['applied_discounts', 'payable'];
+    protected $hidden = ['couponRedemptions'];
     protected $fillable = [
         'order_number',
         'customer_id',
@@ -32,11 +35,13 @@ class Order extends Model
         'manual_discount_value',
         'total',
         'paid_amount',
+        'wallet_amount',
         'payment_reference',
         'payment_sender',
         'payment_amount',
         'payment_submitted_at',
         'payment_received_at',
+        'payment_rejected_at',
         'shipping_name',
         'shipping_phone',
         'shipping_email',
@@ -56,6 +61,9 @@ class Order extends Model
         'packed_at',
         'payment_paid_at',
         'cancelled_at',
+        'cancelled_by',
+        'reseller_commission_rate',
+        'reseller_monthly_target',
     ];
 
     protected function casts(): array
@@ -67,6 +75,7 @@ class Order extends Model
             'manual_discount_value' => 'decimal:2',
             'total' => 'decimal:2',
             'paid_amount' => 'decimal:2',
+            'wallet_amount' => 'decimal:2',
             'payment_amount' => 'decimal:2',
             'is_guest' => 'boolean',
             'staff_order' => 'boolean',
@@ -77,7 +86,9 @@ class Order extends Model
             'payment_paid_at' => 'datetime',
             'payment_submitted_at' => 'datetime',
             'payment_received_at' => 'datetime',
+            'payment_rejected_at' => 'datetime',
             'cancelled_at' => 'datetime',
+            'reseller_commission_rate' => 'decimal:4',
         ];
     }
 
@@ -122,5 +133,25 @@ class Order extends Model
     public function coupon(): BelongsTo
     {
         return $this->belongsTo(Coupon::class);
+    }
+
+    public function couponRedemptions(): HasMany
+    {
+        return $this->hasMany(CouponRedemption::class);
+    }
+
+    protected function appliedDiscounts(): \Illuminate\Database\Eloquent\Casts\Attribute
+    {
+        return \Illuminate\Database\Eloquent\Casts\Attribute::get(fn () => $this->couponRedemptions->map(fn (CouponRedemption $redemption) => [
+            'name' => $redemption->coupon_name ?: $redemption->coupon_code,
+            'code' => $redemption->coupon_code,
+            'kind' => $redemption->is_automatic ? 'automatic' : 'coupon',
+            'amount' => (float) $redemption->discount_amount,
+        ])->values()->all());
+    }
+
+    protected function payable(): \Illuminate\Database\Eloquent\Casts\Attribute
+    {
+        return \Illuminate\Database\Eloquent\Casts\Attribute::get(fn () => round(max(0, (float) $this->total - (float) ($this->wallet_amount ?? 0)), 2));
     }
 }

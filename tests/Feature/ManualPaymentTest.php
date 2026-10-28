@@ -165,6 +165,33 @@ class ManualPaymentTest extends TestCase
         $this->assertSame('pending', $order->fresh()->status);
     }
 
+    public function test_confirmed_manual_payment_cannot_be_overwritten_by_shopper(): void
+    {
+        $method = PaymentMethod::where('code', 'bkash')->firstOrFail();
+        $order = $this->order($method, 'bkash');
+        $order->update(['payment_sender' => '01712345678', 'payment_reference' => 'ORIGINAL', 'paid_amount' => 100]);
+
+        $this->postJson("/api/orders/{$order->id}/payment", [
+            'phone' => '01712345678', 'sender' => '01812345678', 'reference' => 'REPLACED',
+        ])->assertUnprocessable()->assertJsonPath('message', 'This payment is already confirmed.');
+
+        $this->assertSame('ORIGINAL', $order->fresh()->payment_reference);
+    }
+
+    public function test_admin_can_reject_submitted_manual_payment(): void
+    {
+        $method = PaymentMethod::where('code', 'bkash')->firstOrFail();
+        $order = $this->order($method, 'bkash');
+        $order->update(['payment_sender' => '01712345678', 'payment_reference' => 'SUBMITTED']);
+        $admin = Admin::create(['name' => 'Payment Admin', 'email' => 'payment-reject@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);
+
+        $this->withToken($admin->createToken('test', ['admin'])->plainTextToken)
+            ->postJson("/api/admin/orders/{$order->id}/payment/reject")
+            ->assertOk()->assertJsonPath('order.status', 'cancelled');
+        $this->assertNotNull($order->fresh()->payment_rejected_at);
+        $this->assertSame('admin', $order->fresh()->cancelled_by);
+    }
+
     private function order(PaymentMethod $method, string $code): Order
     {
         return Order::create([
