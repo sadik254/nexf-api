@@ -123,6 +123,7 @@ class ManualPaymentController extends Controller
             'payment_amount' => $data['amount'] ?? $this->payable($order),
             'payment_submitted_at' => now(),
         ])->save();
+        app(\App\Services\ConsoleNotificationService::class)->manualPayment($order);
 
         return response()->json($this->state($order->fresh()));
     }

@@ -84,6 +84,7 @@ class ReturnRequestController extends Controller
             return $return;
         });
         $return->load(['item', 'order:id,order_number', 'seller:id,store_name'])->makeHidden('staff_note');
+        app(\App\Services\ConsoleNotificationService::class)->returnRequested($return->load('order:id,order_number'));
         return response()->json($return, 201);
     }
 
@@ -135,7 +136,7 @@ class ReturnRequestController extends Controller
             }
             return $created;
         });
-        foreach ($returns as $return) $return->load(['item', 'order:id,order_number', 'seller:id,store_name'])->makeHidden('staff_note');
+        foreach ($returns as $return) { $return->load(['item', 'order:id,order_number', 'seller:id,store_name'])->makeHidden('staff_note'); app(\App\Services\ConsoleNotificationService::class)->returnRequested($return); }
         return response()->json(['reference' => $returns[0]->reference ?? null, 'data' => $returns], 201);
     }
 

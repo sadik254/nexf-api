@@ -123,6 +123,7 @@ class ProductEngagementController extends Controller
         abort_unless($customer instanceof Customer, 403);
         $data = $request->validate(['question' => ['required', 'string', 'min:5', 'max:1000']]);
         $question = $product->questions()->create(['customer_id' => $customer->id, 'question' => $data['question']]);
+        app(\App\Services\ConsoleNotificationService::class)->moderation($product->seller_id, 'question_pending', 'Question waiting for approval', '/dashboard/questions');
         return response()->json(['message' => 'Question posted successfully.', 'question' => $this->questionPayload($question->load('customer:id,name'))], 201);
     }
 
@@ -162,6 +163,7 @@ class ProductEngagementController extends Controller
             }
         }
         $review = Review::updateOrCreate(['customer_id' => $customer->id, 'order_item_id' => $item->id], ['product_id' => $product->id, 'rating' => $data['rating'], 'comment' => $data['comment'] ?? null, 'images' => $data['images'] ?? [], 'videos' => $data['videos'] ?? [], 'status' => 'pending', 'rejection_note' => null, 'moderated_at' => null]);
+        app(\App\Services\ConsoleNotificationService::class)->moderation($product->seller_id, 'review_pending', 'Review waiting for approval', '/dashboard/reviews');
         return response()->json(['message' => 'Review submitted for approval.', 'review' => $review], $review->wasRecentlyCreated ? 201 : 200);
     }
 

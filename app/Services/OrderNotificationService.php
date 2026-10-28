@@ -10,9 +10,9 @@ use Illuminate\Support\Facades\Mail;
 
 class OrderNotificationService
 {
-    public function placed(Order $order): void { $this->notifyCustomer($order, 'order_placed', 'Order received', 'We received your order.'); $this->send($order, 'Order received', 'We received your order.'); $this->notifyOperations($order, 'New order received', 'A new order requires fulfilment.'); }
+    public function placed(Order $order): void { $this->notifyCustomer($order, 'order_placed', 'Order received', 'We received your order.'); $this->send($order, 'Order received', 'We received your order.'); $this->notifyOperations($order, 'New order received', 'A new order requires fulfilment.'); app(ConsoleNotificationService::class)->orderPlaced($order); }
     public function statusChanged(Order $order): void { $this->notifyCustomer($order, 'order_status', 'Order status updated', "Your order is now {$order->status}."); $this->send($order, 'Order status updated', "Your order is now {$order->status}."); }
-    public function cancelled(Order $order): void { $this->notifyCustomer($order, 'order_cancelled', 'Order cancelled', 'Your order has been cancelled.'); $this->send($order, 'Order cancelled', 'Your order has been cancelled.'); }
+    public function cancelled(Order $order): void { $this->notifyCustomer($order, 'order_cancelled', 'Order cancelled', 'Your order has been cancelled.'); $this->send($order, 'Order cancelled', 'Your order has been cancelled.'); if ($order->cancelled_by === 'customer') app(ConsoleNotificationService::class)->orderCancelled($order); }
     public function paymentRejected(Order $order): void { $this->notifyCustomer($order, 'payment_rejected', 'Payment rejected', 'We could not confirm your payment, so this order was cancelled.'); $this->send($order, 'Payment rejected', 'We could not confirm your payment, so this order was cancelled.'); }
     private function notifyCustomer(Order $order, string $type, string $title, string $body): void
     {

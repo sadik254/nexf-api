@@ -57,6 +57,10 @@ Route::prefix('resellers')->group(function () {
     Route::post('/reset-password', [ResellerController::class, 'resetPassword'])->middleware('throttle:auth-reset');
     Route::post('/check-reset-code', \App\Http\Controllers\PasswordResetCheckController::class)->defaults('accountType', 'reseller')->middleware('throttle:auth-reset');
     Route::middleware('sanctum.type:reseller')->group(function () {
+        Route::get('/notifications', fn (\Illuminate\Http\Request $request) => app(\App\Http\Controllers\ConsoleNotificationController::class)->index($request, 'reseller'))->middleware('perm:dashboard.view');
+        Route::post('/notifications/read-all', fn (\Illuminate\Http\Request $request) => app(\App\Http\Controllers\ConsoleNotificationController::class)->readAll($request, 'reseller'))->middleware('perm:dashboard.view');
+        Route::post('/notifications/clear', fn (\Illuminate\Http\Request $request) => app(\App\Http\Controllers\ConsoleNotificationController::class)->clear($request, 'reseller'))->middleware('perm:dashboard.view');
+        Route::post('/notifications/{notification}/read', fn (\Illuminate\Http\Request $request, \App\Models\ConsoleNotification $notification) => app(\App\Http\Controllers\ConsoleNotificationController::class)->read($request, 'reseller', $notification))->middleware('perm:dashboard.view');
         Route::get('/me', [ResellerController::class, 'me']);
         Route::post('/me', [ResellerController::class, 'updateMe']);
         Route::get('/me/commission-period', [ResellerController::class, 'commissionPeriod'])->middleware('perm:commission.view');
@@ -209,6 +213,10 @@ Route::prefix('admin')->group(function () {
     Route::post('/reset-password', [AdminController::class, 'resetPassword'])->middleware('throttle:auth-reset');
     Route::post('/check-reset-code', \App\Http\Controllers\PasswordResetCheckController::class)->defaults('accountType', 'admin')->middleware('throttle:auth-reset');
     Route::middleware('sanctum.type:admin')->post('/logout', [AdminController::class, 'logout']);
+    Route::middleware(['sanctum.type:admin','perm:dashboard.view'])->get('/notifications', fn (\Illuminate\Http\Request $request) => app(\App\Http\Controllers\ConsoleNotificationController::class)->index($request, 'admin'));
+    Route::middleware(['sanctum.type:admin','perm:dashboard.view'])->post('/notifications/read-all', fn (\Illuminate\Http\Request $request) => app(\App\Http\Controllers\ConsoleNotificationController::class)->readAll($request, 'admin'));
+    Route::middleware(['sanctum.type:admin','perm:dashboard.view'])->post('/notifications/clear', fn (\Illuminate\Http\Request $request) => app(\App\Http\Controllers\ConsoleNotificationController::class)->clear($request, 'admin'));
+    Route::middleware(['sanctum.type:admin','perm:dashboard.view'])->post('/notifications/{notification}/read', fn (\Illuminate\Http\Request $request, \App\Models\ConsoleNotification $notification) => app(\App\Http\Controllers\ConsoleNotificationController::class)->read($request, 'admin', $notification));
     // Temporarily disable admin creation endpoint to prevent accidental creation of multiple admins during testing
     Route::middleware(['sanctum.type:admin','perm:admins.manage'])->post('/create', [AdminController::class, 'store']);
     Route::middleware('sanctum.type:admin')->get('/me', function (\Illuminate\Http\Request $request) { $admin=$request->user(); $admin->setAttribute('store_id', null)->setAttribute('permissions', $admin->permissions()); return response()->json($admin); });
@@ -457,6 +465,10 @@ Route::prefix('seller')->middleware(['sanctum.type:seller','store.scope'])->grou
     Route::middleware('throttle:auth-resend')->post('/staff/me/email', [\App\Http\Controllers\SellerStaffController::class, 'emailRequest']);
     Route::middleware('throttle:auth-verify')->post('/staff/me/email/verify-new', [\App\Http\Controllers\SellerStaffController::class, 'emailVerifyNew']);
     Route::middleware('throttle:auth-resend')->post('/staff/me/email/resend', [\App\Http\Controllers\SellerStaffController::class, 'emailResend']);
+    Route::get('/notifications', fn (\Illuminate\Http\Request $request) => app(\App\Http\Controllers\ConsoleNotificationController::class)->index($request, 'seller'))->middleware('perm:dashboard.view');
+    Route::post('/notifications/read-all', fn (\Illuminate\Http\Request $request) => app(\App\Http\Controllers\ConsoleNotificationController::class)->readAll($request, 'seller'))->middleware('perm:dashboard.view');
+    Route::post('/notifications/clear', fn (\Illuminate\Http\Request $request) => app(\App\Http\Controllers\ConsoleNotificationController::class)->clear($request, 'seller'))->middleware('perm:dashboard.view');
+    Route::post('/notifications/{notification}/read', fn (\Illuminate\Http\Request $request, \App\Models\ConsoleNotification $notification) => app(\App\Http\Controllers\ConsoleNotificationController::class)->read($request, 'seller', $notification))->middleware('perm:dashboard.view');
     Route::get('/payouts', [PartnerPayoutController::class, 'sellerPayouts'])->middleware('perm:dashboard.view');
     Route::post('/payouts/withdraw', [PartnerPayoutController::class, 'withdrawSeller'])->middleware('perm:dashboard.view');
     Route::post('/payout-accounts', fn (\Illuminate\Http\Request $request) => app(PartnerPayoutController::class)->saveAccount($request, 'seller'))->middleware('perm:dashboard.view');

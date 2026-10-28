@@ -172,6 +172,12 @@ class InventoryService
 
                 $lot->quantity_remaining = (int) $lot->quantity_remaining - $take;
                 $lot->save();
+                // A small fixed threshold keeps the console informed until a
+                // per-product reorder level is introduced.
+                if ((int) $lot->quantity_remaining <= 5) {
+                    $product = $lot->product_id ? Product::find($lot->product_id) : ProductVariation::find($lot->variation_id)?->product;
+                    if ($product) app(ConsoleNotificationService::class)->lowStock($product->seller_id, $product->name, (int) $lot->quantity_remaining, $lot->id);
+                }
 
                 $movementMeta = array_merge($meta, [
                     'unit_buying_price' => (string) $lot->buying_price,

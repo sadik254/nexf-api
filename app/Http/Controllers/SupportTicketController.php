@@ -50,6 +50,7 @@ class SupportTicketController extends Controller
             $ticket->messages()->create(['author_type' => 'guest', 'author_id' => 0, 'body' => trim($data['message']), 'attachments' => []]);
             return $ticket;
         });
+        app(\App\Services\ConsoleNotificationService::class)->support($ticket, 'new');
         return response()->json(['message' => 'Message received.', 'id' => $ticket->id, 'reference' => $ticket->reference], 201);
     }
 
@@ -115,6 +116,7 @@ class SupportTicketController extends Controller
             $ticket->messages()->create(['author_type' => $customer instanceof Customer ? 'customer' : 'reseller', 'author_id' => $customer->id, 'body' => trim($data['body']), 'attachments' => $data['attachments'] ?? []]);
             return $ticket;
         });
+        app(\App\Services\ConsoleNotificationService::class)->support($ticket->load('order:id,order_number'), 'new');
         return response()->json($ticket->load(['customer:id,name,email', 'seller:id,store_name,store_slug', 'reseller:id,name,email', 'order:id,order_number', 'messages']), 201);
     }
 
@@ -168,6 +170,7 @@ class SupportTicketController extends Controller
             ]);
             return $ticket;
         });
+        app(\App\Services\ConsoleNotificationService::class)->support($ticket->load('order:id,order_number'), 'new');
 
         return response()->json($ticket->load(['customer:id,name,email', 'seller:id,store_name,store_slug', 'reseller:id,name,email', 'order:id,order_number', 'messages']), 201);
     }
@@ -189,6 +192,7 @@ class SupportTicketController extends Controller
             ]);
             $ticket->update(['status' => 'open', 'resolved_at' => null]);
         });
+        app(\App\Services\ConsoleNotificationService::class)->support($ticket->fresh('order:id,order_number'), 'reply');
         return $this->show($request, $ticket);
     }
 

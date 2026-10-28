@@ -50,6 +50,7 @@ class WithdrawalController extends Controller
             CustomerWalletTransaction::create(['customer_id' => $customer->id, 'type' => 'debit', 'kind' => 'withdrawal', 'amount' => $data['amount'], 'withdrawal_request_id' => $request->id, 'description' => "Withdrawal request {$request->reference}"]);
             return $request;
         });
+        app(\App\Services\ConsoleNotificationService::class)->withdrawal($withdrawal->reference, (float) $withdrawal->amount);
         return response()->json($withdrawal, 201);
     }
     public function index(Request $request): JsonResponse { return response()->json(WithdrawalRequest::with('customer:id,name,email')->latest()->paginate(min(100, max(1, (int) $request->query('per_page', 25))))); }

@@ -137,6 +137,7 @@ class PartnerPayoutController extends Controller
             $withdrawal->update(['reference' => 'PAY-' . str_pad((string) $withdrawal->id, 5, '0', STR_PAD_LEFT)]);
             return $withdrawal;
         });
+        app(\App\Services\ConsoleNotificationService::class)->payout($type, $owner->id, $withdrawal->reference, (float) $withdrawal->amount);
         return response()->json($withdrawal, 201);
     }
 
