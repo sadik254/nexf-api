@@ -12,14 +12,14 @@
         For your security, you've been signed out on all devices.
     </p>
 
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;line-height:20px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;background:#fafafa;border:1px solid #e4e4e7;border-radius:10px;font-size:14px;line-height:20px;">
         <tr>
-            <td style="padding:14px 20px 4px;color:#6b7280;">When</td>
-            <td align="right" style="padding:14px 20px 4px;color:#111827;font-weight:600;">{{ $changedAt }}</td>
+            <td style="padding:14px 20px 4px;color:#71717a;">When</td>
+            <td align="right" style="padding:14px 20px 4px;color:#09090b;font-weight:600;">{{ $changedAt }}</td>
         </tr>
         <tr>
-            <td style="padding:4px 20px 14px;color:#6b7280;">IP address</td>
-            <td align="right" style="padding:4px 20px 14px;color:#111827;font-weight:600;">{{ $ip ?: 'Unknown' }}</td>
+            <td style="padding:4px 20px 14px;color:#71717a;">IP address</td>
+            <td align="right" style="padding:4px 20px 14px;color:#09090b;font-weight:600;">{{ $ip ?: 'Unknown' }}</td>
         </tr>
     </table>
 

@@ -25,6 +25,6 @@
         @include('emails.partials.button', ['url' => $url, 'label' => $code ? 'Create password' : 'Go to seller sign-in'])
     @endif
     @if ($code)
-        <p style="margin:0;font-size:13px;line-height:20px;color:#6b7280;">This link works for seven days. After that, use Forgot password on the seller sign-in page with {{ $seller->email }}.</p>
+        <p style="margin:0;font-size:13px;line-height:20px;color:#71717a;">This link works for 7 days. After that, use Forgot password on the seller sign-in page with {{ $seller->email }}.</p>
     @endif
 @endsection

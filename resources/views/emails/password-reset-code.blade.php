@@ -19,13 +19,13 @@
     @else
         <p style="margin:0 0 8px;">Use this code to reset your {{ $accountType }} account password:</p>
     @endif
-    @include('emails.partials.code', ['code' => $code, 'expires' => $expiresMinutes.' minutes'])
+    @include('emails.partials.code', ['code' => $code, 'expires' => '10 minutes'])
     @if ($url)
         @include('emails.partials.button', ['url' => $url, 'label' => $invite ? 'Set password' : 'Reset password'])
     @endif
-    <p style="margin:0;font-size:13px;line-height:20px;color:#6b7280;">
+    <p style="margin:0;font-size:13px;line-height:20px;color:#71717a;">
         @if ($invite)
-            The code expires in {{ $expiresMinutes }} minutes. If it runs out, tap Resend on that page and we'll email a new one.
+            The code expires in 10 minutes. If it runs out, tap Resend on that page and we'll email a new one.
         @else
             If you didn't request a password reset, you can ignore this email. Your password won't change.
         @endif

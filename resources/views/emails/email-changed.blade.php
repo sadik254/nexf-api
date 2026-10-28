@@ -15,18 +15,18 @@
         @endif
     </p>
 
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;line-height:20px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;background:#fafafa;border:1px solid #e4e4e7;border-radius:10px;font-size:14px;line-height:20px;">
         <tr>
-            <td style="padding:14px 20px 4px;color:#6b7280;white-space:nowrap;">Old email</td>
-            <td align="right" style="padding:14px 20px 4px;color:#6b7280;text-decoration:line-through;word-break:break-all;">{{ $oldEmail }}</td>
+            <td style="padding:14px 20px 4px;color:#71717a;white-space:nowrap;">Old email</td>
+            <td align="right" style="padding:14px 20px 4px;color:#71717a;text-decoration:line-through;word-break:break-all;">{{ $oldEmail }}</td>
         </tr>
         <tr>
-            <td style="padding:4px 20px;color:#6b7280;white-space:nowrap;">New email</td>
-            <td align="right" style="padding:4px 20px;color:#111827;font-weight:600;word-break:break-all;">{{ $newEmail }}</td>
+            <td style="padding:4px 20px;color:#71717a;white-space:nowrap;">New email</td>
+            <td align="right" style="padding:4px 20px;color:#09090b;font-weight:600;word-break:break-all;">{{ $newEmail }}</td>
         </tr>
         <tr>
-            <td style="padding:4px 20px 14px;color:#6b7280;white-space:nowrap;">When</td>
-            <td align="right" style="padding:4px 20px 14px;color:#111827;">{{ $changedAt }}</td>
+            <td style="padding:4px 20px 14px;color:#71717a;white-space:nowrap;">When</td>
+            <td align="right" style="padding:4px 20px 14px;color:#09090b;">{{ $changedAt }}</td>
         </tr>
     </table>
 

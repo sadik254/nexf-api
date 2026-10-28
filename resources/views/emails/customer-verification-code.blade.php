@@ -25,5 +25,5 @@
     @if ($verifyUrl)
         @include('emails.partials.button', ['url' => $verifyUrl, 'label' => 'Verify email'])
     @endif
-    <p style="margin:0;font-size:13px;line-height:20px;color:#6b7280;">If you didn't request this code, you can ignore this email.</p>
+    <p style="margin:0;font-size:13px;line-height:20px;color:#71717a;">If you didn't request this code, you can ignore this email.</p>
 @endsection

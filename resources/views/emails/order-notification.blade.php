@@ -8,20 +8,34 @@
         'delivered', 'completed' => ['#ecfdf5', '#047857'],
         'shipped' => ['#eff6ff', '#1d4ed8'],
         'return_pending' => ['#fff7ed', '#c2410c'],
-        default => ['#f3f4f6', '#374151'],
+        default => ['#f4f4f5', '#3f3f46'],
     };
-    $variant = function ($attributes) {
+    // Lines snapshot raw option keys ({"vg-1": "white"}); the product's option groups name them ("Color: White").
+    $variant = function ($item) {
+        $attributes = $item->variation_attributes;
         if (!is_array($attributes) || !$attributes) return '';
-        return collect($attributes)->map(function ($value, $key) {
+        $groups = collect($item->product?->option_groups ?? [])->keyBy('key');
+        return collect($attributes)->map(function ($value, $key) use ($groups) {
             if (is_array($value)) {
                 $name = $value['name'] ?? $value['attribute'] ?? null;
                 $val = $value['value'] ?? $value['option'] ?? null;
                 return $name && $val ? "{$name}: {$val}" : ($val ?? $name);
             }
-            return is_string($key) ? "{$key}: {$value}" : $value;
+            $group = $groups->get($key);
+            $label = collect($group['values'] ?? [])->firstWhere('value', (string) $value)['label'] ?? ucfirst((string) $value);
+            if ($group) return "{$group['label']}: {$label}";
+            return is_string($key) && !preg_match('/^vg-\d+$/i', $key) ? ucwords(str_replace('_', ' ', $key)).": {$label}" : $label;
         })->filter()->implode(' · ');
     };
-    $address = collect([$order->shipping_address, $order->shipping_area, $order->shipping_district])->filter()->implode(', ');
+    // The saved address line already ends with the thana and district; drop that tail so they show once, on their own line.
+    $locality = collect([$order->shipping_area, $order->shipping_district])->filter()->unique()->implode(', ');
+    $street = trim((string) $order->shipping_address);
+    foreach ([$order->shipping_district, $order->shipping_area] as $part) {
+        if ($part && preg_match('/(?:^|[,\s]+)'.preg_quote(trim($part), '/').'$/iu', $street, $m)) {
+            $street = rtrim(substr($street, 0, -strlen($m[0])), ", \t");
+        }
+    }
+    $address = $street || $locality;
     $frontend = rtrim((string) config('app.frontend_url'), '/');
     $audience = $audience ?? 'customer';
     $isStaff = $audience !== 'customer';
@@ -46,14 +60,14 @@
         <p style="margin:0 0 20px;">{{ $messageLine }}</p>
     @endif
 
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;background:#fafafa;border:1px solid #e4e4e7;border-radius:10px;">
         <tr>
             <td style="padding:14px 18px;">
-                <div style="font-size:12px;line-height:16px;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;color:#6b7280;">Order</div>
-                <div style="font-size:16px;line-height:24px;font-weight:700;color:#111827;">{{ $order->order_number }}</div>
+                <div style="font-size:12px;line-height:16px;font-weight:500;color:#71717a;">Order</div>
+                <div style="font-size:16px;line-height:24px;font-weight:600;color:#09090b;">{{ $order->order_number }}</div>
             </td>
             <td align="right" style="padding:14px 18px;">
-                <span style="display:inline-block;padding:4px 12px;border-radius:999px;background:{{ $statusColors[0] }};color:{{ $statusColors[1] }};font-size:13px;line-height:18px;font-weight:600;">{{ $statusLabel }}</span>
+                <span style="display:inline-block;padding:2px 8px;border-radius:999px;background:{{ $statusColors[0] }};color:{{ $statusColors[1] }};font-size:12px;line-height:16px;font-weight:500;">{{ $statusLabel }}</span>
             </td>
         </tr>
     </table>
@@ -65,9 +79,9 @@
             : collect();
     @endphp
     @if ($parcels->isNotEmpty())
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;background:#fafafa;border:1px solid #e4e4e7;border-radius:10px;">
             <tr>
-                <td style="padding:14px 18px 4px;font-size:12px;line-height:16px;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;color:#1e3a8a;">Tracking</td>
+                <td style="padding:14px 18px 4px;font-size:12px;line-height:16px;font-weight:500;color:#71717a;">Tracking</td>
             </tr>
             @foreach ($parcels as $parcel)
                 @php
@@ -76,13 +90,13 @@
                         ? 'https://steadfast.com.bd/t/'.rawurlencode($parcel->tracking_number) : null;
                 @endphp
                 <tr>
-                    <td style="padding:2px 18px {{ $loop->last ? '14px' : '6px' }};font-size:14px;line-height:21px;color:#111827;">
+                    <td style="padding:2px 18px {{ $loop->last ? '14px' : '6px' }};font-size:14px;line-height:21px;color:#09090b;">
                         {{ $courier }}: <strong style="font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;">{{ $parcel->tracking_number }}</strong>
                         @if ($trackUrl)
-                            &nbsp;<a href="{{ $trackUrl }}" style="color:#1d4ed8;font-weight:600;">Track parcel</a>
+                            &nbsp;<a href="{{ $trackUrl }}" style="color:#066fff;font-weight:600;">Track parcel</a>
                         @endif
                         @if ($parcel->courier_tracking_message)
-                            <div style="font-size:13px;line-height:19px;color:#4b5563;">{{ $parcel->courier_tracking_message }}</div>
+                            <div style="font-size:13px;line-height:19px;color:#52525b;">{{ $parcel->courier_tracking_message }}</div>
                         @endif
                     </td>
                 </tr>
@@ -92,24 +106,24 @@
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 4px;">
         @foreach ($items as $item)
-            @php $variantText = $variant($item->variation_attributes); @endphp
+            @php $variantText = $variant($item); @endphp
             <tr>
-                <td style="padding:12px 0;border-bottom:1px solid #f3f4f6;vertical-align:top;">
-                    <div style="font-size:14px;line-height:20px;font-weight:600;color:#111827;">{{ $item->product_name }}</div>
-                    <div style="font-size:13px;line-height:18px;color:#6b7280;">
+                <td style="padding:12px 0;border-bottom:1px solid #e4e4e7;vertical-align:top;">
+                    <div style="font-size:14px;line-height:20px;font-weight:600;color:#09090b;">{{ $item->product_name }}</div>
+                    <div style="font-size:13px;line-height:18px;color:#71717a;">
                         Qty {{ $item->quantity }}@if ($variantText) &middot; {{ $variantText }}@endif
                     </div>
                 </td>
-                <td align="right" style="padding:12px 0 12px 12px;border-bottom:1px solid #f3f4f6;vertical-align:top;white-space:nowrap;font-size:14px;line-height:20px;color:#111827;">{{ $money($item->line_subtotal) }}</td>
+                <td align="right" style="padding:12px 0 12px 12px;border-bottom:1px solid #e4e4e7;vertical-align:top;white-space:nowrap;font-size:14px;line-height:20px;color:#09090b;">{{ $money($item->line_subtotal) }}</td>
             </tr>
         @endforeach
     </table>
 
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;font-size:14px;line-height:20px;color:#4b5563;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;font-size:14px;line-height:20px;color:#52525b;">
     @if ($audience === 'seller')
         <tr>
-            <td style="padding:10px 0 0;font-size:16px;line-height:24px;font-weight:700;color:#111827;">Your items</td>
-            <td align="right" style="padding:10px 0 0;font-size:16px;line-height:24px;font-weight:700;color:#111827;">{{ $money($items->sum('line_subtotal')) }}</td>
+            <td style="padding:10px 0 0;font-size:16px;line-height:24px;font-weight:600;color:#09090b;">Your items</td>
+            <td align="right" style="padding:10px 0 0;font-size:16px;line-height:24px;font-weight:600;color:#09090b;">{{ $money($items->sum('line_subtotal')) }}</td>
         </tr>
     @else
         @if ($order->subtotal !== null)
@@ -122,8 +136,8 @@
             <tr><td style="padding:3px 0;">Discount{{ $order->coupon_code ? ' ('.$order->coupon_code.')' : '' }}</td><td align="right" style="padding:3px 0;color:#047857;">−{{ $money($order->discount_total) }}</td></tr>
         @endif
         <tr>
-            <td style="padding:10px 0 0;border-top:1px solid #e5e7eb;font-size:16px;line-height:24px;font-weight:700;color:#111827;">Total</td>
-            <td align="right" style="padding:10px 0 0;border-top:1px solid #e5e7eb;font-size:16px;line-height:24px;font-weight:700;color:#111827;">{{ $money($order->total) }}</td>
+            <td style="padding:10px 0 0;border-top:1px solid #e4e4e7;font-size:16px;line-height:24px;font-weight:600;color:#09090b;">Total</td>
+            <td align="right" style="padding:10px 0 0;border-top:1px solid #e4e4e7;font-size:16px;line-height:24px;font-weight:600;color:#09090b;">{{ $money($order->total) }}</td>
         </tr>
     @endif
     </table>
@@ -132,18 +146,19 @@
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;">
             <tr>
                 @if ($order->shipping_name || $address)
-                    <td style="vertical-align:top;padding-right:12px;font-size:13px;line-height:20px;color:#4b5563;">
-                        <div style="font-size:12px;line-height:16px;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;color:#6b7280;padding-bottom:4px;">Delivery</div>
-                        @if ($order->shipping_name)<div style="color:#111827;font-weight:600;">{{ $order->shipping_name }}</div>@endif
+                    <td style="vertical-align:top;padding-right:12px;font-size:13px;line-height:20px;color:#52525b;">
+                        <div style="font-size:12px;line-height:16px;font-weight:500;color:#71717a;padding-bottom:4px;">Delivery</div>
+                        @if ($order->shipping_name)<div style="color:#09090b;font-weight:600;">{{ $order->shipping_name }}</div>@endif
                         @if ($order->shipping_phone)<div>{{ $order->shipping_phone }}</div>@endif
                         @if ($isStaff && $order->shipping_email)<div>{{ $order->shipping_email }}</div>@endif
-                        @if ($address)<div>{{ $address }}</div>@endif
+                        @if ($street)<div>{{ $street }}</div>@endif
+                        @if ($locality)<div>{{ $locality }}</div>@endif
                     </td>
                 @endif
                 @if ($order->payment_method_name)
-                    <td style="vertical-align:top;font-size:13px;line-height:20px;color:#4b5563;">
-                        <div style="font-size:12px;line-height:16px;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;color:#6b7280;padding-bottom:4px;">Payment</div>
-                        <div style="color:#111827;font-weight:600;">{{ $order->payment_method_name }}</div>
+                    <td style="vertical-align:top;font-size:13px;line-height:20px;color:#52525b;">
+                        <div style="font-size:12px;line-height:16px;font-weight:500;color:#71717a;padding-bottom:4px;">Payment</div>
+                        <div style="color:#09090b;font-weight:600;">{{ $order->payment_method_name }}</div>
                         @if ($order->payment_status)<div>{{ ucwords(str_replace('_', ' ', $order->payment_status)) }}</div>@endif
                     </td>
                 @endif
@@ -152,6 +167,6 @@
     @endif
 
     @if ($ordersUrl)
-        @include('emails.partials.button', ['url' => $ordersUrl, 'label' => $isStaff ? 'Open order' : 'View order'])
+        @include('emails.partials.button', ['url' => $ordersUrl, 'label' => 'View order'])
     @endif
 @endsection

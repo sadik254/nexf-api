@@ -6,7 +6,7 @@
 --}}
 @php
     $callouts = [
-        'info' => ['#eff6ff', '#bfdbfe', '#1e3a8a'],
+        'info' => ['#ffffff', '#e4e4e7', '#09090b'],
         'danger' => ['#fef2f2', '#fecaca', '#7f1d1d'],
         'success' => ['#ecfdf5', '#a7f3d0', '#065f46'],
     ];
@@ -28,17 +28,17 @@
     @if (!empty($quote))
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;">
             <tr>
-                <td style="border-left:3px solid #056fff;background:#f9fafb;border-radius:0 8px 8px 0;padding:12px 16px;font-size:14px;line-height:21px;color:#374151;white-space:pre-line;">{{ $quote }}</td>
+                <td style="border-left:3px solid #056fff;background:#fafafa;border-radius:0 8px 8px 0;padding:12px 16px;font-size:14px;line-height:21px;color:#3f3f46;white-space:pre-line;">{{ $quote }}</td>
             </tr>
         </table>
     @endif
 
     @if (!empty($rows))
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;line-height:20px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;background:#fafafa;border:1px solid #e4e4e7;border-radius:10px;font-size:14px;line-height:20px;">
             @foreach ($rows as $label => $value)
                 <tr>
-                    <td style="padding:{{ $loop->first ? '14px' : '4px' }} 20px {{ $loop->last ? '14px' : '4px' }};color:#6b7280;white-space:nowrap;vertical-align:top;">{{ $label }}</td>
-                    <td align="right" style="padding:{{ $loop->first ? '14px' : '4px' }} 20px {{ $loop->last ? '14px' : '4px' }};color:#111827;font-weight:600;word-break:break-word;">{{ $value }}</td>
+                    <td style="padding:{{ $loop->first ? '14px' : '4px' }} 20px {{ $loop->last ? '14px' : '4px' }};color:#71717a;white-space:nowrap;vertical-align:top;">{{ $label }}</td>
+                    <td align="right" style="padding:{{ $loop->first ? '14px' : '4px' }} 20px {{ $loop->last ? '14px' : '4px' }};color:#09090b;font-weight:600;word-break:break-word;">{{ $value }}</td>
                 </tr>
             @endforeach
         </table>
@@ -57,6 +57,6 @@
     @endif
 
     @if (!empty($footnote))
-        <p style="margin:0;font-size:13px;line-height:20px;color:#6b7280;">{{ $footnote }}</p>
+        <p style="margin:0;font-size:13px;line-height:20px;color:#71717a;">{{ $footnote }}</p>
     @endif
 @endsection
