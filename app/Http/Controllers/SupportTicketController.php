@@ -193,6 +193,7 @@ class SupportTicketController extends Controller
             $ticket->update(['status' => 'open', 'resolved_at' => null]);
         });
         app(\App\Services\ConsoleNotificationService::class)->support($ticket->fresh('order:id,order_number'), 'reply');
+        if (!($actor instanceof Customer)) app(\App\Services\CustomerNotificationService::class)->supportReply($ticket);
         return $this->show($request, $ticket);
     }
 
@@ -202,6 +203,7 @@ class SupportTicketController extends Controller
         $this->authorizeTicket($actor, $ticket);
         abort_if($actor instanceof Customer, 403);
         $ticket->update(['status' => 'resolved', 'resolved_at' => now()]);
+        app(\App\Services\CustomerNotificationService::class)->supportResolved($ticket);
         return $this->show($request, $ticket);
     }
 

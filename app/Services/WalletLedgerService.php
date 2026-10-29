@@ -58,9 +58,12 @@ class WalletLedgerService
     private function credit(?Customer $customer, ?Order $order, string $kind, float $amount, string $description, string $sourceKey, string $bucket, ?int $returnRequestId = null): ?CustomerWalletTransaction
     {
         if (!$customer || $amount <= 0) return null;
-        return CustomerWalletTransaction::firstOrCreate(
+        $transaction = CustomerWalletTransaction::firstOrCreate(
             ['customer_id' => $customer->id, 'kind' => $kind, 'source_key' => $sourceKey],
             ['order_id' => $order?->id, 'return_request_id' => $returnRequestId, 'type' => 'credit', 'bucket' => $bucket, 'amount' => $amount, 'description' => $description],
         );
+        // A retry returns the existing row, so it cannot repeat the bell event.
+        if ($transaction->wasRecentlyCreated) app(CustomerNotificationService::class)->walletCredit($transaction);
+        return $transaction;
     }
 }

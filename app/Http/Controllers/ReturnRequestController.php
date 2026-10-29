@@ -204,6 +204,7 @@ class ReturnRequestController extends Controller
                 app(\App\Services\WalletLedgerService::class)->refundCredit($returnRequest->fresh('order', 'customer'), (float) $updates['refund_amount']);
             }
         });
+        app(\App\Services\CustomerNotificationService::class)->returnUpdated($returnRequest->fresh());
         return $this->show($request, $returnRequest);
     }
 

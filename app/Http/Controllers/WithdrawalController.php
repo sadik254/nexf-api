@@ -67,7 +67,9 @@ class WithdrawalController extends Controller
             if ($data['status'] === 'rejected') CustomerWalletTransaction::create(['customer_id' => $locked->customer_id, 'type' => 'credit', 'kind' => 'withdrawal_reversal', 'bucket' => 'withdrawable', 'amount' => $locked->amount, 'withdrawal_request_id' => $locked->id, 'description' => "Rejected withdrawal {$locked->reference}"]);
             $locked->update(['status' => $data['status'], 'admin_note' => $data['admin_note'] ?? null, 'transaction_id' => $data['transaction_id'] ?? null, 'processed_by_admin_id' => $admin->id, 'processed_at' => now()]);
         });
-        return response()->json($withdrawal->refresh());
+        $withdrawal = $withdrawal->fresh();
+        app(\App\Services\CustomerNotificationService::class)->withdrawal($withdrawal);
+        return response()->json($withdrawal);
     }
     private function balance(int $customerId, bool $lock = false): float
     {
