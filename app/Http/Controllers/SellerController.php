@@ -303,7 +303,7 @@ class SellerController extends Controller
 
         return response()->json([
             'message' => 'Seller onboarding submitted and pending approval.',
-            'seller' => $seller->setAttribute('staff', $staff),
+            'seller' => $seller,
         ], 201);
     }
 
