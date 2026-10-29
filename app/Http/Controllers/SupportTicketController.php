@@ -70,6 +70,7 @@ class SupportTicketController extends Controller
         if ($actor instanceof Seller) $query->where('seller_id', $actor->id);
         if ($actor instanceof Reseller) $query->where('reseller_id', $actor->id);
         if ($request->filled('status')) $query->where('status', $request->validate(['status' => ['required', Rule::in(['open', 'resolved'])]])['status']);
+        if ($request->boolean('escalated')) $query->whereNotNull('escalated_at');
         if ($request->filled('search')) {
             $search = substr((string) $request->query('search'), 0, 100);
             $query->where(fn ($q) => $q->where('subject', 'like', "%{$search}%")->orWhere('category', 'like', "%{$search}%"));
@@ -111,6 +112,8 @@ class SupportTicketController extends Controller
                 'reseller_id' => $customer instanceof Reseller ? $customer->id : null,
                 'order_id' => $orderId, 'seller_id' => $sellerId,
                 'category' => trim($data['category']), 'subject' => trim($data['subject']),
+                // A store has a day to answer before the customer can bring NEXF in.
+                'respond_by' => $sellerId ? now()->addHours(24) : null,
             ]);
             $ticket->update(['reference' => 'SUP-' . str_pad((string) $ticket->id, 5, '0', STR_PAD_LEFT)]);
             $ticket->messages()->create(['author_type' => $customer instanceof Customer ? 'customer' : 'reseller', 'author_id' => $customer->id, 'body' => trim($data['body']), 'attachments' => $data['attachments'] ?? []]);
@@ -190,7 +193,8 @@ class SupportTicketController extends Controller
                 'author_type' => $staff instanceof SellerStaff ? 'seller_staff' : ($actor instanceof Customer ? 'customer' : ($actor instanceof Seller ? 'seller' : ($actor instanceof Reseller ? 'reseller' : 'admin'))),
                 'author_id' => $staff?->id ?? $actor->id, 'author_name' => $staff?->name, 'body' => trim($data['body']), 'attachments' => $data['attachments'] ?? [],
             ]);
-            $ticket->update(['status' => 'open', 'resolved_at' => null]);
+            $ticket->update(['status' => 'open', 'resolved_at' => null]
+                + ($actor instanceof Seller && !$ticket->seller_responded_at ? ['seller_responded_at' => now()] : []));
         });
         app(\App\Services\ConsoleNotificationService::class)->support($ticket->fresh('order:id,order_number'), 'reply');
         if (!($actor instanceof Customer)) app(\App\Services\CustomerNotificationService::class)->supportReply($ticket);
@@ -204,6 +208,22 @@ class SupportTicketController extends Controller
         abort_if($actor instanceof Customer, 403);
         $ticket->update(['status' => 'resolved', 'resolved_at' => now()]);
         app(\App\Services\CustomerNotificationService::class)->supportResolved($ticket);
+        return $this->show($request, $ticket);
+    }
+
+    /** POST /customers/support-tickets/{ticket}/escalate - bring NEXF into an open store ticket. */
+    public function escalate(Request $request, SupportTicket $ticket): JsonResponse
+    {
+        $customer = $this->actor($request);
+        abort_unless($customer instanceof Customer, 403);
+        $this->authorizeTicket($customer, $ticket);
+        if (!$ticket->seller_id || $ticket->status !== 'open' || $ticket->escalated_at) {
+            throw ValidationException::withMessages(['ticket' => ['Only an open store ticket can be passed to NEXF.']]);
+        }
+        $ticket->update(['escalated_at' => now()]);
+        // Returns filed with the ticket go to NEXF with it, so staff can overrule the store.
+        \App\Models\ReturnRequest::query()->where('support_ticket_id', $ticket->id)->whereNull('escalated_at')->update(['escalated_at' => now()]);
+        app(\App\Services\ConsoleNotificationService::class)->escalated('/dashboard/support', (string) $ticket->reference, $ticket->order?->order_number, $ticket->seller_id);
         return $this->show($request, $ticket);
     }
 

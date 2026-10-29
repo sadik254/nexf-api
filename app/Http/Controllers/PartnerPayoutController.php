@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Admin;
 use App\Models\OrderItem;
+use App\Models\OrderStoreGroup;
+use App\Models\ReturnRequest;
 use App\Models\PartnerPayoutAccount;
 use App\Models\PartnerWithdrawal;
 use App\Models\Reseller;
@@ -158,14 +160,49 @@ class PartnerPayoutController extends Controller
         $settling = (float) $earnings->where('state', 'settling')->sum('amount');
         $withdrawals = $this->withdrawalsFor($type, $owner)->selectRaw("COALESCE(SUM(CASE WHEN status = 'requested' THEN amount ELSE 0 END), 0) pending, COALESCE(SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END), 0) paid")->first();
         $pending = (float) $withdrawals->pending; $paid = (float) $withdrawals->paid;
-        return ['available' => round(max(0, $settled - $pending - $paid), 2), 'settling' => round($settling, 2), 'pending' => round($pending, 2), 'paid' => round($paid, 2), 'lifetime' => round($settled + $settling, 2)];
+        $net = $settled - $pending - $paid;
+        // `owed`: COD a store collected itself outweighs what NEXF holds for it - the store owes NEXF.
+        return ['available' => round(max(0, $net), 2), 'owed' => round(max(0, -$net), 2), 'settling' => round($settling, 2), 'pending' => round($pending, 2), 'paid' => round($paid, 2), 'lifetime' => round($settled + $settling, 2)];
+    }
+
+    /** GET /admin/sellers/{seller}/payouts - a store's ledger and balance, including what it owes NEXF. */
+    public function adminSellerPayouts(Request $request, Seller $seller): JsonResponse
+    {
+        abort_unless($request->user() instanceof Admin, 403);
+        return response()->json($this->payload('seller', $seller));
     }
 
     private function earnings(string $type, Seller|Reseller $owner): array
     {
         if ($type === 'seller') {
-            return OrderItem::query()->where('seller_id', $owner->id)->where('fulfillment_status', 'delivered')->whereNotNull('delivered_at')->orderByDesc('delivered_at')->get()
-                ->map(fn (OrderItem $item) => ['id' => 'item-' . $item->id, 'date' => $item->delivered_at->toDateString(), 'order_item_id' => $item->id, 'amount' => round((float) $item->line_subtotal * (1 - ((float) ($item->commission_rate ?? $owner->commission_rate) / 100)), 2), 'state' => $item->delivered_at->lte(now()->subDays(self::HOLD_DAYS)) ? 'settled' : 'settling'])->all();
+            $rate = fn ($itemRate) => (float) ($itemRate ?? $owner->commission_rate) / 100;
+            // One ledger row. `amount`/`state` drive the balance; `ref`/`gross`/`fee`/`net`/
+            // `available_on`/`settled` are what the console's Earnings table shows.
+            $row = function (string $id, string $kind, ?string $ref, $at, float $gross, float $fee, bool $held) {
+                $availableOn = $held ? $at->copy()->addDays(self::HOLD_DAYS) : $at;
+                $net = round($gross - $fee, 2);
+                return ['id' => $id, 'kind' => $kind, 'ref' => $ref, 'date' => $at->toIso8601String(), 'gross' => round($gross, 2), 'fee' => round($fee, 2), 'net' => $net,
+                    'available_on' => $availableOn->toIso8601String(), 'settled' => $availableOn->lte(now()), 'amount' => $net, 'state' => $availableOn->lte(now()) ? 'settled' : 'settling'];
+            };
+            // Sales: each delivered line, less NEXF's commission, held for the return window.
+            $rows = OrderItem::query()->with('order:id,order_number')->where('seller_id', $owner->id)->where('fulfillment_status', 'delivered')->whereNotNull('delivered_at')->get()
+                ->map(fn (OrderItem $item) => $row('item-' . $item->id, 'order', $item->order?->order_number, $item->delivered_at, (float) $item->line_subtotal, (float) $item->line_subtotal * $rate($item->commission_rate), true));
+            // Parcels the store shipped itself: it keeps the delivery charge, pays its own coupons,
+            // and already holds the COD its courier collected - that is settled at once.
+            $parcels = OrderStoreGroup::query()->where('seller_id', $owner->id)->where('ships_by', 'seller')->whereNotNull('delivered_at')->whereNotIn('status', ['return_pending', 'returned', 'cancelled'])->get();
+            foreach ($parcels as $group) {
+                if ((float) $group->shipping_charge > 0 || (float) $group->seller_funded_discount > 0) {
+                    $rows->push($row('delivery-' . $group->id, 'delivery', $group->number, $group->delivered_at, (float) $group->shipping_charge, (float) $group->seller_funded_discount, true));
+                }
+                if ((float) $group->cod_amount > 0) $rows->push($row('cod-' . $group->id, 'cod', $group->number, $group->delivered_at, 0, (float) $group->cod_amount, false));
+            }
+            // Refunds NEXF paid out on the store's returns come back off its earnings.
+            $refunds = ReturnRequest::query()->with('item:id,commission_rate')->where('seller_id', $owner->id)->where('status', 'refunded')->whereNotNull('completed_at')->get();
+            foreach ($refunds as $return) {
+                $refund = (float) $return->refund_amount;
+                $rows->push($row('refund-' . $return->id, 'refund', $return->reference, $return->completed_at, -$refund, -$refund * $rate($return->item?->commission_rate), false));
+            }
+            return $rows->sortByDesc('date')->values()->all();
         }
         $months = [];
         for ($month = now()->copy()->startOfMonth()->subMonths(11); $month->lte(now()->copy()->startOfMonth()); $month->addMonth()) {

@@ -79,7 +79,7 @@ class ReturnRequestController extends Controller
             $claimed = ReturnRequest::where('order_item_id', $lockedItem->id)->whereNotIn('status', ['rejected', 'cancelled'])->sum('quantity');
             if ($claimed + $data['quantity'] > $lockedItem->quantity) throw ValidationException::withMessages(['quantity' => 'This item quantity is already in a return request.']);
             $order = $lockedItem->order;
-            $return = ReturnRequest::create(['order_item_id' => $lockedItem->id, 'order_id' => $lockedItem->order_id, 'customer_id' => $customer->id, 'seller_id' => $lockedItem->seller_id, 'support_ticket_id' => $data['support_ticket_id'] ?? null, 'submission_reference' => $data['submission_reference'] ?? null, 'type' => $data['type'], 'status' => 'requested', 'quantity' => $data['quantity'], 'reason' => trim($data['reason']), 'refund_to' => $data['refund_to'] ?? 'balance', 'attachments' => $data['attachments'] ?? [], 'return_address_name' => $order->shipping_name, 'return_address_phone' => $order->shipping_phone, 'return_address_email' => $order->shipping_email, 'return_address' => $order->shipping_address, 'return_address_area' => $order->shipping_area, 'return_address_district' => $order->shipping_district]);
+            $return = ReturnRequest::create(['order_item_id' => $lockedItem->id, 'order_id' => $lockedItem->order_id, 'customer_id' => $customer->id, 'seller_id' => $lockedItem->seller_id, 'support_ticket_id' => $data['support_ticket_id'] ?? null, 'submission_reference' => $data['submission_reference'] ?? null, 'type' => $data['type'], 'status' => 'requested', 'quantity' => $data['quantity'], 'reason' => trim($data['reason']), 'refund_to' => $data['refund_to'] ?? 'balance', 'attachments' => $data['attachments'] ?? [], 'return_address_name' => $order->shipping_name, 'return_address_phone' => $order->shipping_phone, 'return_address_email' => $order->shipping_email, 'return_address' => $order->shipping_address, 'return_address_area' => $order->shipping_area, 'return_address_district' => $order->shipping_district] + $this->routing($lockedItem));
             $return->update(['reference' => 'RET-' . str_pad((string) $return->id, 5, '0', STR_PAD_LEFT)]);
             return $return;
         });
@@ -129,7 +129,7 @@ class ReturnRequestController extends Controller
                     'return_address_phone' => $order->shipping_phone, 'return_address_email' => $order->shipping_email,
                     'return_address' => $order->shipping_address, 'return_address_area' => $order->shipping_area,
                     'return_address_district' => $order->shipping_district,
-                ]);
+                ] + $this->routing($item));
                 $reference = 'RET-' . str_pad((string) $return->id, 5, '0', STR_PAD_LEFT);
                 $return->update(['reference' => $reference, 'submission_reference' => $reference]);
                 $created[] = $return;
@@ -170,7 +170,9 @@ class ReturnRequestController extends Controller
             ]);
             return $this->show($request, $returnRequest);
         }
-        $allowed = ['requested' => ['approved', 'rejected', 'cancelled'], 'approved' => ['returning', 'in_transit', 'received', 'cancelled'], 'returning' => ['in_transit', 'received', 'cancelled'], 'in_transit' => ['received', 'cancelled'], 'received' => [$returnRequest->type === 'refund' ? 'refunded' : 'exchanged']];
+        $allowed = ['requested' => ['approved', 'rejected', 'cancelled'], 'approved' => ['returning', 'in_transit', 'received', 'cancelled'], 'returning' => ['in_transit', 'received', 'cancelled'], 'in_transit' => ['received', 'cancelled'], 'received' => [$returnRequest->type === 'refund' ? 'refunded' : 'exchanged'],
+            // NEXF can overrule a store's rejection once the customer escalates it.
+            'rejected' => $actor instanceof Admin && $returnRequest->escalated_at ? ['approved'] : []];
         $next = $data['status'];
         if ($actor instanceof Seller && $next === 'refunded') abort(403, 'Only an administrator can record a completed refund.');
         if (!in_array($next, $allowed[$returnRequest->status] ?? [], true)) throw ValidationException::withMessages(['status' => 'Invalid return transition.']);
@@ -233,6 +235,41 @@ class ReturnRequestController extends Controller
             'item', 'order:id,order_number,customer_id,payment_method_id,payment_method_name,payment_status,total,shipping_name,shipping_phone,shipping_email,shipping_address,status,created_at',
             'order.paymentMethod:id,name,code', 'exchangeOrder:id,order_number,status,total,exchange_for', 'customer:id,name,email,phone', 'seller:id,store_name', 'ticket:id,subject',
         ]));
+    }
+
+    /**
+     * POST /customers/return-requests/{id}/escalate - ask NEXF to step in when
+     * the store hasn't answered within 48 hours or turned the request down.
+     */
+    public function escalate(Request $request, ReturnRequest $returnRequest): JsonResponse
+    {
+        $customer = $this->actor($request);
+        abort_unless($customer instanceof Customer, 403);
+        $this->authorizeRequest($customer, $returnRequest);
+        if (!$returnRequest->seller_id || $returnRequest->escalated_at || !($returnRequest->overdue || $returnRequest->status === 'rejected')) {
+            throw ValidationException::withMessages(['return_request' => ['You can ask NEXF to step in once the store has turned this down or not answered within 48 hours.']]);
+        }
+        $returnRequest->update(['escalated_at' => now()]);
+        app(\App\Services\ConsoleNotificationService::class)->escalated('/dashboard/returns', (string) $returnRequest->reference, $returnRequest->order?->order_number, $returnRequest->seller_id);
+        return $this->show($request, $returnRequest);
+    }
+
+    /**
+     * Where the parcel goes back to - the store that shipped it, not a NEXF
+     * warehouse - and, for a third-party store, its 48-hour answer deadline.
+     */
+    private function routing(OrderItem $item): array
+    {
+        $shipper = $item->storeGroup?->ships_by === 'seller' ? $item->storeGroup->seller : ($item->storeGroup ? null : $item->seller);
+        $store = $shipper ?? \App\Models\Store::primary();
+        $address = collect([$store?->address_line, $store?->address_area, $store?->address_district])->filter()->implode(', ') ?: $store?->store_address;
+        return [
+            'return_to_name' => $shipper?->store_name ?? $store?->name ?? config('app.name'),
+            'return_to_phone' => $store?->support_phone ?: ($shipper?->phone ?? null),
+            'return_to_address' => $address ?: null,
+            // Only a store that shipped the parcel itself answers on a deadline; NEXF handles the rest.
+            'respond_by' => $shipper ? now()->addHours(48) : null,
+        ];
     }
 
     private function actor(Request $request): Customer|Seller|Admin

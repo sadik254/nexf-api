@@ -271,19 +271,23 @@ class OrderLifecycleTest extends TestCase
             ->assertOk()->assertJsonPath('order.items.0.fulfillment_status', 'confirmed');
         $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'shipped'])
             ->assertUnprocessable();
+        // A store's parcel ships with the store's own courier: packing books nothing with Steadfast.
         $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'packed'])
+            ->assertOk()->assertJsonPath('order.items.0.fulfillment_status', 'packed')
+            ->assertJsonPath('order.items.0.courier_consignment_id', null);
+        $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'shipped', 'courier_provider' => 'Pathao Courier'])
+            ->assertUnprocessable()->assertJsonValidationErrors('tracking_number');
+        $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}/items/{$itemId}/fulfillment", ['status' => 'shipped', 'courier_provider' => 'Pathao Courier', 'tracking_number' => 'PTH-9'])
             ->assertOk()->assertJsonPath('order.items.0.fulfillment_status', 'shipped')
-            ->assertJsonPath('order.items.0.courier_provider', 'steadfast')
-            ->assertJsonPath('order.items.0.tracking_number', 'DIRECT-TRACK');
+            ->assertJsonPath('order.items.0.tracking_number', 'PTH-9');
+        Http::assertNothingSent();
 
         $bulkOrder = $this->placeOrder($customer, $product, 1)->assertCreated()->json('order');
         $bulkItemId = $bulkOrder['items'][0]['id'];
         $this->withToken($token)->postJson("/api/admin/orders/{$bulkOrder['id']}/items/{$bulkItemId}/fulfillment", ['status' => 'confirmed'])->assertOk();
-        $this->withToken($token)->postJson('/api/admin/orders/bulk-ship', ['order_item_ids' => [$bulkItemId]])->assertUnprocessable();
-        OrderItem::findOrFail($bulkItemId)->update(['fulfillment_status' => 'packed']); // retries a previously failed packing submission
+        OrderItem::findOrFail($bulkItemId)->update(['fulfillment_status' => 'packed']);
         $this->withToken($token)->postJson('/api/admin/orders/bulk-ship', ['order_item_ids' => [$bulkItemId]])
-            ->assertOk()->assertJsonPath('successful_item_ids.0', $bulkItemId);
-        $this->assertDatabaseHas('order_items', ['id' => $bulkItemId, 'fulfillment_status' => 'shipped', 'courier_provider' => 'steadfast']);
+            ->assertUnprocessable()->assertJsonPath('message', 'A store ships its own parcels; only NEXF parcels can be booked here.');
     }
 
     public function test_products_referenced_by_orders_cannot_be_deleted(): void

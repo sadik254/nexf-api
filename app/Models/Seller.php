@@ -51,11 +51,17 @@ class Seller extends Authenticatable
         'password',
         'remember_token',
         'store_layout',
+        'steadfast_api_key',
+        'steadfast_secret_key',
+        'steadfast_webhook_token',
     ];
 
     protected function casts(): array
     {
         return [
+            'steadfast_api_key' => 'encrypted',
+            'steadfast_secret_key' => 'encrypted',
+            'steadfast_connected_at' => 'datetime',
             'delivery_options_customized' => 'boolean',
             'store_layout' => 'array',
             'password' => 'hashed',

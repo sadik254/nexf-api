@@ -106,6 +106,10 @@ class Order extends Model
                 $order->payment_received_at = (float) $order->paid_amount > 0 ? ($order->payment_received_at ?? now()) : null;
             }
         });
+        // Money in or out changes what each unshipped parcel collects on delivery.
+        static::saved(function (Order $order): void {
+            if ($order->wasChanged(['paid_amount', 'payment_status', 'wallet_amount'])) app(\App\Services\SubOrderService::class)->allocate($order);
+        });
     }
 
     public function customer(): BelongsTo

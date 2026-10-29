@@ -10,6 +10,7 @@ class OrderItem extends Model
 {
     protected $fillable = [
         'order_id',
+        'store_group_id',
         'product_id',
         'variation_id',
         'seller_id',
@@ -83,6 +84,11 @@ class OrderItem extends Model
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class);
+    }
+
+    public function storeGroup(): BelongsTo
+    {
+        return $this->belongsTo(OrderStoreGroup::class, 'store_group_id');
     }
 
     public function product(): BelongsTo

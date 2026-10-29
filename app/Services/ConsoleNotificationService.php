@@ -64,6 +64,14 @@ class ConsoleNotificationService
         if ($ticket->reseller_id) $this->reseller($ticket->reseller_id, 'support_'.$event, $title, $ticket->subject, $data, $source);
     }
 
+    /** A customer asked NEXF to step into a store's return or ticket. */
+    public function escalated(string $url, string $reference, ?string $orderNumber, ?int $sellerId): void
+    {
+        $data = ['url' => $url, 'reference' => $reference, 'order_number' => $orderNumber];
+        $this->admins('escalated', "{$reference} needs NEXF", 'The customer asked NEXF to step in.', $data, "escalated:{$reference}");
+        if ($sellerId) $this->seller($sellerId, 'escalated', "{$reference} escalated to NEXF", 'The customer asked NEXF to step in.', $data, "escalated:{$reference}");
+    }
+
     public function payout(string $payee, int $id, string $reference, float $amount): void
     {
         $data = ['url' => '/dashboard/withdrawals', 'reference' => $reference];

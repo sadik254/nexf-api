@@ -2,41 +2,33 @@
 
 namespace App\Services;
 
-use App\Models\OrderItem;
+use App\Models\OrderStoreGroup;
+use App\Models\Seller;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\ValidationException;
 
+/**
+ * Books NEXF's own parcels with Steadfast. One consignment per sub-order (store
+ * group): the group number is the invoice, its lines are the description and
+ * its COD is what the customer still owes for that parcel.
+ */
 class SteadfastService
 {
-    public function createBulkConsignments(iterable $items): array
+    public function __construct(private SubOrderService $subOrders) {}
+
+    /** @param iterable<OrderStoreGroup> $groups */
+    public function createBulkConsignments(iterable $groups): array
     {
-        $apiKey = (string) config('services.steadfast.api_key');
-        $secretKey = (string) config('services.steadfast.secret_key');
-        if ($apiKey === '' || $secretKey === '') {
-            throw ValidationException::withMessages(['courier' => ['SteadFast credentials are not configured.']]);
-        }
+        [$apiKey, $secretKey] = $this->credentials();
 
         $payload = [];
-        foreach ($items as $item) {
-            $order = $item->order;
-            $phone = preg_replace('/\D+/', '', (string) $order->shipping_phone);
-            if (strlen($phone) !== 11) {
-                $item->update(['courier_error' => 'A valid 11-digit phone number is required for SteadFast delivery.']);
+        foreach ($groups as $group) {
+            $parcel = $this->parcel($group);
+            if (is_string($parcel)) {
+                $group->update(['courier_error' => $parcel]);
                 continue;
             }
-            $invoice = $order->order_number . '-ITEM-' . $item->id;
-            $payload[$invoice] = [
-                'invoice' => $invoice,
-                'recipient_name' => $order->shipping_name,
-                'recipient_phone' => $phone,
-                'recipient_email' => $order->customer?->email,
-                'recipient_address' => $order->shipping_address,
-                'cod_amount' => (float) $item->line_subtotal,
-                'note' => $order->notes,
-                'item_description' => $item->product_name,
-                'total_lot' => $item->quantity,
-                'delivery_type' => 0,
-            ];
+            $payload[$parcel['invoice']] = $parcel;
         }
 
         if ($payload === []) return [];
@@ -56,33 +48,15 @@ class SteadfastService
         return is_array($results) ? $results : [];
     }
 
-    public function createConsignment(OrderItem $item): array
+    /**
+     * Books one parcel. A store's parcel goes on the store's own Steadfast
+     * account (its keys from Store settings); NEXF's goes on NEXF's.
+     */
+    public function createConsignment(OrderStoreGroup $group): array
     {
-        $apiKey = (string) config('services.steadfast.api_key');
-        $secretKey = (string) config('services.steadfast.secret_key');
-        if ($apiKey === '' || $secretKey === '') {
-            throw ValidationException::withMessages(['courier' => ['SteadFast credentials are not configured.']]);
-        }
-
-        $order = $item->order()->with('customer')->firstOrFail();
-        $phone = preg_replace('/\D+/', '', (string) $order->shipping_phone);
-        if (strlen($phone) !== 11) {
-            throw ValidationException::withMessages(['shipping_phone' => ['A valid 11-digit phone number is required for SteadFast delivery.']]);
-        }
-
-        $invoice = $order->order_number . '-ITEM-' . $item->id;
-        $payload = [
-            'invoice' => $invoice,
-            'recipient_name' => $order->shipping_name,
-            'recipient_phone' => $phone,
-            'recipient_email' => $order->customer?->email,
-            'recipient_address' => $order->shipping_address,
-            'cod_amount' => (float) $item->line_subtotal,
-            'note' => $order->notes,
-            'item_description' => $item->product_name,
-            'total_lot' => $item->quantity,
-            'delivery_type' => 0,
-        ];
+        [$apiKey, $secretKey] = $this->credentials($group->ships_by === 'seller' ? $group->seller : null);
+        $payload = $this->parcel($group);
+        if (is_string($payload)) throw ValidationException::withMessages(['shipping_phone' => [$payload]]);
 
         $response = Http::timeout(config('services.steadfast.timeout', 15))
             ->acceptJson()
@@ -91,8 +65,8 @@ class SteadfastService
 
         // Steadfast response logging intentionally disabled after integration.
         // Log::info('Steadfast consignment response', [
-        //     'order_item_id' => $item->id,
-        //     'invoice' => $invoice,
+        //     'store_group_id' => $group->id,
+        //     'invoice' => $payload['invoice'],
         //     'http_status' => $response->status(),
         //     'response' => $response->json() ?? $response->body(),
         // ]);
@@ -110,12 +84,54 @@ class SteadfastService
         return [
             'provider' => 'steadfast',
             'consignment_id' => (string) ($consignment['consignment_id'] ?? ''),
-            'invoice' => (string) ($consignment['invoice'] ?? $invoice),
+            'invoice' => (string) ($consignment['invoice'] ?? $payload['invoice']),
             'tracking_code' => (string) $consignment['tracking_code'],
             'tracking_url' => isset($consignment['tracking_link']) ? (string) $consignment['tracking_link'] : null,
             'status' => (string) ($consignment['status'] ?? 'in_review'),
             'created_at' => $consignment['created_at'] ?? null,
             'updated_at' => $consignment['updated_at'] ?? null,
         ];
+    }
+
+    /** The consignment for one group, or why it can't be booked. */
+    private function parcel(OrderStoreGroup $group): array|string
+    {
+        $group->loadMissing(['order.customer', 'items']);
+        $order = $group->order;
+        $phone = preg_replace('/\D+/', '', (string) $order->shipping_phone);
+        if (strlen($phone) !== 11) return 'A valid 11-digit phone number is required for SteadFast delivery.';
+
+        return [
+            'invoice' => $group->number,
+            'recipient_name' => $order->shipping_name,
+            'recipient_phone' => $phone,
+            'recipient_email' => $order->customer?->email,
+            'recipient_address' => $order->shipping_address,
+            'cod_amount' => (float) $group->cod_amount,
+            'note' => $order->notes,
+            'item_description' => $this->subOrders->itemDescription($group),
+            'total_lot' => (int) $group->items->where('fulfillment_status', '!=', 'cancelled')->sum('quantity'),
+            'delivery_type' => 0,
+        ];
+    }
+
+    /** Whether a store has connected its own Steadfast account. */
+    public static function storeConnected(?Seller $seller): bool
+    {
+        return $seller !== null && $seller->steadfast_connected_at !== null && filled($seller->steadfast_api_key) && filled($seller->steadfast_secret_key);
+    }
+
+    private function credentials(?Seller $seller = null): array
+    {
+        if ($seller) {
+            if (!self::storeConnected($seller)) throw ValidationException::withMessages(['courier' => ['Connect your Steadfast account in Store settings first.']]);
+            return [(string) $seller->steadfast_api_key, (string) $seller->steadfast_secret_key];
+        }
+        $apiKey = (string) config('services.steadfast.api_key');
+        $secretKey = (string) config('services.steadfast.secret_key');
+        if ($apiKey === '' || $secretKey === '') {
+            throw ValidationException::withMessages(['courier' => ['SteadFast credentials are not configured.']]);
+        }
+        return [$apiKey, $secretKey];
     }
 }

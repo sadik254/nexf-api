@@ -143,6 +143,7 @@ Route::prefix('customers')->group(function () {
         Route::post('/support-tickets', [SupportTicketController::class, 'store']);
         Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show']);
         Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);
+        Route::post('/support-tickets/{ticket}/escalate', [SupportTicketController::class, 'escalate']);
         Route::post('/support-attachments', [SupportTicketController::class, 'upload']);
         Route::post('/chat-attachments', [SupportTicketController::class, 'upload']);
         Route::get('/chats', [StoreChatController::class, 'index']);
@@ -154,6 +155,7 @@ Route::prefix('customers')->group(function () {
         Route::post('/return-requests', [ReturnRequestController::class, 'store']);
         Route::post('/return-requests/batch', [ReturnRequestController::class, 'storeBatch']);
         Route::get('/return-requests/{returnRequest}', [ReturnRequestController::class, 'show']);
+        Route::post('/return-requests/{returnRequest}/escalate', [ReturnRequestController::class, 'escalate']);
         Route::get('/wallet', [WithdrawalController::class, 'wallet']);
         Route::get('/payout-accounts', [\App\Http\Controllers\CustomerPayoutController::class, 'index']);
         Route::post('/payout-accounts', [\App\Http\Controllers\CustomerPayoutController::class, 'save']);
@@ -268,6 +270,7 @@ Route::prefix('admin')->group(function () {
     Route::middleware(['sanctum.type:admin','perm:orders.manage'])->get('/orders/{order}', [OrderController::class, 'showAdmin']);
     Route::middleware(['sanctum.type:admin','perm:orders.manage'])->post('/orders/{order}', [OrderController::class, 'updateStatus']);
     Route::middleware(['sanctum.type:admin','perm:orders.manage'])->post('/orders/{order}/items/{item}/fulfillment', [OrderController::class, 'fulfillAdminItem']);
+    Route::middleware(['sanctum.type:admin','perm:orders.manage'])->post('/orders/{order}/groups/{group}/fulfillment', [OrderController::class, 'fulfillAdminGroup']);
     Route::middleware(['sanctum.type:admin','perm:orders.manage'])->post('/orders/{order}/items/{item}/reconcile-return', [OrderController::class, 'reconcileReturn']);
     Route::middleware(['sanctum.type:admin','perm:orders.manage'])->post('/orders/{order}/cancel', [OrderController::class, 'cancel']);
     Route::middleware(['sanctum.type:admin','perm:orders.manage'])->post('/orders/{order}/delete', [OrderController::class, 'destroyAdmin']);
@@ -341,6 +344,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {
     Route::get('/withdrawals', [WithdrawalController::class, 'index'])->middleware('perm:withdrawals.settle');
     Route::post('/withdrawals/{withdrawal}', [WithdrawalController::class, 'update'])->middleware('perm:withdrawals.settle');
     Route::get('/partner-withdrawals', [PartnerPayoutController::class, 'adminIndex'])->middleware('perm:withdrawals.settle');
+    Route::get('/sellers/{seller}/payouts', [PartnerPayoutController::class, 'adminSellerPayouts'])->middleware('perm:withdrawals.settle');
     Route::post('/partner-withdrawals/{partnerWithdrawal}', [PartnerPayoutController::class, 'adminUpdate'])->middleware('perm:withdrawals.settle');
     Route::get('/support-tickets', [SupportTicketController::class, 'index'])->middleware('perm:support.reply');
     Route::post('/support-tickets', [SupportTicketController::class, 'storeConsole'])->middleware('perm:support.reply');
@@ -479,6 +483,9 @@ Route::prefix('seller')->middleware(['sanctum.type:seller','store.scope'])->grou
     Route::post('/payout-accounts/{account}/select', fn (\Illuminate\Http\Request $request, int $account) => app(PartnerPayoutController::class)->selectAccount($request, 'seller', $account))->middleware('perm:dashboard.view');
     Route::post('/payout-accounts/{account}/delete', fn (\Illuminate\Http\Request $request, int $account) => app(PartnerPayoutController::class)->deleteAccount($request, 'seller', $account))->middleware('perm:dashboard.view');
     Route::post('/store', [SellerController::class, 'updateStore'])->middleware('perm:store.profile');
+    Route::get('/courier', [\App\Http\Controllers\SellerCourierController::class, 'show'])->middleware('perm:store.profile');
+    Route::post('/courier/steadfast', [\App\Http\Controllers\SellerCourierController::class, 'connect'])->middleware('perm:store.profile');
+    Route::post('/courier/steadfast/delete', [\App\Http\Controllers\SellerCourierController::class, 'disconnect'])->middleware('perm:store.profile');
     Route::get('/staff', [\App\Http\Controllers\SellerStaffController::class, 'index'])->middleware('perm:staff.manage');
     Route::post('/staff', [\App\Http\Controllers\SellerStaffController::class, 'store'])->middleware('perm:staff.manage');
     Route::post('/staff/{staff}', [\App\Http\Controllers\SellerStaffController::class, 'update'])->middleware('perm:staff.manage');
@@ -549,6 +556,7 @@ Route::prefix('seller')->middleware(['sanctum.type:seller','store.scope'])->grou
     Route::get('/orders', [OrderController::class, 'indexSeller'])->middleware('perm:orders.view');
     Route::get('/orders/{order}', [OrderController::class, 'showSeller'])->middleware('perm:orders.view');
     Route::post('/orders/{order}/items/{item}/fulfillment', [OrderController::class, 'fulfillSellerItem'])->middleware('perm:orders.manage');
+    Route::post('/orders/{order}/groups/{group}/fulfillment', [OrderController::class, 'fulfillSellerGroup'])->middleware('perm:orders.manage');
     Route::get('/products', [ProductController::class, 'indexSellerSelf'])->middleware('perm:products.view');
     Route::post('/products', [ProductController::class, 'store'])->middleware('perm:products.edit');
     Route::get('/products/{product}', [ProductController::class, 'show'])->middleware('perm:products.edit');

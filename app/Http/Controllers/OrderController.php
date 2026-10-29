@@ -13,8 +13,10 @@ use App\Models\Product;
 use App\Models\ProductVariation;
 use App\Models\ShippingMethod;
 use App\Models\OrderItem;
+use App\Models\OrderStoreGroup;
 use App\Models\Seller;
 use App\Services\InventoryService;
+use App\Services\SubOrderService;
 use App\Services\CheckoutService;
 use App\Services\OrderNotificationService;
 use App\Services\SteadfastService;
@@ -31,8 +33,17 @@ use Illuminate\Validation\ValidationException;
 
 class OrderController extends Controller
 {
-    public function __construct(private InventoryService $inventory, private CheckoutService $checkout, private OrderNotificationService $notifications, private SteadfastService $steadfast, private StoreShippingService $storeShipping, private TurnstileService $turnstile)
+    public function __construct(private InventoryService $inventory, private CheckoutService $checkout, private OrderNotificationService $notifications, private SteadfastService $steadfast, private StoreShippingService $storeShipping, private TurnstileService $turnstile, private SubOrderService $subOrders)
     {
+    }
+
+    /**
+     * A store sees the sub-orders carrying its lines: its own, or the shared
+     * delivery group's parcel its lines ride in.
+     */
+    private function sellerGroups(int $sellerId): \Closure
+    {
+        return fn ($query) => $query->where(fn ($q) => $q->where('seller_id', $sellerId)->orWhereHas('items', fn ($items) => $items->where('seller_id', $sellerId)));
     }
 
     public function indexCustomer(Request $request): JsonResponse
@@ -171,14 +182,14 @@ class OrderController extends Controller
     public function indexSellerOrdersForSuperAdmin(Request $request, Seller $seller): JsonResponse
     {
         if (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
-        return response()->json($this->paginateOrderList(Order::whereHas('items', fn ($q) => $q->where('seller_id', $seller->id))->with(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => fn ($q) => $q->where('seller_id', $seller->id)])->latest(), $request, $seller->id));
+        return response()->json($this->paginateOrderList(Order::whereHas('items', fn ($q) => $q->where('seller_id', $seller->id))->with(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => $this->sellerGroups($seller->id)])->latest(), $request, $seller->id));
     }
 
     public function showSellerOrderForSuperAdmin(Request $request, Seller $seller, Order $order): JsonResponse
     {
         if (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
         if (!$order->items()->where('seller_id', $seller->id)->exists()) return response()->json(['message' => 'Order does not contain items from this seller.'], 404);
-        return response()->json($order->load(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => fn ($q) => $q->where('seller_id', $seller->id), 'paymentMethod', 'shippingMethod', 'coupon']));
+        return response()->json($order->load(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => $this->sellerGroups($seller->id), 'paymentMethod', 'shippingMethod', 'coupon']));
     }
 
     public function cancelSellerOrderForSuperAdmin(Request $request, Seller $seller, Order $order): JsonResponse
@@ -200,7 +211,7 @@ class OrderController extends Controller
                 ->with([
                     'customer:id,name,email,phone',
                     'items' => fn ($query) => $query->where('seller_id', $seller->id),
-                    'storeGroups' => fn ($query) => $query->where('seller_id', $seller->id),
+                    'storeGroups' => $this->sellerGroups($seller->id),
                     'shippingMethod',
                 ])
             ->latest(), $request, $seller->id
@@ -215,12 +226,39 @@ class OrderController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        return response()->json($order->load([
+        return response()->json($this->sellerView($order->load([
             'customer:id,name,email,phone',
             'items' => fn ($query) => $query->where('seller_id', $seller->id),
-            'storeGroups' => fn ($query) => $query->where('seller_id', $seller->id),
+            'storeGroups' => $this->sellerGroups($seller->id),
             'shippingMethod',
-        ]));
+        ])->toArray(), $seller->id));
+    }
+
+    /**
+     * A store's view of an order: its own lines' value, its delivery charge and
+     * discount share instead of the whole basket's, and its own sub-order's
+     * status rather than the slowest store's.
+     */
+    private function sellerView(array $order, int $sellerId): array
+    {
+        $items = collect($order['items'] ?? []);
+        $sellerSubtotal = round($items->sum(fn (array $item) => (float) $item['line_subtotal']), 2);
+        $storeGroup = collect($order['store_groups'] ?? [])->first(fn (array $group) => (int) ($group['seller_id'] ?? 0) === $sellerId);
+        $shippingCharge = (float) ($storeGroup['shipping_charge'] ?? 0);
+        $orderSubtotal = (float) ($order['subtotal'] ?? 0);
+        $discountShare = $storeGroup && array_key_exists('discount_share', $storeGroup)
+            ? (float) $storeGroup['discount_share']
+            : ($orderSubtotal > 0 ? round((float) ($order['discount_total'] ?? 0) * ($sellerSubtotal / $orderSubtotal), 2) : 0);
+        $order['seller_subtotal'] = $sellerSubtotal;
+        $order['seller_shipping_charge'] = $shippingCharge;
+        $order['seller_discount_share'] = $discountShare;
+        $order['seller_total'] = round($sellerSubtotal + $shippingCharge - $discountShare, 2);
+        if ($order['status'] !== 'cancelled' && $items->isNotEmpty()) {
+            $rank = ['pending' => 0, 'confirmed' => 1, 'packed' => 2, 'shipped' => 3, 'delivered' => 4, 'return_pending' => 5, 'returned' => 6];
+            $live = $items->pluck('fulfillment_status')->reject(fn ($s) => $s === 'cancelled');
+            if ($live->isNotEmpty()) $order['status'] = $live->sortBy(fn ($s) => $rank[$s] ?? 0)->first();
+        }
+        return $order;
     }
 
     public function updateStatus(Request $request, Order $order): JsonResponse
@@ -284,42 +322,23 @@ class OrderController extends Controller
             unset($data['packed']);
             DB::transaction(function () use ($order, $packed): void {
                 $locked = Order::query()->lockForUpdate()->findOrFail($order->id);
-                $items = $locked->items()->lockForUpdate()->get();
+                if ($locked->storeGroups()->exists() && $locked->items()->whereNull('store_group_id')->exists()) $this->subOrders->sync($locked);
+                // Only NEXF's own parcels: third-party stores pack and ship theirs.
+                $groups = $locked->storeGroups()->where('ships_by', 'nexf')->lockForUpdate()->get()
+                    ->each(fn (OrderStoreGroup $group) => $group->setRelation('items', $group->items()->where('fulfillment_status', '!=', 'cancelled')->lockForUpdate()->get()))
+                    ->filter(fn (OrderStoreGroup $group) => $group->items->isNotEmpty())->values();
                 if ($packed) {
-                    if ($locked->status !== 'confirmed' || $items->isEmpty() || $items->contains(fn (OrderItem $item) => $item->fulfillment_status !== 'confirmed')) {
-                        throw ValidationException::withMessages(['packed' => ['An order must be fully confirmed before it can be packed.']]);
+                    if ($groups->isEmpty() || $groups->contains(fn (OrderStoreGroup $group) => $group->items->contains(fn (OrderItem $item) => $item->fulfillment_status !== 'confirmed'))) {
+                        throw ValidationException::withMessages(['packed' => ['Every NEXF parcel on this order must be confirmed before it can be packed.']]);
                     }
-
-                    // Packing a house/admin order hands it to Steadfast.  Do not
-                    // mark a line shipped until the courier has accepted it.
-                    $byInvoice = collect($this->steadfast->createBulkConsignments($items))->keyBy('invoice');
-                    foreach ($items as $item) {
-                        $invoice = $locked->order_number . '-ITEM-' . $item->id;
-                        $result = $byInvoice->get($invoice);
-                        if (!$result || ($result['status'] ?? null) === 'error' || empty($result['tracking_code'])) {
-                            $item->update([
-                                'fulfillment_status' => 'packed',
-                                'courier_error' => $result['message'] ?? $item->fresh()->courier_error ?? 'SteadFast did not create this consignment.',
-                            ]);
-                            continue;
-                        }
-
-                        $item->update([
-                            'fulfillment_status' => 'shipped',
-                            'tracking_number' => $result['tracking_code'],
-                            'courier_tracking_url' => $result['tracking_link'] ?? $result['tracking_url'] ?? null,
-                            'courier_provider' => 'steadfast',
-                            'courier_consignment_id' => (string) ($result['consignment_id'] ?? ''),
-                            'courier_invoice' => $result['invoice'] ?? $invoice,
-                            'courier_status' => $result['status'] ?? 'in_review',
-                            'shipped_at' => now(),
-                            'courier_created_at' => $result['created_at'] ?? now(),
-                            'courier_updated_at' => $result['updated_at'] ?? now(),
-                            'courier_error' => null,
-                        ]);
+                    // A manual-ship parcel (an exchange) is booked by hand; the rest go to Steadfast.
+                    if ($locked->manual_ship) {
+                        foreach ($groups as $group) $group->items()->where('fulfillment_status', 'confirmed')->update(['fulfillment_status' => 'packed']);
+                    } else {
+                        $this->bookGroups($groups);
                     }
-                } elseif ($locked->status === 'packed' && $items->every(fn (OrderItem $item) => $item->fulfillment_status === 'packed')) {
-                    $locked->items()->update(['fulfillment_status' => 'confirmed']);
+                } elseif ($groups->isNotEmpty() && $groups->every(fn (OrderStoreGroup $group) => $group->items->every(fn (OrderItem $item) => $item->fulfillment_status === 'packed'))) {
+                    foreach ($groups as $group) $group->items()->where('fulfillment_status', 'packed')->update(['fulfillment_status' => 'confirmed']);
                 } else {
                     throw ValidationException::withMessages(['packed' => ['Only a fully packed, unshipped order can be unpacked.']]);
                 }
@@ -457,6 +476,7 @@ class OrderController extends Controller
                 $appliedCoupon->increment('used_count');
                 CouponRedemption::create(['coupon_id' => $appliedCoupon->id, 'customer_id' => $customer?->id, 'order_id' => $locked->id, 'coupon_code' => $appliedCoupon->code, 'coupon_name' => $appliedCoupon->name, 'is_automatic' => $appliedCoupon->is_automatic, 'order_subtotal' => $subtotal, 'discount_amount' => $appliedDiscount['amount']]);
             }
+            $this->subOrders->sync($locked);
             return $locked->fresh()->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
 
@@ -527,49 +547,107 @@ class OrderController extends Controller
             }
             $this->inventory->restoreOrderItem($lockedItem, $request->user(), 'return_reconciliation');
             $lockedItem->update(['fulfillment_status' => 'returned']);
+            if ($lockedItem->storeGroup) $this->subOrders->refreshStatus($lockedItem->storeGroup);
             if (!$lockedOrder->items()->whereNotIn('fulfillment_status', ['returned', 'cancelled'])->exists()) {
                 $lockedOrder->update(['status' => 'cancelled', 'cancelled_at' => $lockedOrder->cancelled_at ?? now(), 'cancelled_by' => $lockedOrder->cancelled_by ?? 'admin']);
             }
-            return $lockedOrder->load(['customer', 'items', 'paymentMethod', 'shippingMethod', 'coupon']);
+            return $lockedOrder->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
         return response()->json(['message' => 'Returned item reconciled and inventory restored.', 'order' => $result]);
     }
 
+    /**
+     * Books packed NEXF parcels with Steadfast in one request. Takes store
+     * group ids, or (older callers) line ids, which stand for their parcels.
+     */
     public function bulkShipAdmin(Request $request): JsonResponse
     {
         $admin = $request->user();
         if (!$admin instanceof Admin) return response()->json(['message' => 'Forbidden.'], 403);
-        $ids = $request->validate(['order_item_ids' => ['required', 'array', 'min:1', 'max:500'], 'order_item_ids.*' => ['integer', 'distinct', 'exists:order_items,id']])['order_item_ids'];
-        $items = OrderItem::query()->with(['order.customer'])->whereIn('id', $ids)->get();
-        return $this->bulkShipItems($items, $ids);
+        $data = $request->validate([
+            'store_group_ids' => ['required_without:order_item_ids', 'array', 'min:1', 'max:500'],
+            'store_group_ids.*' => ['integer', 'distinct', 'exists:order_store_groups,id'],
+            'order_item_ids' => ['required_without:store_group_ids', 'array', 'min:1', 'max:500'],
+            'order_item_ids.*' => ['integer', 'distinct', 'exists:order_items,id'],
+        ]);
+        $groupIds = collect($data['store_group_ids'] ?? []);
+        if (!empty($data['order_item_ids'])) {
+            $items = OrderItem::query()->whereIn('id', $data['order_item_ids'])->get();
+            foreach ($items->whereNull('store_group_id')->pluck('order_id')->unique() as $orderId) $this->subOrders->sync(Order::findOrFail($orderId));
+            $groupIds = $groupIds->merge(OrderItem::query()->whereIn('id', $data['order_item_ids'])->pluck('store_group_id'))->filter()->unique();
+        }
+        $groups = OrderStoreGroup::query()->with(['order.customer'])->whereIn('id', $groupIds)->get()
+            ->each(fn (OrderStoreGroup $group) => $group->setRelation('items', $group->items()->where('fulfillment_status', '!=', 'cancelled')->get()));
+
+        if ($groups->contains(fn (OrderStoreGroup $group) => $group->ships_by !== 'nexf')) {
+            return response()->json(['message' => 'A store ships its own parcels; only NEXF parcels can be booked here.'], 422);
+        }
+        if ($groups->contains(fn (OrderStoreGroup $group) => $group->courier_consignment_id || $group->items->isEmpty() || $group->items->contains(fn (OrderItem $item) => $item->fulfillment_status !== 'packed'))) {
+            return response()->json(['message' => 'All selected parcels must be packed and not already shipped.'], 422);
+        }
+
+        [$successful, $failed] = DB::transaction(fn () => $this->bookGroups($groups));
+        $itemIds = fn (array $ids) => OrderItem::query()->whereIn('store_group_id', $ids)->where('fulfillment_status', '!=', 'cancelled')->pluck('id')->values();
+
+        return response()->json([
+            'message' => 'Bulk fulfilment processed.',
+            'successful_store_group_ids' => $successful,
+            'failed_store_group_ids' => $failed,
+            'successful_item_ids' => $itemIds($successful),
+            'failed_item_ids' => $itemIds($failed),
+        ]);
     }
 
-    private function bulkShipItems($items, array $requestedIds): JsonResponse
+    /**
+     * Packs NEXF parcels and books them with Steadfast in one bulk request. A
+     * parcel the courier accepted moves to Shipped; one it refused stays Packed
+     * with the courier's reason, ready to retry.
+     *
+     * @return array{0: int[], 1: int[]} booked and failed group ids
+     */
+    private function bookGroups($groups): array
     {
-        if ($items->count() !== count($requestedIds)) return response()->json(['message' => 'One or more items are outside your fulfilment scope.'], 403);
-        $invalid = $items->first(fn ($item) => $item->fulfillment_status !== 'packed' || $item->courier_consignment_id);
-        if ($invalid) return response()->json(['message' => 'All selected items must be packed and not already shipped.'], 422);
-
-        $results = $this->steadfast->createBulkConsignments($items);
-        $byInvoice = collect($results)->keyBy('invoice');
+        foreach ($groups as $group) {
+            $group->items()->where('fulfillment_status', 'confirmed')->update(['fulfillment_status' => 'packed']);
+            $group->load(['order.customer', 'items']);
+        }
+        $byInvoice = collect($this->steadfast->createBulkConsignments($groups))->keyBy('invoice');
         $successful = [];
         $failed = [];
-        DB::transaction(function () use ($items, $byInvoice, &$successful, &$failed) {
-            foreach ($items as $item) {
-                $invoice = $item->order->order_number . '-ITEM-' . $item->id;
-                $result = $byInvoice->get($invoice);
-                if (!$result || ($result['status'] ?? null) === 'error' || empty($result['tracking_code'])) {
-                    $item->update(['courier_error' => $result['message'] ?? 'SteadFast did not create this consignment.']);
-                    $failed[] = $item->id;
-                    continue;
-                }
-                $item->update(['fulfillment_status' => 'shipped', 'tracking_number' => $result['tracking_code'], 'courier_tracking_url' => $result['tracking_link'] ?? $result['tracking_url'] ?? null, 'courier_provider' => 'steadfast', 'courier_consignment_id' => (string) ($result['consignment_id'] ?? ''), 'courier_invoice' => $result['invoice'] ?? $invoice, 'courier_status' => $result['status'] ?? 'in_review', 'shipped_at' => now(), 'courier_created_at' => $result['created_at'] ?? now(), 'courier_updated_at' => $result['updated_at'] ?? now(), 'courier_error' => null]);
-                $this->refreshOrderStatus($item->order);
-                $successful[] = $item->id;
+        foreach ($groups as $group) {
+            $result = $byInvoice->get($group->number);
+            if (!$result || ($result['status'] ?? null) === 'error' || empty($result['tracking_code'])) {
+                $group->update(['courier_error' => $result['message'] ?? $group->fresh()->courier_error ?? 'SteadFast did not create this consignment.']);
+                $this->subOrders->refreshStatus($group);
+                $failed[] = $group->id;
+                continue;
             }
-        });
+            $this->markGroupShipped($group, [
+                'courier_provider' => 'steadfast',
+                'tracking_number' => (string) $result['tracking_code'],
+                'courier_tracking_url' => $result['tracking_link'] ?? $result['tracking_url'] ?? null,
+                'courier_consignment_id' => (string) ($result['consignment_id'] ?? ''),
+                'courier_invoice' => $result['invoice'] ?? $group->number,
+                'courier_status' => $result['status'] ?? 'in_review',
+            ]);
+            $this->refreshOrderStatus($group->order);
+            $successful[] = $group->id;
+        }
+        return [$successful, $failed];
+    }
 
-        return response()->json(['message' => 'Bulk fulfilment processed.', 'successful_item_ids' => $successful, 'failed_item_ids' => $failed]);
+    /** Every live line in the parcel moves to Shipped with the parcel's courier details. */
+    private function markGroupShipped(OrderStoreGroup $group, array $courier): void
+    {
+        $courier += ['courier_error' => null];
+        $group->update($courier + ['shipped_at' => $group->shipped_at ?? now()]);
+        $group->items()->whereIn('fulfillment_status', ['packed', 'confirmed'])->update($courier + [
+            'fulfillment_status' => 'shipped',
+            'shipped_at' => now(),
+            'courier_created_at' => now(),
+            'courier_updated_at' => now(),
+        ]);
+        $this->subOrders->refreshStatus($group->fresh());
     }
 
     public function cancel(Request $request, Order $order): JsonResponse
@@ -607,6 +685,7 @@ class OrderController extends Controller
                 $this->inventory->restoreOrderItem($item, $actor);
                 $item->update(['fulfillment_status' => 'cancelled']);
             }
+            foreach ($lockedOrder->storeGroups()->get() as $group) $this->subOrders->refreshStatus($group);
 
             $lockedOrder->update(array_merge([
                 'status' => 'cancelled',
@@ -615,86 +694,146 @@ class OrderController extends Controller
             ], $extra));
             app(WalletLedgerService::class)->cancellationCredit($lockedOrder);
 
-            return $lockedOrder->load(['customer', 'items', 'paymentMethod', 'shippingMethod', 'coupon']);
+            return $lockedOrder->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
     }
 
+    public function fulfillSellerGroup(Request $request, Order $order, OrderStoreGroup $group): JsonResponse
+    {
+        /** @var Seller $seller */
+        $seller = $request->user();
+        if ((int) $group->order_id !== (int) $order->id || (int) $group->seller_id !== (int) $seller->id) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+        return $this->fulfill($request, $order, $group, null, $seller->id);
+    }
+
+    public function fulfillAdminGroup(Request $request, Order $order, OrderStoreGroup $group): JsonResponse
+    {
+        if (!$request->user() instanceof Admin) return response()->json(['message' => 'Forbidden.'], 403);
+        if ((int) $group->order_id !== (int) $order->id) return response()->json(['message' => 'This parcel does not belong to this order.'], 422);
+        return $this->fulfill($request, $order, $group);
+    }
+
+    /**
+     * The older per-line route. Confirming still confirms just that line; every
+     * later step moves the whole parcel the line ships in, since a parcel is
+     * packed, shipped and delivered as one.
+     */
     private function fulfillItem(Request $request, Order $order, OrderItem $item, ?int $sellerId = null): JsonResponse
+    {
+        if (!$item->store_group_id && $order->storeGroups()->exists()) $this->subOrders->sync($order);
+        $group = $item->fresh()->storeGroup;
+        if (!$group) throw ValidationException::withMessages(['order' => ['This order has no parcel to fulfil.']]);
+        if ($sellerId !== null && $request->input('status') !== 'confirmed' && (int) $group->seller_id !== $sellerId) {
+            throw ValidationException::withMessages(['status' => ["These lines ship in {$group->store_name}'s parcel, so that store packs and ships them."]]);
+        }
+        return $this->fulfill($request, $order, $group, $item, $sellerId);
+    }
+
+    /**
+     * Moves one parcel a step: confirmed → packed → shipped → delivered.
+     *
+     * NEXF's parcels (`ships_by` nexf) are booked with Steadfast on Packed and
+     * go straight to Shipped. A store's parcel is packed, shipped and marked
+     * delivered by the store (or staff on its behalf) with its own courier's
+     * details - NEXF never books it.
+     */
+    private function fulfill(Request $request, Order $order, OrderStoreGroup $group, ?OrderItem $only = null, ?int $sellerId = null): JsonResponse
     {
         $data = $request->validate([
             'status' => ['required', 'in:confirmed,packed,shipped,delivered'],
             'tracking_number' => ['nullable', 'string', 'max:255'],
             'courier_provider' => ['nullable', 'string', 'max:255'],
+            'tracking_url' => ['nullable', 'url', 'max:1000'],
         ]);
 
-        if ($sellerId !== null && $data['status'] === 'shipped' && empty($data['courier_provider'])) {
-            throw ValidationException::withMessages([
-                'courier_provider' => ['Parcel service is required when marking an item shipped.'],
-            ]);
-        }
-
         $actor = $request->attributes->get('seller_staff') ?? $request->user();
-        $order = DB::transaction(function () use ($order, $item, $data, $sellerId, $actor) {
+        $order = DB::transaction(function () use ($order, $group, $only, $data, $actor, $sellerId) {
             $lockedOrder = Order::query()->lockForUpdate()->findOrFail($order->id);
             if ($lockedOrder->status === 'cancelled') {
                 throw ValidationException::withMessages(['order' => ['Cancelled orders cannot be fulfilled.']]);
             }
+            $lockedGroup = OrderStoreGroup::query()->lockForUpdate()->findOrFail($group->id);
+            $items = $lockedGroup->items()->where('fulfillment_status', '!=', 'cancelled')->lockForUpdate()->get();
+            // Each store confirms its own lines, even inside a shared parcel.
+            if ($only && $data['status'] === 'confirmed') $items = $items->where('id', $only->id)->values();
+            elseif ($sellerId !== null && $data['status'] === 'confirmed') $items = $items->where('seller_id', $sellerId)->values();
+            if ($items->isEmpty()) throw ValidationException::withMessages(['status' => ['This parcel has nothing left to fulfil.']]);
 
-            $lockedItem = OrderItem::query()->lockForUpdate()->findOrFail($item->id);
-            $allowedNextStatus = [
-                'pending' => 'confirmed',
-                'confirmed' => 'packed',
-                'packed' => 'shipped',
-                'shipped' => 'delivered',
-            ][$lockedItem->fulfillment_status] ?? null;
-
-            if ($data['status'] !== $allowedNextStatus) {
-                throw ValidationException::withMessages([
-                    'status' => ["Item must transition from {$lockedItem->fulfillment_status} to {$allowedNextStatus}."],
-                ]);
+            $ladder = ['pending', 'confirmed', 'packed', 'shipped', 'delivered'];
+            $target = array_search($data['status'], $ladder, true);
+            $from = $ladder[$target - 1];
+            $moving = $items->where('fulfillment_status', $from);
+            $behind = $items->first(fn (OrderItem $item) => ($i = array_search($item->fulfillment_status, $ladder, true)) !== false && $i < $target - 1);
+            if ($moving->isEmpty() || $behind) {
+                $at = $only?->fresh()->fulfillment_status ?? ($behind?->fulfillment_status ?? $items->first()->fulfillment_status);
+                $next = $ladder[(array_search($at, $ladder, true) ?: 0) + 1] ?? null;
+                throw ValidationException::withMessages(['status' => [$only ? "Item must transition from {$at} to {$next}." : "Parcel must move from {$at} to {$next} first."]]);
             }
 
-            if ($data['status'] === 'confirmed' && $lockedItem->awaiting_stock) {
-                $this->takeAwaitedStock($lockedItem, $actor);
+            $nexfBooks = $lockedGroup->ships_by === 'nexf' && !$lockedOrder->manual_ship;
+            // A store that connected its own Steadfast account gets the same automatic booking, on its account.
+            $storeBooks = $lockedGroup->ships_by === 'seller' && !$lockedOrder->manual_ship && SteadfastService::storeConnected($lockedGroup->seller);
+            switch ($data['status']) {
+                case 'confirmed':
+                    foreach ($moving as $item) {
+                        if ($item->awaiting_stock) $this->takeAwaitedStock($item, $actor);
+                        $item->update(['fulfillment_status' => 'confirmed']);
+                    }
+                    break;
+                case 'packed':
+                    foreach ($moving as $item) $item->update(['fulfillment_status' => 'packed']);
+                    // Packing hands the parcel to Steadfast (NEXF's or the store's own account); a refusal aborts the step.
+                    if (($nexfBooks || $storeBooks) && !$lockedGroup->courier_consignment_id) {
+                        $lockedGroup->load(['order.customer', 'items']);
+                        $courier = $this->steadfast->createConsignment($lockedGroup);
+                        $this->markGroupShipped($lockedGroup, [
+                            'courier_provider' => $courier['provider'],
+                            'tracking_number' => $courier['tracking_code'],
+                            'courier_tracking_url' => $courier['tracking_url'],
+                            'courier_consignment_id' => $courier['consignment_id'],
+                            'courier_invoice' => $courier['invoice'],
+                            'courier_status' => $courier['status'],
+                        ]);
+                    }
+                    break;
+                case 'shipped':
+                    if ($nexfBooks) throw ValidationException::withMessages(['status' => ['NEXF parcels are booked with Steadfast when they are packed.']]);
+                    if ($lockedGroup->ships_by === 'seller' && empty($data['courier_provider'])) {
+                        throw ValidationException::withMessages(['courier_provider' => ['Parcel service is required when marking an item shipped.']]);
+                    }
+                    if (empty($data['tracking_number'])) {
+                        throw ValidationException::withMessages(['tracking_number' => ["Enter the courier's tracking code for this parcel."]]);
+                    }
+                    $this->markGroupShipped($lockedGroup, [
+                        'courier_provider' => $data['courier_provider'] ?? $lockedGroup->courier_provider ?? 'steadfast',
+                        'tracking_number' => $data['tracking_number'],
+                        'courier_tracking_url' => $data['tracking_url'] ?? null,
+                        'courier_consignment_id' => null,
+                        'courier_invoice' => $lockedGroup->number,
+                    ]);
+                    break;
+                case 'delivered':
+                    foreach ($moving as $item) $item->update(['fulfillment_status' => 'delivered', 'delivered_at' => now()]);
+                    break;
             }
 
-            $courier = null;
-            // For house/admin fulfilment, selecting Packed submits the parcel
-            // to Steadfast. A successful response advances it straight to
-            // Shipped; a rejected response aborts this transition.
-            if ($sellerId === null && $data['status'] === 'packed' && !$lockedItem->courier_consignment_id) {
-                $courier = $this->steadfast->createConsignment($lockedItem);
-            }
-
-            $nextStatus = $courier ? 'shipped' : $data['status'];
-
-            $lockedItem->update([
-                'fulfillment_status' => $nextStatus,
-                'tracking_number' => $courier['tracking_code'] ?? ($data['tracking_number'] ?? $lockedItem->tracking_number),
-                'courier_tracking_url' => $courier['tracking_url'] ?? $lockedItem->courier_tracking_url,
-                'courier_provider' => $courier['provider'] ?? ($data['courier_provider'] ?? $lockedItem->courier_provider),
-                'courier_consignment_id' => $courier['consignment_id'] ?? $lockedItem->courier_consignment_id,
-                'courier_invoice' => $courier['invoice'] ?? $lockedItem->courier_invoice,
-                'courier_status' => $courier['status'] ?? $lockedItem->courier_status,
-                'courier_created_at' => $courier['created_at'] ?? $lockedItem->courier_created_at,
-                'courier_updated_at' => $courier['updated_at'] ?? $lockedItem->courier_updated_at,
-                'shipped_at' => $nextStatus === 'shipped' ? now() : $lockedItem->shipped_at,
-                'delivered_at' => $data['status'] === 'delivered' ? now() : $lockedItem->delivered_at,
-            ]);
-
+            $this->subOrders->refreshStatus($lockedGroup->fresh());
             $this->refreshOrderStatus($lockedOrder);
 
-            return $lockedOrder->load(['customer', 'items', 'paymentMethod', 'shippingMethod', 'coupon']);
+            return $lockedOrder->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
 
         $this->notifications->statusChanged($order);
 
         if ($sellerId !== null) {
-            $order->load([
+            $order = $this->sellerView($order->load([
                 'customer:id,name,email,phone',
                 'items' => fn ($query) => $query->where('seller_id', $sellerId),
+                'storeGroups' => $this->sellerGroups($sellerId),
                 'shippingMethod',
-            ]);
+            ])->toArray(), $sellerId);
         }
 
         return response()->json([
@@ -717,6 +856,7 @@ class OrderController extends Controller
 
     public function refreshOrderStatus(Order $order): void
     {
+        foreach ($order->storeGroups()->get() as $group) $this->subOrders->refreshStatus($group);
         $statuses = $order->items()->pluck('fulfillment_status');
         if ($statuses->isEmpty()) {
             return;
@@ -783,6 +923,11 @@ class OrderController extends Controller
             if (!empty($data['coupon_code'])) {
                 throw ValidationException::withMessages(['coupon_code' => ['Exchange orders cannot use coupons.']]);
             }
+            // An exchange is a swap with the store that sold the item; another store's goods are a new order.
+            $sellerIds = Product::query()->whereIn('id', collect($data['items'])->pluck('product_id'))->pluck('seller_id')->unique();
+            if ($sellerIds->contains(fn ($id) => (int) $id !== (int) $exchangeReturn->seller_id || ($id === null) !== ($exchangeReturn->seller_id === null))) {
+                throw ValidationException::withMessages(['items' => ['An exchange can only use products from the store that sold the returned item.']]);
+            }
         }
 
         // Uses the same validation, availability, and pricing rules as checkout preview.
@@ -817,7 +962,8 @@ class OrderController extends Controller
             }
 
             $order = Order::create([
-                'order_number' => $this->generateOrderNumber($exchangeReturn ? 'EXC' : $this->orderPrefixForCart($data['items'])),
+                // The customer's order is always NEXF's; each store's part is numbered under it (NEXF-00024-SADK).
+                'order_number' => $this->generateOrderNumber($exchangeReturn ? 'EXC' : 'NEXF'),
                 'customer_id' => $customer?->id,
                 'reseller_id' => $customer?->reseller_id,
                 'reseller_commission_rate' => $customer?->reseller?->commission_rate,
@@ -1018,6 +1164,7 @@ class OrderController extends Controller
                 $lockedReturn->update(['exchange_order_id' => $order->id]);
             }
 
+            $this->subOrders->sync($order);
             return $order->load(['items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
 
@@ -1175,15 +1322,6 @@ class OrderController extends Controller
         return $coupon;
     }
 
-    private function orderPrefixForCart(array $items): string
-    {
-        $products = Product::query()->with('seller:id,sku_prefix')->whereIn('id', collect($items)->pluck('product_id')->unique())->get();
-        $sellerIds = $products->pluck('seller_id')->unique()->values();
-        if ($sellerIds->count() !== 1 || $sellerIds->first() === null) return 'NEXF';
-        $prefix = $products->first()?->seller?->sku_prefix;
-        return is_string($prefix) && preg_match('/^[A-Z0-9]{4}$/', $prefix) ? $prefix : 'NEXF';
-    }
-
     private function generateOrderNumber(string $prefix = 'NEXF'): string
     {
         $prefix = strtoupper($prefix);
@@ -1220,18 +1358,7 @@ class OrderController extends Controller
         $page = $query->paginate($filters['per_page'] ?? 25);
         $result = $page->toArray();
         if ($sellerId !== null) {
-            $result['data'] = array_map(function (array $order) use ($sellerId): array {
-                $sellerSubtotal = round(collect($order['items'] ?? [])->sum(fn (array $item) => (float) $item['line_subtotal']), 2);
-                $storeGroup = collect($order['store_groups'] ?? [])->first(fn (array $group) => (int) ($group['seller_id'] ?? 0) === $sellerId);
-                $shippingCharge = (float) ($storeGroup['shipping_charge'] ?? 0);
-                $orderSubtotal = (float) ($order['subtotal'] ?? 0);
-                $discountShare = $orderSubtotal > 0 ? round((float) ($order['discount_total'] ?? 0) * ($sellerSubtotal / $orderSubtotal), 2) : 0;
-                $order['seller_subtotal'] = $sellerSubtotal;
-                $order['seller_shipping_charge'] = $shippingCharge;
-                $order['seller_discount_share'] = $discountShare;
-                $order['seller_total'] = round($sellerSubtotal + $shippingCharge - $discountShare, 2);
-                return $order;
-            }, $result['data'] ?? []);
+            $result['data'] = array_map(fn (array $order) => $this->sellerView($order, $sellerId), $result['data'] ?? []);
         }
         return array_merge($result, ['status_counts' => $counts]);
     }
