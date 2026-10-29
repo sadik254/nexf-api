@@ -47,6 +47,7 @@ use App\Http\Controllers\DeliveryGroupController;
 use App\Http\Controllers\HouseStoreController;
 use App\Http\Controllers\PartnerPayoutController;
 use App\Http\Controllers\AnalyticsController;
+use App\Http\Controllers\WalletRewardController;
 
 Route::post('/webhooks/steadfast', [SteadfastWebhookController::class, 'handle']);
 Route::post('/analytics/events', [AnalyticsController::class, 'track'])->middleware('throttle:120,1,analytics-events');
@@ -240,6 +241,8 @@ Route::prefix('admin')->group(function () {
     Route::middleware(['sanctum.type:admin','perm:payment_methods.manage'])->post('/payment-methods/{paymentMethod}', [PaymentMethodController::class, 'update']);
     Route::middleware(['sanctum.type:admin','perm:payment_methods.manage'])->post('/payment-methods/{paymentMethod}/delete', [PaymentMethodController::class, 'destroy']);
     Route::middleware(['sanctum.type:admin','perm:payment_methods.manage'])->post('/payment-accounts', [ManualPaymentController::class, 'saveAccounts']);
+    Route::middleware(['sanctum.type:admin','perm:rewards.manage'])->get('/wallet-rewards', [WalletRewardController::class, 'show']);
+    Route::middleware(['sanctum.type:admin','perm:rewards.manage'])->post('/wallet-rewards', [WalletRewardController::class, 'save']);
 
     Route::middleware(['sanctum.type:admin','perm:shipping_methods.manage'])->post('/shipping-methods', [ShippingMethodController::class, 'store']);
     Route::middleware(['sanctum.type:admin','perm:shipping_methods.manage'])->post('/shipping-methods/{shippingMethod}', [ShippingMethodController::class, 'update']);

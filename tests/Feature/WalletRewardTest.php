@@ -9,6 +9,7 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Review;
+use App\Models\SiteSetting;
 use App\Services\WalletRewardService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -42,6 +43,20 @@ class WalletRewardTest extends TestCase
         app(WalletRewardService::class)->reviewApproved($review);
         $this->assertDatabaseHas('customer_wallet_transactions', ['customer_id'=>$customer->id, 'kind'=>'review_reward', 'amount'=>20]);
         $this->assertSame(1, CustomerWalletTransaction::count());
+    }
+
+    public function test_disabled_rewards_do_not_create_new_credits(): void
+    {
+        SiteSetting::create(['key' => 'wallet_rewards', 'payload' => [
+            'cashback_enabled' => false, 'cashback_percent' => 25,
+            'review_enabled' => false, 'review_amount' => 100,
+            'referral_enabled' => false, 'referral_amount' => 100,
+        ]]);
+        $referrer = $this->customer('disabled-referrer@example.test');
+        $customer = $this->customer('disabled@example.test', $referrer->id);
+        app(WalletRewardService::class)->orderDelivered($this->order($customer, 'REWARD-DISABLED', 'delivered'));
+
+        $this->assertSame(0, CustomerWalletTransaction::count());
     }
 
     private function customer(string $email, ?int $referrerId=null): Customer { return Customer::create(['name'=>'Customer','email'=>$email,'password'=>'password123','email_verified_at'=>now(),'referred_by_customer_id'=>$referrerId]); }
