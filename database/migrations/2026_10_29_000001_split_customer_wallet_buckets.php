@@ -10,7 +10,12 @@ return new class extends Migration {
     {
         Schema::table('customer_wallet_transactions', function (Blueprint $table): void {
             // A refund can now have one reward and one withdrawable credit.
+            // MySQL uses the unique index to satisfy this foreign key, so the
+            // constraint must be removed before the index can become non-unique.
+            $table->dropForeign(['return_request_id']);
             $table->dropUnique(['return_request_id']);
+            $table->index('return_request_id');
+            $table->foreign('return_request_id')->references('id')->on('return_requests')->nullOnDelete();
             $table->string('bucket', 16)->default('reward')->after('kind');
             $table->index(['customer_id', 'bucket']);
         });
@@ -43,9 +48,12 @@ return new class extends Migration {
     {
         Schema::table('orders', fn (Blueprint $table) => $table->dropColumn(['wallet_reward_amount', 'wallet_withdrawable_amount']));
         Schema::table('customer_wallet_transactions', function (Blueprint $table): void {
+            $table->dropForeign(['return_request_id']);
+            $table->dropIndex(['return_request_id']);
             $table->dropIndex(['customer_id', 'bucket']);
             $table->dropColumn('bucket');
             $table->unique('return_request_id');
+            $table->foreign('return_request_id')->references('id')->on('return_requests')->nullOnDelete();
         });
     }
 };
