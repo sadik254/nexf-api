@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Admin;
 use App\Models\Order;
+use App\Models\OrderStoreGroup;
 use App\Models\PaymentMethod;
 use App\Models\SiteSetting;
 use App\Services\ManualPaymentExpiryService;
@@ -112,6 +113,27 @@ class ManualPaymentTest extends TestCase
         ])->assertOk()
             ->assertJsonPath('payment_method_code', 'nagad')
             ->assertJsonPath('payment_amount', '40.00');
+    }
+
+    public function test_confirmed_cod_order_can_be_paid_until_a_parcel_is_packed(): void
+    {
+        $cod = PaymentMethod::create(['name' => 'Cash on Delivery', 'code' => 'cod', 'is_active' => true]);
+        $order = $this->order($cod, 'cod');
+        $order->update(['status' => 'confirmed', 'order_number' => 'MANUAL-cod-confirmed']);
+        SiteSetting::create(['key' => 'payment_accounts', 'payload' => [
+            ['id' => 'bkash', 'enabled' => true, 'number' => '01712345678'],
+        ]]);
+
+        $this->postJson("/api/orders/{$order->id}/payment", [
+            'phone' => '01712345678', 'method' => 'bkash', 'sender' => '01712345678', 'reference' => 'confirmed-1',
+        ])->assertOk()->assertJsonPath('payment_method_code', 'bkash');
+
+        $packed = $this->order($cod, 'cod');
+        $packed->update(['status' => 'confirmed', 'order_number' => 'MANUAL-cod-packed']);
+        OrderStoreGroup::create(['order_id' => $packed->id, 'number' => 'MANUAL-cod-packed-NEXF', 'ships_by' => 'nexf', 'status' => 'packed', 'store_name' => 'NEXF', 'subtotal' => 0, 'shipping_charge' => 0]);
+        $this->postJson("/api/orders/{$packed->id}/payment", [
+            'phone' => '01712345678', 'method' => 'bkash', 'sender' => '01712345678', 'reference' => 'packed-1',
+        ])->assertUnprocessable()->assertJsonPath('message', 'This order is already packed.');
     }
 
     public function test_admin_can_record_and_delete_a_manual_payment(): void

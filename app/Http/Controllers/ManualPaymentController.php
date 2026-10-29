@@ -80,13 +80,15 @@ class ManualPaymentController extends Controller
         }
         abort_if($order->payment_received_at, 422, 'This payment is already confirmed.');
 
-        // A pending COD order may be paid in advance if the shopper picks an
-        // enabled manual method in the payment window.
+        // COD stays payable until a parcel is packed. This lets a shopper pay
+        // after staff confirms an order, but never after fulfilment starts.
         $codPrepay = $order->payment_method_code === 'cod'
-            && $order->status === 'pending'
+            && in_array($order->status, ['pending', 'confirmed'], true)
+            && (float) ($order->paid_amount ?? 0) <= 0
             && $request->filled('method');
         abort_unless($codPrepay || in_array($order->payment_method_code, self::METHODS, true), 422, 'This order is not paid by manual transfer.');
         abort_if(in_array($order->status, ['cancelled', 'delivered'], true), 422, 'This order is closed.');
+        abort_if($codPrepay && $this->hasPackedFulfilment($order), 422, 'This order is already packed.');
 
         $enabledMethods = collect(SiteSetting::find('payment_accounts')?->payload ?? [])
             ->filter(fn (array $account): bool => !empty($account['enabled']) && !empty($account['number']))
@@ -97,7 +99,7 @@ class ManualPaymentController extends Controller
         ]);
 
         if (!empty($switch['method']) && $switch['method'] !== $order->payment_method_code) {
-            abort_if($order->status !== 'pending', 422, 'This order is already confirmed.');
+            abort_if($order->status !== 'pending' && !$codPrepay, 422, 'This order is already confirmed.');
             $method = PaymentMethod::query()->active()->where('code', $switch['method'])->firstOrFail();
             $order->forceFill([
                 'payment_method_id' => $method->id,
@@ -212,5 +214,13 @@ class ManualPaymentController extends Controller
     private function payable(Order $order): float
     {
         return max(0, round((float) $order->total - (float) ($order->wallet_amount ?? 0), 2));
+    }
+
+    /** Any line or parcel at Packed and beyond closes the COD pay-now window. */
+    private function hasPackedFulfilment(Order $order): bool
+    {
+        $statuses = ['packed', 'shipped', 'delivered', 'return_pending', 'returned'];
+        return $order->items()->whereIn('fulfillment_status', $statuses)->exists()
+            || $order->storeGroups()->whereIn('status', $statuses)->exists();
     }
 }
