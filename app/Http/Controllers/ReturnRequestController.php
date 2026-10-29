@@ -76,8 +76,9 @@ class ReturnRequestController extends Controller
         $return = DB::transaction(function () use ($item, $customer, $data) {
             $lockedItem = OrderItem::whereKey($item->id)->lockForUpdate()->firstOrFail();
             if ($lockedItem->fulfillment_status !== 'delivered') throw ValidationException::withMessages(['order_item_id' => 'Only delivered items can be returned.']);
-            $claimed = ReturnRequest::where('order_item_id', $lockedItem->id)->whereNotIn('status', ['rejected', 'cancelled'])->sum('quantity');
-            if ($claimed + $data['quantity'] > $lockedItem->quantity) throw ValidationException::withMessages(['quantity' => 'This item quantity is already in a return request.']);
+            if (ReturnRequest::where('order_item_id', $lockedItem->id)->whereNotIn('status', ['rejected', 'cancelled'])->exists()) {
+                throw ValidationException::withMessages(['order_item_id' => ['This order item already has a return or exchange request.']]);
+            }
             $order = $lockedItem->order;
             $return = ReturnRequest::create(['order_item_id' => $lockedItem->id, 'order_id' => $lockedItem->order_id, 'customer_id' => $customer->id, 'seller_id' => $lockedItem->seller_id, 'support_ticket_id' => $data['support_ticket_id'] ?? null, 'submission_reference' => $data['submission_reference'] ?? null, 'type' => $data['type'], 'status' => 'requested', 'quantity' => $data['quantity'], 'reason' => trim($data['reason']), 'refund_to' => $data['refund_to'] ?? 'balance', 'attachments' => $data['attachments'] ?? [], 'return_address_name' => $order->shipping_name, 'return_address_phone' => $order->shipping_phone, 'return_address_email' => $order->shipping_email, 'return_address' => $order->shipping_address, 'return_address_area' => $order->shipping_area, 'return_address_district' => $order->shipping_district] + $this->routing($lockedItem));
             $return->update(['reference' => 'RET-' . str_pad((string) $return->id, 5, '0', STR_PAD_LEFT)]);
@@ -118,8 +119,9 @@ class ReturnRequestController extends Controller
                 $item = OrderItem::query()->where('order_id', $order->id)->whereKey($line['order_item_id'])->lockForUpdate()->firstOrFail();
                 if ($item->fulfillment_status !== 'delivered') throw ValidationException::withMessages(['items' => ['Only delivered items can be returned.']]);
                 if ($ticket?->seller_id && (int) $ticket->seller_id !== (int) $item->seller_id) throw ValidationException::withMessages(['support_ticket_id' => ['The support ticket does not match this item store.']]);
-                $claimed = ReturnRequest::query()->where('order_item_id', $item->id)->whereNotIn('status', ['rejected', 'cancelled'])->sum('quantity');
-                if ($claimed + $line['quantity'] > $item->quantity) throw ValidationException::withMessages(['items' => ["The quantity requested for {$item->product_name} exceeds its eligible quantity."]]);
+                if (ReturnRequest::query()->where('order_item_id', $item->id)->whereNotIn('status', ['rejected', 'cancelled'])->exists()) {
+                    throw ValidationException::withMessages(['items' => ["{$item->product_name} already has a return or exchange request."]]);
+                }
                 $return = ReturnRequest::query()->create([
                     'order_item_id' => $item->id, 'order_id' => $order->id, 'customer_id' => $customer->id,
                     'seller_id' => $item->seller_id, 'support_ticket_id' => $ticket?->id,
@@ -200,13 +202,18 @@ class ReturnRequestController extends Controller
         if (in_array($next, ['approved', 'rejected'], true)) $updates['reviewed_at'] = now();
         if ($next === 'received') $updates['received_at'] = now();
         if (in_array($next, ['refunded', 'exchanged'], true)) { $updates['completed_at'] = now(); $updates['outcome_reference'] = $data['outcome_reference'] ?? $returnRequest->outcome_reference; $updates['refund_amount'] = $data['refund_amount'] ?? null; }
-        DB::transaction(function () use ($returnRequest, $updates, $next) {
+        $ticketResolved = DB::transaction(function () use ($returnRequest, $updates, $next) {
             $returnRequest->update($updates);
             if ($next === 'refunded' && $returnRequest->refund_to === 'balance') {
                 app(\App\Services\WalletLedgerService::class)->refundCredit($returnRequest->fresh('order', 'customer'), (float) $updates['refund_amount']);
             }
+            if (in_array($next, ['refunded', 'exchanged'], true) && $returnRequest->support_ticket_id) {
+                return SupportTicket::query()->whereKey($returnRequest->support_ticket_id)->where('status', '!=', 'resolved')->update(['status' => 'resolved', 'resolved_at' => now()]) > 0;
+            }
+            return false;
         });
         app(\App\Services\CustomerNotificationService::class)->returnUpdated($returnRequest->fresh());
+        if ($ticketResolved) app(\App\Services\CustomerNotificationService::class)->supportResolved(SupportTicket::find($returnRequest->support_ticket_id));
         return $this->show($request, $returnRequest);
     }
 

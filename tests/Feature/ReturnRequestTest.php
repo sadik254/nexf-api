@@ -27,11 +27,10 @@ class ReturnRequestTest extends TestCase
         $customerToken = $customer->createToken('test', ['customer:basic'])->plainTextToken;
         $payload = ['order_item_id' => $item->id, 'type' => 'refund', 'quantity' => 1, 'reason' => 'Wrong size'];
         $id = $this->withToken($customerToken)->postJson('/api/customers/return-requests', $payload)->assertCreated()->assertJsonPath('status', 'requested')->json('id');
-        $this->withToken($customerToken)->postJson('/api/customers/return-requests', $payload)->assertCreated();
         $this->withToken($customerToken)->postJson('/api/customers/return-requests', $payload)->assertUnprocessable();
         $this->withToken($other->createToken('test', ['customer:basic'])->plainTextToken)->getJson("/api/customers/return-requests/{$id}")->assertNotFound();
         $sellerToken = $seller->createToken('test', ['seller:basic'])->plainTextToken;
-        $this->withToken($sellerToken)->getJson('/api/seller/return-requests')->assertOk()->assertJsonPath('total', 2);
+        $this->withToken($sellerToken)->getJson('/api/seller/return-requests')->assertOk()->assertJsonPath('total', 1);
         $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$id}", ['status' => 'approved'])->assertOk()->assertJsonPath('status', 'approved');
         $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$id}", ['status' => 'refunded', 'refund_amount' => 100, 'outcome_reference' => 'TX-1'])->assertForbidden();
         $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$id}", ['status' => 'received'])->assertOk()->assertJsonPath('status', 'received');

@@ -21,9 +21,14 @@ class DashboardController extends Controller
         abort_unless($request->user() instanceof Admin, 403);
         $data = $request->validate([
             'seller_id' => ['sometimes', 'nullable', 'integer', 'exists:sellers,id'],
+            'store' => ['sometimes', 'string', 'in:house'],
         ]);
+        abort_if(isset($data['seller_id']) && isset($data['store']), 422, 'Choose either a seller or the house store.');
         $seller = isset($data['seller_id']) ? Seller::findOrFail($data['seller_id']) : null;
         [$from, $to, $previousFrom, $previousTo] = $this->period($request);
+        if (($data['store'] ?? null) === 'house') {
+            return response()->json($this->housePayload($from, $to, $previousFrom, $previousTo));
+        }
         return response()->json($this->payload($seller, $from, $to, $previousFrom, $previousTo));
     }
 
@@ -90,6 +95,42 @@ class DashboardController extends Controller
             'recent_orders' => $this->recentOrders($seller),
             'inventory_alerts' => $this->inventoryAlerts($productQuery),
         ];
+    }
+
+    /** NEXF Lifestyle's card is house lines only, never the whole marketplace. */
+    private function housePayload(CarbonImmutable $from, CarbonImmutable $to, CarbonImmutable $previousFrom, CarbonImmutable $previousTo): array
+    {
+        // Keep the full dashboard contract for the console, but replace the
+        // store-card measurements with the actual house-store scope.
+        $payload = $this->payload(null, $from, $to, $previousFrom, $previousTo);
+        $items = fn (CarbonImmutable $start, CarbonImmutable $end) => OrderItem::query()
+            ->whereNull('seller_id')
+            ->whereHas('order', fn (Builder $order) => $order->whereBetween('created_at', [$start, $end])->where('status', '!=', 'cancelled'));
+        $revenue = (float) $items($from, $to)->sum('line_subtotal');
+        $previousRevenue = (float) $items($previousFrom, $previousTo)->sum('line_subtotal');
+        $payload['stats']['revenue'] = round($revenue, 2);
+        $payload['stats']['revenue_change'] = $this->change($revenue, $previousRevenue);
+        $payload['stats']['units_sold'] = (int) $items($from, $to)->sum('quantity');
+        $payload['sales_trend'] = $this->houseTrend($from->startOfMonth()->subMonths(7), $to);
+        return $payload;
+    }
+
+    private function houseTrend(CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $items = OrderItem::query()->whereNull('seller_id')
+            ->whereHas('order', fn (Builder $order) => $order->whereBetween('created_at', [$from, $to])->where('status', '!=', 'cancelled'))
+            ->with('order:id,created_at')->get();
+        $daily = $items->groupBy(fn (OrderItem $item) => $item->order->created_at->toDateString())
+            ->map(fn ($rows) => round((float) $rows->sum('line_subtotal'), 2));
+        $span = $from->diffInDays($to);
+        $monthly = $span > 62;
+        $points = [];
+        for ($cursor = $from; $cursor <= $to; $cursor = $monthly ? $cursor->addMonth()->startOfMonth() : $cursor->addDay()) {
+            $key = $cursor->toDateString();
+            $value = $monthly ? $daily->filter(fn ($amount, $date) => str_starts_with($date, $cursor->format('Y-m')))->sum() : ($daily[$key] ?? 0);
+            $points[] = ['label' => $monthly ? $cursor->format('M') : ($span <= 14 ? $cursor->format('D') : $cursor->format('M j')), 'value' => round((float) $value, 2)];
+        }
+        return $points;
     }
 
     private function orders(?Seller $seller): Builder
