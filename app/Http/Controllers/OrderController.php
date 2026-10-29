@@ -129,6 +129,8 @@ class OrderController extends Controller
             'shipping_groups' => $preview['shipping_groups'],
             'shipping_charge' => $preview['shipping_charge'], 'total' => $preview['total'],
             'wallet_amount' => $preview['wallet_amount'] ?? 0,
+            'wallet_reward_amount' => $preview['wallet_reward_amount'] ?? 0,
+            'wallet_withdrawable_amount' => $preview['wallet_withdrawable_amount'] ?? 0,
             'payable' => $preview['payable'] ?? $preview['total'],
         ]);
     }
@@ -800,14 +802,18 @@ class OrderController extends Controller
 
             $useWallet = $paymentMethod->code === 'wallet' || !empty($data['use_wallet']);
             $walletAmount = 0.0;
+            $walletRewardAmount = 0.0;
+            $walletWithdrawableAmount = 0.0;
             if ($useWallet) {
                 if (!$customer) throw ValidationException::withMessages(['payment_method_id' => ['NEXF Balance is available only to signed-in customers.']]);
                 Customer::whereKey($customer->id)->lockForUpdate()->firstOrFail();
-                $balance = app(WalletBalanceService::class)->balance($customer->id, true);
-                if ($paymentMethod->code === 'wallet' && $balance < (float) $preview['total']) {
+                $buckets = app(WalletBalanceService::class)->buckets($customer->id, true);
+                if ($paymentMethod->code === 'wallet' && $buckets['total'] < (float) $preview['total']) {
                     throw ValidationException::withMessages(['payment_method_id' => ['Your NEXF Balance is not enough for this order.']]);
                 }
-                $walletAmount = min($balance, (float) $preview['total']);
+                $walletAmount = min($buckets['total'], (float) $preview['total']);
+                $walletRewardAmount = min($buckets['reward'], $walletAmount);
+                $walletWithdrawableAmount = $walletAmount - $walletRewardAmount;
             }
 
             $order = Order::create([
@@ -831,6 +837,8 @@ class OrderController extends Controller
                 'total' => 0,
                 'paid_amount' => $data['paid_amount'] ?? null,
                 'wallet_amount' => $walletAmount,
+                'wallet_reward_amount' => $walletRewardAmount,
+                'wallet_withdrawable_amount' => $walletWithdrawableAmount,
                 'manual_ship' => (bool) $exchangeReturn,
                 'stock_request' => !$exchangeReturn && !empty($data['stock_request']),
                 'exchange_for' => $exchangeReturn ? (string) $exchangeReturn->id : null,
@@ -853,10 +861,6 @@ class OrderController extends Controller
 
             $subtotal = 0.0;
             $shippingLines = [];
-
-            if ($walletAmount > 0) {
-                CustomerWalletTransaction::create(['customer_id' => $customer->id, 'order_id' => $order->id, 'type' => 'debit', 'kind' => 'spend', 'amount' => $walletAmount, 'source_key' => "order:{$order->id}:wallet", 'description' => "Payment for order {$order->order_number}"]);
-            }
 
             foreach ($data['items'] as $itemData) {
                 $product = Product::query()
@@ -978,8 +982,17 @@ class OrderController extends Controller
                 'shipping_charge' => $shipping['total'],
                 'total' => $total,
                 'wallet_amount' => min($walletAmount, $total),
+                'wallet_reward_amount' => min($walletRewardAmount, $total),
+                'wallet_withdrawable_amount' => min($walletWithdrawableAmount, max(0, $total - min($walletRewardAmount, $total))),
                 'payment_status' => $walletAmount >= $total ? 'paid' : $order->payment_status,
             ])->save();
+
+            if ((float) $order->wallet_reward_amount > 0) {
+                CustomerWalletTransaction::create(['customer_id' => $customer->id, 'order_id' => $order->id, 'type' => 'debit', 'kind' => 'spend', 'bucket' => 'reward', 'amount' => $order->wallet_reward_amount, 'source_key' => "order:{$order->id}:wallet:reward", 'description' => "Payment for order {$order->order_number}"]);
+            }
+            if ((float) $order->wallet_withdrawable_amount > 0) {
+                CustomerWalletTransaction::create(['customer_id' => $customer->id, 'order_id' => $order->id, 'type' => 'debit', 'kind' => 'spend', 'bucket' => 'withdrawable', 'amount' => $order->wallet_withdrawable_amount, 'source_key' => "order:{$order->id}:wallet:withdrawable", 'description' => "Payment for order {$order->order_number}"]);
+            }
 
             foreach ($appliedDiscounts as $appliedDiscount) {
                 $appliedCoupon = $appliedDiscount['coupon'];

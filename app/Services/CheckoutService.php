@@ -63,15 +63,23 @@ class CheckoutService
         $discount = round(array_sum(array_column($appliedDiscounts, 'amount')), 2);
         $total = round($subtotal + $shipping['total'] - $discount, 2);
         $walletAmount = 0.0;
+        $walletRewardAmount = 0.0;
+        $walletWithdrawableAmount = 0.0;
         if ($paymentMethod->code === 'wallet') {
             if (!$customer) throw ValidationException::withMessages(['payment_method_id' => ['NEXF Balance is available only to signed-in customers.']]);
-            if (app(WalletBalanceService::class)->balance($customer->id) < $total) {
+            $buckets = app(WalletBalanceService::class)->buckets($customer->id);
+            if ($buckets['total'] < $total) {
                 throw ValidationException::withMessages(['payment_method_id' => ['NEXF Balance is not enough for this order.']]);
             }
             $walletAmount = $total;
+            $walletRewardAmount = min($buckets['reward'], $walletAmount);
+            $walletWithdrawableAmount = $walletAmount - $walletRewardAmount;
         } elseif (!empty($data['use_wallet'])) {
             if (!$customer) throw ValidationException::withMessages(['use_wallet' => ['NEXF Balance is available only to signed-in customers.']]);
-            $walletAmount = min(app(WalletBalanceService::class)->balance($customer->id), $total);
+            $buckets = app(WalletBalanceService::class)->buckets($customer->id);
+            $walletAmount = min($buckets['total'], $total);
+            $walletRewardAmount = min($buckets['reward'], $walletAmount);
+            $walletWithdrawableAmount = $walletAmount - $walletRewardAmount;
         }
         $this->fraudGuard->assertAllowed($customer, $data + ['payment_method_code' => $paymentMethod->code], $total);
 
@@ -85,6 +93,8 @@ class CheckoutService
             'shipping_charge' => $shipping['total'],
             'total' => $total,
             'wallet_amount' => round($walletAmount, 2),
+            'wallet_reward_amount' => round($walletRewardAmount, 2),
+            'wallet_withdrawable_amount' => round($walletWithdrawableAmount, 2),
             'payable' => round(max(0, $total - $walletAmount), 2),
         ];
     }

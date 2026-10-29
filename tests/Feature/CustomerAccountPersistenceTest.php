@@ -34,7 +34,7 @@ class CustomerAccountPersistenceTest extends TestCase {
   $one=$this->customer('payout-one@example.test');$other=$this->customer('payout-other@example.test');
   $token=$one->createToken('test',['customer:basic'])->plainTextToken;
   $this->withToken($token);
-  CustomerWalletTransaction::create(['customer_id'=>$one->id,'type'=>'credit','amount'=>100,'description'=>'Isolated refund']);
+  CustomerWalletTransaction::create(['customer_id'=>$one->id,'type'=>'credit','kind'=>'refund','bucket'=>'withdrawable','amount'=>100,'description'=>'Isolated refund']);
   $payout=$this->postJson('/api/customers/payout-accounts',['provider'=>'bkash','account'=>'01700000000'])->assertCreated()->assertJsonPath('isSelected',true)->json('id');
   $this->postJson('/api/customers/payout-accounts',['provider'=>'upay','account'=>'01800000000'])->assertCreated()->assertJsonPath('provider','upay');
   $this->postJson('/api/customers/payout-accounts',['provider'=>'bank','account'=>'123456'])->assertUnprocessable();

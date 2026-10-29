@@ -201,10 +201,7 @@ class ReturnRequestController extends Controller
         DB::transaction(function () use ($returnRequest, $updates, $next) {
             $returnRequest->update($updates);
             if ($next === 'refunded' && $returnRequest->refund_to === 'balance') {
-                CustomerWalletTransaction::firstOrCreate(
-                    ['return_request_id' => $returnRequest->id],
-                    ['customer_id' => $returnRequest->customer_id, 'type' => 'credit', 'kind' => 'refund', 'amount' => $updates['refund_amount'], 'description' => "Refund for return {$returnRequest->reference}", 'order_id' => $returnRequest->order_id],
-                );
+                app(\App\Services\WalletLedgerService::class)->refundCredit($returnRequest->fresh('order', 'customer'), (float) $updates['refund_amount']);
             }
         });
         return $this->show($request, $returnRequest);
