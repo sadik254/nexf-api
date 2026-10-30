@@ -8,7 +8,7 @@ return new class extends Migration {
     {
         DB::table('order_items')->whereNotNull('variation_labels')->whereNotNull('variation_attributes')->orderBy('id')->chunkById(100, function ($items): void {
             foreach ($items as $item) {
-                $product = $item->product_id ? DB::table('products')->select('option_groups')->whereKey($item->product_id)->first() : null;
+                $product = $item->product_id ? DB::table('products')->select('option_groups')->where('id', $item->product_id)->first() : null;
                 if (! $product) continue;
                 $attributes = json_decode($item->variation_attributes ?: '{}', true) ?: [];
                 $groups = json_decode($product->option_groups ?: '[]', true) ?: [];
@@ -22,7 +22,7 @@ return new class extends Migration {
                     $handled[] = $key;
                 }
                 foreach ($attributes as $key => $value) if (!in_array((string) $key, $handled, true)) $labels[] = ['group' => (string) $key, 'value' => (string) $value, 'swatch' => null];
-                DB::table('order_items')->whereKey($item->id)->update(['variation_labels' => json_encode($labels)]);
+                DB::table('order_items')->where('id', $item->id)->update(['variation_labels' => json_encode($labels)]);
             }
         });
     }
