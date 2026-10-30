@@ -504,6 +504,22 @@ class OrderLifecycleTest extends TestCase
             ->assertJsonPath('order.items.0.confirmed_at', null);
     }
 
+    public function test_admin_can_return_a_partly_confirmed_multi_store_order_to_processing(): void
+    {
+        $admin = Admin::create(['name' => 'Parcel Admin', 'email' => 'parcel-admin@example.test', 'password' => 'password123', 'role' => 'super_admin']);
+        $order = \App\Models\Order::create(['order_number' => 'PARCEL-BACK', 'status' => 'pending', 'subtotal' => 200, 'total' => 200, 'shipping_name' => 'Buyer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka']);
+        $confirmed = $order->items()->create(['product_name' => 'House item', 'quantity' => 1, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 100, 'line_cost' => 50, 'line_profit' => 50, 'fulfillment_status' => 'confirmed', 'confirmed_at' => now()]);
+        $cancelled = $order->items()->create(['product_name' => 'Cancelled item', 'quantity' => 1, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 100, 'line_cost' => 50, 'line_profit' => 50, 'fulfillment_status' => 'cancelled']);
+
+        $this->withToken($admin->createToken('test', ['admin'])->plainTextToken)
+            ->postJson("/api/admin/orders/{$order->id}", ['status' => 'pending'])
+            ->assertOk()
+            ->assertJsonPath('order.items.0.fulfillment_status', 'pending');
+
+        $this->assertDatabaseHas('order_items', ['id' => $confirmed->id, 'fulfillment_status' => 'pending']);
+        $this->assertDatabaseHas('order_items', ['id' => $cancelled->id, 'fulfillment_status' => 'cancelled']);
+    }
+
     public function test_admin_cannot_return_a_shipped_order_to_processing(): void
     {
         [$customer, $product] = $this->checkoutFixtures(1);

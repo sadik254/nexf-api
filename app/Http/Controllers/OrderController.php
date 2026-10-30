@@ -299,19 +299,19 @@ class OrderController extends Controller
             unset($data['status']);
             DB::transaction(function () use ($order): void {
                 $locked = Order::query()->lockForUpdate()->findOrFail($order->id);
-                if ($locked->status === 'pending') return;
-
                 $items = $locked->items()->lockForUpdate()->get();
-                if (!in_array($locked->status, ['confirmed', 'packed'], true) || $items->isEmpty() || $items->contains(fn (OrderItem $item) =>
-                    !in_array($item->fulfillment_status, ['confirmed', 'packed'], true)
+                $liveItems = $items->reject(fn (OrderItem $item) => $item->fulfillment_status === 'cancelled');
+                if ($liveItems->isEmpty() || $liveItems->every(fn (OrderItem $item) => $item->fulfillment_status === 'pending')) return;
+                if ($liveItems->contains(fn (OrderItem $item) =>
+                    !in_array($item->fulfillment_status, ['pending', 'confirmed', 'packed'], true)
                     || $item->courier_consignment_id !== null
                     || $item->shipped_at !== null
                     || $item->delivered_at !== null
                 )) {
-                    throw ValidationException::withMessages(['status' => ['Only an unshipped, fully confirmed or packed order can return to processing.']]);
+                    throw ValidationException::withMessages(['status' => ['Only unshipped pending, confirmed, or packed lines can return to processing.']]);
                 }
 
-                $locked->items()->update(['fulfillment_status' => 'pending', 'confirmed_at' => null]);
+                $locked->items()->where('fulfillment_status', '!=', 'cancelled')->update(['fulfillment_status' => 'pending', 'confirmed_at' => null]);
                 $locked->update(['packed_at' => null]);
                 $this->refreshOrderStatus($locked);
             });
