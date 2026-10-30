@@ -127,14 +127,15 @@ class ProductCategoryController extends Controller
             $category->slug = $this->uniqueSlug($data['name'], $category->id);
         }
 
+        $value = fn (string $field) => array_key_exists($field, $data) ? $data[$field] : $category->{$field};
         $category->fill([
-            'name' => $data['name'] ?? $category->name,
+            'name' => $value('name'),
             'parent_id' => array_key_exists('parent_id', $data) ? $data['parent_id'] : $category->parent_id,
-            'description' => $data['description'] ?? $category->description,
-            'image' => $data['image'] ?? $category->image,
-            'menu_heading' => $data['menu_heading'] ?? $category->menu_heading,
-            'promo_image' => $data['promo_image'] ?? $category->promo_image,
-            'promo_href' => $data['promo_href'] ?? $category->promo_href, 'promo_title' => $data['promo_title'] ?? $category->promo_title, 'promo_caption' => $data['promo_caption'] ?? $category->promo_caption,
+            'description' => $value('description'),
+            'image' => $value('image'),
+            'menu_heading' => $value('menu_heading'),
+            'promo_image' => $value('promo_image'),
+            'promo_href' => $value('promo_href'), 'promo_title' => $value('promo_title'), 'promo_caption' => $value('promo_caption'),
             'is_active' => array_key_exists('is_active', $data) ? (bool) $data['is_active'] : $category->is_active,
         ])->save();
 
