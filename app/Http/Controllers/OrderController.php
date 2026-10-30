@@ -716,13 +716,7 @@ class OrderController extends Controller
                 ]);
             }
 
-            foreach ($lockedOrder->items as $item) {
-                if (in_array($item->fulfillment_status, ['shipped', 'delivered', 'return_pending'], true)) {
-                    throw ValidationException::withMessages(['order' => ['Shipped, delivered, or return-pending items must complete courier return reconciliation before cancellation.']]);
-                }
-                $this->inventory->restoreOrderItem($item, $actor);
-                $item->update(['fulfillment_status' => 'cancelled']);
-            }
+            $this->cancelLines($lockedOrder->items, $actor);
             foreach ($lockedOrder->storeGroups()->get() as $group) $this->subOrders->refreshStatus($group);
 
             $lockedOrder->update(array_merge([
@@ -734,6 +728,79 @@ class OrderController extends Controller
 
             return $lockedOrder->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
+    }
+
+    /**
+     * Cancels lines, including parcels already handed to a courier. Shipped
+     * lines wait for the courier to bring them back; their stock is restored
+     * only when that return is reconciled. Delivered lines must use Returns.
+     */
+    private function cancelLines($items, $actor): void
+    {
+        if ($items->contains(fn (OrderItem $item) => $item->fulfillment_status === 'delivered')) {
+            throw ValidationException::withMessages([
+                'order' => ['Delivered items go back through a return, not a cancel.'],
+            ]);
+        }
+
+        foreach ($items as $item) {
+            if (in_array($item->fulfillment_status, ['cancelled', 'returned', 'return_pending'], true)) continue;
+            if ($item->fulfillment_status === 'shipped') {
+                $item->update(['fulfillment_status' => 'return_pending']);
+                continue;
+            }
+
+            $this->inventory->restoreOrderItem($item, $actor);
+            $item->update(['fulfillment_status' => 'cancelled']);
+        }
+    }
+
+    /** A store cancels its own parcel; the order closes when no live lines remain. */
+    public function cancelSellerGroup(Request $request, Order $order, OrderStoreGroup $group): JsonResponse
+    {
+        /** @var Seller $seller */
+        $seller = $request->user();
+        abort_if($order->isHeldFromSeller(), 404);
+        if ((int) $group->order_id !== (int) $order->id || (int) $group->seller_id !== (int) $seller->id || $group->ships_by !== 'seller') {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        $actor = $request->attributes->get('seller_staff') ?? $seller;
+        $closed = false;
+        $order = DB::transaction(function () use ($order, $group, $seller, $actor, &$closed) {
+            $lockedOrder = Order::query()->lockForUpdate()->findOrFail($order->id);
+            if ($lockedOrder->status === 'cancelled') {
+                throw ValidationException::withMessages(['order' => ['Order has already been cancelled.']]);
+            }
+
+            $parcel = OrderStoreGroup::query()->lockForUpdate()->findOrFail($group->id);
+            $items = $parcel->items()->where('seller_id', $seller->id)->lockForUpdate()->get();
+            $this->cancelLines($items, $actor);
+            $this->subOrders->refreshStatus($parcel->fresh());
+
+            if (! $lockedOrder->items()->whereNotIn('fulfillment_status', ['cancelled', 'returned', 'return_pending'])->exists()) {
+                $lockedOrder->update(['status' => 'cancelled', 'cancelled_at' => now(), 'cancelled_by' => 'seller']);
+                app(WalletLedgerService::class)->cancellationCredit($lockedOrder);
+                $closed = true;
+            } else {
+                app(WalletLedgerService::class)->parcelCancellationCredit($lockedOrder, $parcel->fresh());
+                $this->refreshOrderStatus($lockedOrder);
+            }
+
+            return $lockedOrder;
+        });
+
+        if ($closed) $this->notifications->cancelled($order);
+
+        return response()->json([
+            'message' => 'Parcel cancelled.',
+            'order' => $this->sellerView($order->load([
+                'customer:id,name,email,phone',
+                'items' => fn ($query) => $query->where('seller_id', $seller->id),
+                'storeGroups' => $this->sellerGroups($seller->id),
+                'shippingMethod',
+            ])->toArray(), $seller->id),
+        ]);
     }
 
     /** A store may replace only its own unshipped parcel and fund its discount. */
@@ -857,7 +924,7 @@ class OrderController extends Controller
     private function fulfill(Request $request, Order $order, OrderStoreGroup $group, ?OrderItem $only = null, ?int $sellerId = null): JsonResponse
     {
         $data = $request->validate([
-            'status' => ['required', 'in:confirmed,packed,shipped,delivered'],
+            'status' => ['required', 'in:pending,confirmed,packed,shipped,delivered'],
             'tracking_number' => ['nullable', 'string', 'max:255'],
             'courier_provider' => ['nullable', 'string', 'max:255'],
             'tracking_url' => ['nullable', 'url', 'max:1000'],
@@ -871,13 +938,33 @@ class OrderController extends Controller
             }
             $lockedGroup = OrderStoreGroup::query()->lockForUpdate()->findOrFail($group->id);
             $items = $lockedGroup->items()->where('fulfillment_status', '!=', 'cancelled')->lockForUpdate()->get();
+            // A step back (packed → confirmed, or back to pending) while nothing is booked or shipped.
+            $ladder = ['pending', 'confirmed', 'packed', 'shipped', 'delivered'];
+            $target = array_search($data['status'], $ladder, true);
+            $rank = fn (OrderItem $item) => array_search($item->fulfillment_status, $ladder, true);
+            $back = $only ? $items->where('id', $only->id)->values() : $items;
+            if ($back->isNotEmpty() && $back->every(fn (OrderItem $item) => $rank($item) !== false && $rank($item) >= $target) && $back->contains(fn (OrderItem $item) => $rank($item) > $target)) {
+                if ($lockedGroup->courier_consignment_id || $lockedGroup->shipped_at || $back->contains(fn (OrderItem $item) =>
+                    in_array($item->fulfillment_status, ['shipped', 'delivered'], true) || $item->courier_consignment_id !== null || $item->shipped_at !== null
+                )) {
+                    throw ValidationException::withMessages(['status' => ['A parcel that is booked or shipped cannot go back.']]);
+                }
+                foreach ($back->filter(fn (OrderItem $item) => $rank($item) > $target) as $item) {
+                    $item->update(['fulfillment_status' => $data['status']] + ($target === 0 ? ['confirmed_at' => null] : []));
+                }
+                if ($target < 2) $lockedGroup->update(['packed_at' => null]);
+                $this->subOrders->refreshStatus($lockedGroup->fresh());
+                $this->refreshOrderStatus($lockedOrder);
+                if ($target < 2 && !$lockedOrder->items()->where('fulfillment_status', 'packed')->exists()) $lockedOrder->update(['packed_at' => null]);
+                return $lockedOrder->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
+            }
+            if ($target === 0) throw ValidationException::withMessages(['status' => ['This parcel is already pending.']]);
+
             // Each store confirms its own lines, even inside a shared parcel.
             if ($only && $data['status'] === 'confirmed') $items = $items->where('id', $only->id)->values();
             elseif ($sellerId !== null && $data['status'] === 'confirmed') $items = $items->where('seller_id', $sellerId)->values();
             if ($items->isEmpty()) throw ValidationException::withMessages(['status' => ['This parcel has nothing left to fulfil.']]);
 
-            $ladder = ['pending', 'confirmed', 'packed', 'shipped', 'delivered'];
-            $target = array_search($data['status'], $ladder, true);
             $from = $ladder[$target - 1];
             $moving = $items->where('fulfillment_status', $from);
             $behind = $items->first(fn (OrderItem $item) => ($i = array_search($item->fulfillment_status, $ladder, true)) !== false && $i < $target - 1);

@@ -124,10 +124,10 @@ class SubOrderService
         $prepaid = $order->payment_status === 'paid'
             ? (float) $order->total
             : min((float) $order->total, (float) $order->wallet_amount + (float) ($order->paid_amount ?? 0));
-        // Cancelled parcels collect nothing. There is no parcel-level wallet
-        // credit in the ledger yet, so a later cancellation cannot be treated
-        // as prepayment for a remaining parcel.
-        $credited = [];
+        // Cancelled parcels collect nothing. Their credit is already back in
+        // the shopper's wallet, so it cannot be allocated to another parcel.
+        $credited = app(WalletLedgerService::class)->creditedParcels($order);
+        $prepaid = max(0, round($prepaid - array_sum($credited), 2));
         $cancelled = fn (OrderStoreGroup $g) => $g->status === 'cancelled' || isset($credited[$g->id]);
         $prepaidShares = $this->place($prepaid, $groups->mapWithKeys(fn (OrderStoreGroup $g) => [$g->id => $cancelled($g) ? 0.0 : $totals[$g->id]])->all(), $nexfIds);
 
