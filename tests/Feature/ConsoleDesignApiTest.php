@@ -4,14 +4,18 @@ namespace Tests\Feature;
 
 use App\Models\Admin;
 use App\Models\Customer;
+use App\Models\ContentReport;
 use App\Models\HomepageNotice;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Models\ProductQuestion;
 use App\Models\ProductLot;
 use App\Models\ProductVariation;
 use App\Models\Seller;
+use App\Models\SellerPromotion;
 use App\Models\StoreChat;
 use App\Models\SupportTicket;
+use App\Models\Review;
 use App\Services\ProductHtmlSanitizer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -48,6 +52,33 @@ class ConsoleDesignApiTest extends TestCase
         $this->withToken($token)->getJson('/api/admin/console-summary')->assertOk()->assertJsonPath('support', 2)->assertJsonPath('returns', 0)->assertJsonPath('chats', 0)->assertJsonPath('inventory', 3);
         $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
         $this->withToken($token)->getJson('/api/admin/console-summary')->assertForbidden();
+    }
+
+    public function test_summary_counts_pending_reviews_unanswered_questions_and_admin_queues(): void
+    {
+        $admin = Admin::create(['name' => 'Admin', 'email' => 'queue-admin@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);
+        $seller = Seller::create(['seller_name' => 'Seller', 'email' => 'queue-seller@example.test', 'store_name' => 'Queue Store', 'store_slug' => 'queue-store', 'kyc_type' => 'nid', 'kyc_number' => '9', 'kyc_document_url' => 'https://example.test/kyc', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
+        $waitingStore = Seller::create(['seller_name' => 'Waiting', 'email' => 'queue-waiting@example.test', 'store_name' => 'Waiting Store', 'store_slug' => 'waiting-store', 'kyc_type' => 'nid', 'kyc_number' => '10', 'kyc_document_url' => 'https://example.test/kyc', 'product_category' => 'Clothing', 'status' => 'pending', 'is_active' => false, 'password' => 'password123']);
+        $customer = Customer::create(['name' => 'Customer', 'email' => 'queue-customer@example.test', 'password' => 'password123']);
+        $category = ProductCategory::create(['name' => 'Queue category', 'slug' => 'queue-category']);
+        $ownProduct = Product::create(['category_id' => $category->id, 'seller_id' => $seller->id, 'name' => 'Own product', 'slug' => 'queue-own-product', 'product_type' => 'simple', 'status' => 'active']);
+        $otherProduct = Product::create(['category_id' => $category->id, 'name' => 'House product', 'slug' => 'queue-house-product', 'product_type' => 'simple', 'status' => 'active']);
+        Review::create(['product_id' => $ownProduct->id, 'customer_id' => $customer->id, 'rating' => 5, 'status' => 'pending']);
+        Review::create(['product_id' => $otherProduct->id, 'customer_id' => $customer->id, 'rating' => 5, 'status' => 'pending']);
+        ProductQuestion::create(['product_id' => $ownProduct->id, 'customer_id' => $customer->id, 'question' => 'Own?', 'status' => 'pending']);
+        ProductQuestion::create(['product_id' => $otherProduct->id, 'customer_id' => $customer->id, 'question' => 'House?', 'status' => 'pending']);
+        ProductQuestion::create(['product_id' => $ownProduct->id, 'customer_id' => $customer->id, 'question' => 'Rejected?', 'status' => 'rejected']);
+        ContentReport::create(['reporter_customer_id' => $customer->id, 'target_type' => 'product', 'target_id' => $ownProduct->id, 'product_id' => $ownProduct->id, 'reason' => 'Reason', 'status' => 'open']);
+        SellerPromotion::create(['seller_id' => $seller->id, 'title' => 'Pending offer', 'layout' => 'wide', 'blocks' => [], 'status' => 'pending']);
+
+        $sellerToken = $seller->createToken('test', ['seller:basic'])->plainTextToken;
+        $this->withToken($sellerToken)->getJson('/api/seller/console-summary')->assertOk()
+            ->assertJsonPath('reviews', 1)->assertJsonPath('questions', 1)
+            ->assertJsonPath('reports', 0)->assertJsonPath('stores', 0)->assertJsonPath('offers', 0);
+        $adminToken = $admin->createToken('test', ['admin'])->plainTextToken;
+        $this->withToken($adminToken)->getJson('/api/admin/console-summary')->assertOk()
+            ->assertJsonPath('reviews', 2)->assertJsonPath('questions', 2)
+            ->assertJsonPath('reports', 1)->assertJsonPath('stores', 1)->assertJsonPath('offers', 1);
     }
 
     public function test_notice_reorder_is_atomic_and_requires_the_complete_list_and_super_admin(): void

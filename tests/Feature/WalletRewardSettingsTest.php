@@ -18,11 +18,12 @@ class WalletRewardSettingsTest extends TestCase
         $this->withToken($token)->getJson('/api/admin/wallet-rewards')
             ->assertOk()->assertExactJson([
                 'cashback_enabled' => true, 'cashback_percent' => 2,
+                'cashback_min_order' => 0, 'cashback_max_amount' => 0,
                 'review_enabled' => true, 'review_amount' => 20,
                 'referral_enabled' => true, 'referral_amount' => 50,
             ]);
 
-        $payload = ['cashback_enabled' => false, 'cashback_percent' => 7.5, 'review_enabled' => true, 'review_amount' => 35, 'referral_enabled' => false, 'referral_amount' => 75];
+        $payload = ['cashback_enabled' => false, 'cashback_percent' => 7.5, 'cashback_min_order' => 500, 'cashback_max_amount' => 100, 'review_enabled' => true, 'review_amount' => 35, 'referral_enabled' => false, 'referral_amount' => 75];
         $this->withToken($token)->postJson('/api/admin/wallet-rewards', $payload)
             ->assertOk()->assertExactJson($payload);
         $this->assertDatabaseHas('site_settings', ['key' => 'wallet_rewards']);

@@ -3,11 +3,15 @@
 namespace App\Http\Controllers;
 
 use App\Models\Admin;
+use App\Models\ContentReport;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\ProductQuestion;
 use App\Models\ProductVariation;
+use App\Models\Review;
 use App\Models\ReturnRequest;
 use App\Models\Seller;
+use App\Models\SellerPromotion;
 use App\Models\StoreChat;
 use App\Models\SupportTicket;
 use App\Models\PartnerWithdrawal;
@@ -42,11 +46,22 @@ class ConsoleController extends Controller
             ->whereNotNull('payment_submitted_at')
             ->where(fn ($query) => $query->whereNull('paid_amount')->orWhere('paid_amount', 0))
             ->count() : 0;
+        $reviews = Review::query()->where('status', 'pending')
+            ->when($sellerId !== null, fn ($q) => $q->whereHas('product', fn ($product) => $product->where('seller_id', $sellerId)))
+            ->count();
+        $questions = ProductQuestion::query()->whereNull('answer')
+            ->where(fn ($q) => $q->whereNull('status')->orWhere('status', '!=', 'rejected'))
+            ->when($sellerId !== null, fn ($q) => $q->whereHas('product', fn ($product) => $product->where('seller_id', $sellerId)))
+            ->count();
+        $reports = $actor instanceof Admin ? ContentReport::where('status', 'open')->count() : 0;
+        $stores = $actor instanceof Admin ? Seller::where('status', 'pending')->count() : 0;
+        $offers = $actor instanceof Admin ? SellerPromotion::where('status', 'pending')->count() : 0;
 
         return response()->json([
             'support' => $support, 'returns' => $returns, 'chats' => $chats,
             'inventory' => $simple + $variations, 'payments' => $payments,
-            'reports' => 0,
+            'reviews' => $reviews, 'questions' => $questions,
+            'reports' => $reports, 'stores' => $stores, 'offers' => $offers,
             'withdrawals' => $actor instanceof Admin
                 ? PartnerWithdrawal::where('status', 'requested')->count()
                     + \App\Models\WithdrawalRequest::where('status', 'requested')->count()

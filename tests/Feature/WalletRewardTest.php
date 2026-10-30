@@ -59,6 +59,25 @@ class WalletRewardTest extends TestCase
         $this->assertSame(0, CustomerWalletTransaction::count());
     }
 
+    public function test_cashback_respects_the_minimum_order_and_per_order_cap(): void
+    {
+        SiteSetting::create(['key' => 'wallet_rewards', 'payload' => [
+            'cashback_enabled' => true, 'cashback_percent' => 10,
+            'cashback_min_order' => 50, 'cashback_max_amount' => 12,
+        ]]);
+        $customer = $this->customer('cashback-limits@example.test');
+        $belowMinimum = $this->order($customer, 'REWARD-MIN', 'delivered');
+        $belowMinimum->update(['total' => 49]);
+        $capped = $this->order($customer, 'REWARD-CAP', 'delivered');
+        $capped->update(['total' => 200]);
+
+        app(WalletRewardService::class)->orderDelivered($belowMinimum->fresh());
+        app(WalletRewardService::class)->orderDelivered($capped->fresh());
+
+        $this->assertDatabaseMissing('customer_wallet_transactions', ['order_id' => $belowMinimum->id, 'kind' => 'cashback']);
+        $this->assertDatabaseHas('customer_wallet_transactions', ['order_id' => $capped->id, 'kind' => 'cashback', 'amount' => 12]);
+    }
+
     private function customer(string $email, ?int $referrerId=null): Customer { return Customer::create(['name'=>'Customer','email'=>$email,'password'=>'password123','email_verified_at'=>now(),'referred_by_customer_id'=>$referrerId]); }
     private function order(Customer $customer,string $number,string $status): Order { return Order::create(['order_number'=>$number,'customer_id'=>$customer->id,'status'=>$status,'payment_status'=>'paid','subtotal'=>100,'total'=>100,'shipping_charge'=>0,'shipping_name'=>'Customer','shipping_phone'=>'01712345678','shipping_address'=>'Dhaka']); }
 }

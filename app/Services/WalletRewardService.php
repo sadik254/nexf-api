@@ -13,6 +13,8 @@ class WalletRewardService
     private const DEFAULTS = [
         'cashback_enabled' => true,
         'cashback_percent' => 2.0,
+        'cashback_min_order' => 0.0,
+        'cashback_max_amount' => 0.0,
         'review_enabled' => true,
         'review_amount' => 20.0,
         'referral_enabled' => true,
@@ -26,11 +28,14 @@ class WalletRewardService
         $customer = $order->customer;
         if (!$customer) return;
         $rewards = $this->rewards();
-        app(WalletLedgerService::class)->cashback(
-            $customer,
-            $order,
-            $rewards['cashback_enabled'] ? round((float) $order->total * $rewards['cashback_percent'] / 100, 2) : 0
-        );
+        $cashback = 0.0;
+        if ($rewards['cashback_enabled'] && (float) $order->total >= $rewards['cashback_min_order']) {
+            $cashback = round((float) $order->total * $rewards['cashback_percent'] / 100, 2);
+            if ($rewards['cashback_max_amount'] > 0) {
+                $cashback = min($cashback, $rewards['cashback_max_amount']);
+            }
+        }
+        app(WalletLedgerService::class)->cashback($customer, $order, $cashback);
 
         // The referrer earns once, when their referred shopper completes the
         // shopper's first delivered order. The ledger source key makes retries safe.
@@ -58,6 +63,8 @@ class WalletRewardService
             // behaviour for installations created before this setting existed.
             'cashback_enabled' => array_key_exists('cashback_enabled', $saved) ? (bool) $saved['cashback_enabled'] : self::DEFAULTS['cashback_enabled'],
             'cashback_percent' => max(0, min(100, (float) ($saved['cashback_percent'] ?? self::DEFAULTS['cashback_percent']))),
+            'cashback_min_order' => max(0, (float) ($saved['cashback_min_order'] ?? self::DEFAULTS['cashback_min_order'])),
+            'cashback_max_amount' => max(0, (float) ($saved['cashback_max_amount'] ?? self::DEFAULTS['cashback_max_amount'])),
             'review_enabled' => array_key_exists('review_enabled', $saved) ? (bool) $saved['review_enabled'] : self::DEFAULTS['review_enabled'],
             'review_amount' => max(0, (float) ($saved['review_amount'] ?? self::DEFAULTS['review_amount'])),
             'referral_enabled' => array_key_exists('referral_enabled', $saved) ? (bool) $saved['referral_enabled'] : self::DEFAULTS['referral_enabled'],
