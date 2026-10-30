@@ -176,7 +176,7 @@ class OrderController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        return response()->json($order->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']));
+        return response()->json($this->withCustomerHistory($order->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon'])));
     }
 
     public function indexSellerOrdersForSuperAdmin(Request $request, Seller $seller): JsonResponse
@@ -189,7 +189,7 @@ class OrderController extends Controller
     {
         if (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
         if (!$order->items()->where('seller_id', $seller->id)->exists()) return response()->json(['message' => 'Order does not contain items from this seller.'], 404);
-        return response()->json($order->load(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => $this->sellerGroups($seller->id), 'paymentMethod', 'shippingMethod', 'coupon']));
+        return response()->json($this->withCustomerHistory($order->load(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => $this->sellerGroups($seller->id), 'paymentMethod', 'shippingMethod', 'coupon'])));
     }
 
     public function cancelSellerOrderForSuperAdmin(Request $request, Seller $seller, Order $order): JsonResponse
@@ -225,12 +225,14 @@ class OrderController extends Controller
         $seller = $request->user();
         abort_unless(! $order->isHeldFromSeller() && $order->items()->where('seller_id', $seller->id)->exists(), 404);
 
-        return response()->json($this->sellerView($order->load([
+        $view = $this->sellerView($order->load([
             'customer:id,name,email,phone',
             'items' => fn ($query) => $query->where('seller_id', $seller->id),
             'storeGroups' => $this->sellerGroups($seller->id),
             'shippingMethod',
-        ])->toArray(), $seller->id));
+        ])->toArray(), $seller->id);
+        $view['customer_history'] = $this->customerHistory($order);
+        return response()->json($view);
     }
 
     /**
@@ -258,6 +260,37 @@ class OrderController extends Controller
             if ($live->isNotEmpty()) $order['status'] = $live->sortBy(fn ($s) => $rank[$s] ?? 0)->first();
         }
         return $order;
+    }
+
+    private function withCustomerHistory(Order $order): Order
+    {
+        $order->setAttribute('customer_history', $this->customerHistory($order));
+        return $order;
+    }
+
+    /** Platform-wide counts only; no other order data is disclosed to a store. */
+    private function customerHistory(Order $order): array
+    {
+        $phone = $this->normalizedHistoryPhone($order->shipping_phone);
+        $orders = Order::query()->whereNull('exchange_for')
+            ->where(function ($query) use ($order, $phone): void {
+                if ($order->customer_id) $query->orWhere('customer_id', $order->customer_id);
+                if ($phone) {
+                    $query->orWhere('shipping_phone', $phone)
+                        ->orWhere('shipping_phone', '+88'.$phone)
+                        ->orWhere('shipping_phone', '88'.$phone);
+                }
+            })->get(['status']);
+        $received = $orders->whereIn('status', ['delivered', 'completed'])->count();
+        $failed = $orders->whereIn('status', ['cancelled', 'refused'])->count();
+        return ['orders' => $orders->count(), 'received' => $received, 'failed' => $failed, 'pending' => $orders->count() - $received - $failed];
+    }
+
+    private function normalizedHistoryPhone(?string $phone): ?string
+    {
+        $digits = preg_replace('/\D/', '', (string) $phone);
+        if (str_starts_with($digits, '880')) $digits = '0'.substr($digits, 3);
+        return preg_match('/^01[3-9]\d{8}$/', $digits) ? $digits : null;
     }
 
     public function updateStatus(Request $request, Order $order): JsonResponse
