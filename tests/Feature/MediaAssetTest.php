@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\Admin;
+use App\Models\MediaAsset;
 use App\Models\Seller;
+use App\Models\SellerStaff;
 use App\Models\ProductCategory;
 use App\Services\MediaUploadService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -70,5 +72,40 @@ class MediaAssetTest extends TestCase
         ])->assertOk()->assertJsonPath('product.gallery', [])
             ->assertJsonPath('product.default_selling_price', 499)
             ->assertJsonPath('product.compare_at_price', '699.00');
+    }
+
+    public function test_an_asset_can_be_shared_with_many_store_libraries_and_staff_can_remove_only_their_store_copy(): void
+    {
+        $first = Seller::create(['seller_name' => 'First', 'email' => 'first-shared-media@example.test', 'store_name' => 'First Store', 'store_slug' => 'first-shared-media', 'kyc_type' => 'nid', 'kyc_number' => '11', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
+        $second = Seller::create(['seller_name' => 'Second', 'email' => 'second-shared-media@example.test', 'store_name' => 'Second Store', 'store_slug' => 'second-shared-media', 'kyc_type' => 'nid', 'kyc_number' => '22', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
+        $admin = Admin::create(['name' => 'Super', 'email' => 'shared-media@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $adminToken = $admin->createToken('test', ['admin'])->plainTextToken;
+
+        $asset = $this->withToken($adminToken)->postJson('/api/admin/media/link', [
+            'url' => 'https://example.test/shared.jpg', 'file_name' => 'shared.jpg',
+            'seller_ids' => [$first->id, $second->id], 'include_house' => true,
+        ])->assertCreated()
+            ->assertJsonPath('uploaded_by_type', 'admin')
+            ->assertJsonPath('seller_ids', [$first->id, $second->id])
+            ->assertJsonPath('include_house', true)
+            ->json();
+
+        $firstToken = $first->createToken('test', ['seller'])->plainTextToken;
+        $secondToken = $second->createToken('test', ['seller'])->plainTextToken;
+        $this->withToken($firstToken)->getJson('/api/seller/media')->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.id', $asset['id']);
+        $this->withToken($secondToken)->getJson('/api/seller/media')->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.id', $asset['id']);
+
+        $staff = SellerStaff::create(['seller_id' => $first->id, 'name' => 'First staff', 'email' => 'first-staff-media@example.test', 'password' => 'password123', 'status' => 'active']);
+        $staffToken = $staff->createToken('test', ['seller'])->plainTextToken;
+        $this->withToken($staffToken)->postJson("/api/seller/media/{$asset['id']}", ['file_name' => 'renamed-shared.jpg'])
+            ->assertOk()->assertJsonPath('file_name', 'renamed-shared.jpg');
+        $this->withToken($staffToken)->postJson("/api/seller/media/{$asset['id']}/delete")
+            ->assertOk()->assertJsonPath('message', 'Removed from this store media library. The original file remains available for other stores.');
+
+        $this->withToken($firstToken)->getJson('/api/seller/media')->assertOk()->assertJsonPath('total', 0);
+        $this->withToken($secondToken)->getJson('/api/seller/media')->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.file_name', 'renamed-shared.jpg');
+        $this->assertDatabaseHas('media_assets', ['id' => $asset['id']]);
+        $this->assertDatabaseMissing('media_asset_store_libraries', ['media_asset_id' => $asset['id'], 'seller_id' => $first->id]);
+        $this->assertDatabaseHas('media_asset_store_libraries', ['media_asset_id' => $asset['id'], 'seller_id' => $second->id]);
     }
 }

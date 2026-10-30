@@ -661,9 +661,9 @@ class ProductController extends Controller
     {
         $asset = MediaAsset::findOrFail($assetId);
         abort_unless($asset->mime_type && str_starts_with($asset->mime_type, 'image/'), 422, 'Selected media must be an image.');
-        $allowed = $adminActor || $sellerId === null
-            ? $asset->owner_type === 'admin'
-            : $asset->owner_type === 'seller' && $asset->owner_id === $sellerId;
+        $allowed = $adminActor || ($sellerId === null
+            ? $asset->isInHouseLibrary()
+            : $asset->isInSellerLibrary($sellerId));
         abort_unless($allowed, 403, 'You cannot use this media asset.');
         return $asset->url;
     }
