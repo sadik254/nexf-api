@@ -82,9 +82,12 @@ class SubOrderService
 
     /**
      * Split the discount and the prepayment across groups. A store's own coupon
-     * comes off that store's group and is funded by the store; every other
-     * discount is spread by value and funded by NEXF. A group already handed to
-     * a courier keeps its COD - the courier is already collecting it.
+     * comes off that store's group and is funded by the store. Every other
+     * discount, and the prepayment (NEXF Balance, money already paid), comes off
+     * the parcels NEXF ships, by value; only what does not fit there spills onto
+     * the stores' parcels, and NEXF pays that back through their payouts. A
+     * group already handed to a courier keeps its COD - the courier is already
+     * collecting it.
      */
     public function allocate(Order $order): void
     {
@@ -92,21 +95,24 @@ class SubOrderService
         if ($groups->isEmpty()) return;
         $subtotals = $groups->mapWithKeys(fn (OrderStoreGroup $g) => [$g->id => round((float) $g->items->sum(fn (OrderItem $i) => (float) $i->line_subtotal), 2)]);
 
-        $sellerFunded = array_fill_keys($groups->pluck('id')->all(), 0.0);
+        // A store's edit discount stays on its own parcel, at its own cost.
+        $sellerFunded = $groups->mapWithKeys(fn (OrderStoreGroup $g) => [$g->id => (float) $g->manual_discount])->all();
+        $storeFundedTotal = (float) array_sum($sellerFunded);
         $redemptions = $order->couponRedemptions()->get();
         $coupons = Coupon::query()->whereIn('id', $redemptions->pluck('coupon_id')->filter())->get(['id', 'seller_id'])->keyBy('id');
-        $storeCouponTotal = 0.0;
         foreach ($redemptions as $redemption) {
             $sellerId = $coupons->get($redemption->coupon_id)?->seller_id;
             if (!$sellerId) continue;
             // Spread over the groups carrying that store's lines, by their value.
             $weights = $groups->mapWithKeys(fn (OrderStoreGroup $g) => [$g->id => (float) $g->items->where('seller_id', $sellerId)->sum(fn (OrderItem $i) => (float) $i->line_subtotal)])->filter(fn ($w) => $w > 0);
             foreach ($this->spread((float) $redemption->discount_amount, $weights->all()) as $id => $share) $sellerFunded[$id] += $share;
-            $storeCouponTotal += (float) $redemption->discount_amount;
+            $storeFundedTotal += (float) $redemption->discount_amount;
         }
 
-        $platformDiscount = max(0, round((float) $order->discount_total - $storeCouponTotal, 2));
-        $platformShares = $this->spread($platformDiscount, $subtotals->all());
+        $nexfIds = $groups->where('ships_by', 'nexf')->pluck('id')->all();
+        $platformDiscount = max(0, round((float) $order->discount_total - $storeFundedTotal, 2));
+        $room = $groups->mapWithKeys(fn (OrderStoreGroup $g) => [$g->id => max(0, round($subtotals[$g->id] - $sellerFunded[$g->id], 2))])->all();
+        $platformShares = $this->place($platformDiscount, $room, $nexfIds);
 
         $totals = [];
         foreach ($groups as $group) {
@@ -118,10 +124,17 @@ class SubOrderService
         $prepaid = $order->payment_status === 'paid'
             ? (float) $order->total
             : min((float) $order->total, (float) $order->wallet_amount + (float) ($order->paid_amount ?? 0));
-        $prepaidShares = $this->spread(round($prepaid, 2), $totals);
+        // Cancelled parcels collect nothing. There is no parcel-level wallet
+        // credit in the ledger yet, so a later cancellation cannot be treated
+        // as prepayment for a remaining parcel.
+        $credited = [];
+        $cancelled = fn (OrderStoreGroup $g) => $g->status === 'cancelled' || isset($credited[$g->id]);
+        $prepaidShares = $this->place($prepaid, $groups->mapWithKeys(fn (OrderStoreGroup $g) => [$g->id => $cancelled($g) ? 0.0 : $totals[$g->id]])->all(), $nexfIds);
 
         foreach ($groups as $group) {
-            if ($group->shipped_at === null && $group->courier_consignment_id === null) {
+            if ($group->shipped_at === null && $group->courier_consignment_id === null && $cancelled($group)) {
+                $group->forceFill(['prepaid_amount' => 0, 'cod_amount' => 0]);
+            } elseif ($group->shipped_at === null && $group->courier_consignment_id === null) {
                 $share = round(min($totals[$group->id], $prepaidShares[$group->id] ?? 0), 2);
                 $group->forceFill(['prepaid_amount' => $share, 'cod_amount' => max(0, round($totals[$group->id] - $share, 2))]);
             }
@@ -150,6 +163,23 @@ class SubOrderService
     {
         $lines = $group->items->where('fulfillment_status', '!=', 'cancelled')->map(fn (OrderItem $i) => "{$i->product_name} ×{$i->quantity}")->implode(', ');
         return mb_strimwidth($lines, 0, 255, '…');
+    }
+
+    /**
+     * Put `amount` on the `first` keys up to their room, by room; whatever does
+     * not fit goes on the other keys the same way.
+     */
+    private function place(float $amount, array $room, array $first): array
+    {
+        $out = array_map(fn () => 0.0, $room);
+        $firstKeys = array_flip($first);
+        foreach ([array_intersect_key($room, $firstKeys), array_diff_key($room, $firstKeys)] as $tier) {
+            $tier = array_filter($tier, fn ($r) => $r > 0);
+            $take = round(min($amount, array_sum($tier)), 2);
+            foreach ($this->spread($take, $tier) as $key => $share) $out[$key] = round($out[$key] + $share, 2);
+            $amount = round($amount - $take, 2);
+        }
+        return $out;
     }
 
     /** Split `amount` across keys by weight; the last key takes the rounding remainder. */

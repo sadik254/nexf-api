@@ -556,6 +556,7 @@ Route::prefix('seller')->middleware(['sanctum.type:seller','store.scope'])->grou
     Route::get('/orders', [OrderController::class, 'indexSeller'])->middleware('perm:orders.view');
     Route::get('/orders/{order}', [OrderController::class, 'showSeller'])->middleware('perm:orders.view');
     Route::post('/orders/{order}/items/{item}/fulfillment', [OrderController::class, 'fulfillSellerItem'])->middleware('perm:orders.manage');
+    Route::post('/orders/{order}/groups/{group}', [OrderController::class, 'updateSellerGroup'])->middleware('perm:orders.manage');
     Route::post('/orders/{order}/groups/{group}/fulfillment', [OrderController::class, 'fulfillSellerGroup'])->middleware('perm:orders.manage');
     Route::get('/products', [ProductController::class, 'indexSellerSelf'])->middleware('perm:products.view');
     Route::post('/products', [ProductController::class, 'store'])->middleware('perm:products.edit');

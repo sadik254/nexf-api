@@ -37,7 +37,7 @@ class SubOrderTest extends TestCase
         $this->assertSame(1, $groups['seller']->items()->count());
     }
 
-    public function test_a_payment_recorded_by_staff_is_split_across_unshipped_parcels(): void
+    public function test_a_payment_recorded_by_staff_fills_the_nexf_parcel_before_store_parcels(): void
     {
         [$customer, $house, $sellerProduct, , $admin] = $this->fixtures();
         $order = $this->place($customer, [[$house, 2], [$sellerProduct, 1]])->json('order');
@@ -45,10 +45,43 @@ class SubOrderTest extends TestCase
             ->postJson("/api/admin/orders/{$order['id']}", ['paid_amount' => 270])->assertOk();
 
         $groups = OrderStoreGroup::query()->where('order_id', $order['id'])->get()->keyBy('ships_by');
-        $this->assertSame('110.00', $groups['nexf']->prepaid_amount);
-        $this->assertSame('110.00', $groups['nexf']->cod_amount);
-        $this->assertSame('160.00', $groups['seller']->prepaid_amount);
-        $this->assertSame('160.00', $groups['seller']->cod_amount);
+        $this->assertSame('220.00', $groups['nexf']->prepaid_amount);
+        $this->assertSame('0.00', $groups['nexf']->cod_amount);
+        $this->assertSame('50.00', $groups['seller']->prepaid_amount);
+        $this->assertSame('270.00', $groups['seller']->cod_amount);
+    }
+
+    public function test_a_seller_edits_only_its_own_unshipped_parcel_and_funds_its_discount(): void
+    {
+        [$customer, $house, $sellerProduct, $seller] = $this->fixtures();
+        $order = $this->place($customer, [[$house, 2], [$sellerProduct, 1]])->json('order');
+        $storeParcel = OrderStoreGroup::query()->where('order_id', $order['id'])->where('ships_by', 'seller')->sole();
+        $token = $seller->createToken('t', ['seller:basic'])->plainTextToken;
+
+        $this->withToken($token)->postJson("/api/seller/orders/{$order['id']}/groups/{$storeParcel->id}", [
+            'items' => [['product_id' => $sellerProduct->id, 'quantity' => 2]],
+            'manual_discount_kind' => 'flat', 'manual_discount_value' => 100,
+        ])->assertOk();
+
+        $storeParcel->refresh();
+        $this->assertSame('600.00', $storeParcel->subtotal);
+        $this->assertSame('100.00', $storeParcel->manual_discount);
+        $this->assertSame('100.00', $storeParcel->seller_funded_discount);
+        $this->assertSame('520.00', $storeParcel->cod_amount);
+    }
+
+    public function test_admin_cannot_change_a_store_parcel_when_editing_nexf_lines(): void
+    {
+        [$customer, $house, $sellerProduct, , $admin] = $this->fixtures();
+        $order = $this->place($customer, [[$house, 2], [$sellerProduct, 1]])->json('order');
+        $token = $admin->createToken('t', ['admin:orders'])->plainTextToken;
+
+        $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}", [
+            'items' => [['product_id' => $house->id, 'quantity' => 2], ['product_id' => $sellerProduct->id, 'quantity' => 2]],
+            'payment_method_id' => PaymentMethod::where('code', 'cod')->value('id'),
+            'shipping_method_id' => ShippingMethod::value('id'),
+            'shipping_name' => 'Customer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka',
+        ])->assertUnprocessable()->assertJsonValidationErrors('items');
     }
 
     public function test_packing_books_only_the_nexf_parcel_and_the_store_ships_its_own(): void

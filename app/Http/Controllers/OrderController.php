@@ -6,6 +6,7 @@ use App\Models\Admin;
 use App\Models\Coupon;
 use App\Models\CouponRedemption;
 use App\Models\Customer;
+use App\Models\DeliveryGroup;
 use App\Models\Order;
 use App\Models\ReturnRequest;
 use App\Models\PaymentMethod;
@@ -415,71 +416,58 @@ class OrderController extends Controller
 
         $updated = DB::transaction(function () use ($order, $data, $customer, $actor) {
             $locked = Order::query()->lockForUpdate()->findOrFail($order->id);
-            $fulfillmentStates = $locked->items()->pluck('fulfillment_status')->unique()->values();
+
+            // NEXF edits only the parcels it ships. Parcels stores ship
+            // themselves keep their lines, state, courier details, discount and
+            // coupon exactly as they are, shipped or not.
+            $storeParcels = $locked->storeGroups()->where('ships_by', 'seller')->with('items')->get();
+            $storeSellerIds = $storeParcels->flatMap->items->pluck('seller_id')->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
+            $storeGroupIds = $storeParcels->pluck('id');
+            $nexfItems = $locked->items()->get()->reject(fn (OrderItem $item) => $storeGroupIds->contains($item->store_group_id))->values();
+            $sellerOf = Product::query()->whereIn('id', collect($data['items'])->pluck('product_id'))->pluck('seller_id', 'id');
+            [$storeData, $nexfData] = collect($data['items'])->partition(fn (array $line) => in_array((int) $sellerOf->get($line['product_id']), $storeSellerIds, true));
+            if ($this->lineKeys($storeData) !== $this->lineKeys($storeParcels->flatMap->items)) {
+                throw ValidationException::withMessages(['items' => ["A store's parcel can only be changed by that store."]]);
+            }
+
+            $fulfillmentStates = $nexfItems->pluck('fulfillment_status')->unique()->values();
             if (!in_array($locked->status, ['pending', 'confirmed'], true) || $fulfillmentStates->count() > 1 || ($fulfillmentStates->isNotEmpty() && !in_array($fulfillmentStates->first(), ['pending', 'confirmed'], true))) {
-                throw ValidationException::withMessages(['order' => ['Only pending or fully confirmed orders can be edited before shipping.']]);
+                throw ValidationException::withMessages(['order' => ["Only a pending or fully confirmed NEXF parcel can be edited before shipping."]]);
             }
             $itemFulfillmentState = $fulfillmentStates->first() ?? 'pending';
-            if ($locked->items()->whereHas('review')->exists() || DB::table('return_requests')->whereIn('order_item_id', $locked->items()->select('id'))->exists()) {
+            if ($nexfItems->contains(fn (OrderItem $item) => $item->review()->exists()) || DB::table('return_requests')->whereIn('order_item_id', $nexfItems->pluck('id'))->exists()) {
                 throw ValidationException::withMessages(['order' => ['This order has review or return history and cannot have its lines replaced.']]);
             }
 
-            foreach ($locked->items as $oldItem) {
+            foreach ($nexfItems as $oldItem) {
                 $this->inventory->restoreOrderItem($oldItem, $actor, 'admin_order_edit_restore');
             }
+
+            // A store's own coupon stays with the store's parcel; the rest are requoted on NEXF's lines.
+            $redemptions = CouponRedemption::query()->where('order_id', $locked->id)->lockForUpdate()->get();
+            $couponSellers = Coupon::query()->whereIn('id', $redemptions->pluck('coupon_id')->filter())->pluck('seller_id', 'id');
+            [$keptRedemptions, $oldRedemptions] = $redemptions->partition(fn (CouponRedemption $r) => in_array((int) $couponSellers->get($r->coupon_id), $storeSellerIds, true));
 
             $keepRequest = $locked->stock_request && $itemFulfillmentState === 'pending';
             $data['stock_request'] = $keepRequest;
             // Requote only after the old lot allocations are restored, so unchanged quantities remain available.
-            $preview = $this->checkout->preview($customer, $data);
+            $quoteData = ['items' => $nexfData->values()->all()] + $data;
+            if ($keptRedemptions->contains(fn (CouponRedemption $r) => strcasecmp((string) $r->coupon_code, (string) ($data['coupon_code'] ?? '')) === 0)) unset($quoteData['coupon_code']);
+            // With no NEXF lines left there's nothing to quote: the stores' parcels carry the order.
+            $preview = $nexfData->isEmpty()
+                ? ['shippingMethod' => ShippingMethod::query()->findOrFail($data['shipping_method_id']), 'applied_discounts' => []]
+                : $this->checkout->preview($customer, $quoteData);
 
-            CouponRedemption::query()->where('order_id', $locked->id)->lockForUpdate()->get()->each(function (CouponRedemption $oldRedemption): void {
+            $oldRedemptions->each(function (CouponRedemption $oldRedemption): void {
                 if ($oldRedemption->coupon_id) Coupon::query()->whereKey($oldRedemption->coupon_id)->decrement('used_count');
                 $oldRedemption->delete();
             });
-            $locked->items()->delete();
-            $locked->storeGroups()->delete();
+            OrderItem::query()->whereIn('id', $nexfItems->pluck('id'))->delete();
+            $locked->storeGroups()->whereNotIn('id', $storeParcels->pluck('id'))->delete();
 
-            $subtotal = 0.0;
             $shippingLines = [];
-            foreach ($data['items'] as $itemData) {
-                $product = Product::query()->with('seller')->availableForSale()->find($itemData['product_id']);
-                if (!$product || ($product->seller_id !== null && (!$product->seller || $product->seller->status !== 'approved' || !$product->seller->is_active))) {
-                    throw ValidationException::withMessages(['items' => ['One or more products are unavailable.']]);
-                }
-                $quantity = (int) $itemData['quantity'];
-                $variation = null;
-                if ($product->product_type === 'variable' && empty($itemData['variation_id'])) {
-                    throw ValidationException::withMessages(['items' => ["A variation must be selected for {$product->name}."]]);
-                }
-                if ($product->product_type === 'simple' && !empty($itemData['variation_id'])) {
-                    throw ValidationException::withMessages(['items' => ["{$product->name} does not have purchasable variations."]]);
-                }
-                if (!empty($itemData['variation_id'])) {
-                    $variation = ProductVariation::query()->where('product_id', $product->id)->where('is_active', true)->find($itemData['variation_id']);
-                    if (!$variation) throw ValidationException::withMessages(['items' => ["Selected variation for {$product->name} is unavailable."]]);
-                }
-                if ($keepRequest) {
-                    $revenue = round($this->inventory->unitSellingPrice($product, $variation) * $quantity, 2);
-                    $result = ['allocations' => [], 'totals' => ['cost' => 0.0, 'revenue' => $revenue, 'profit' => $revenue]];
-                } elseif ($variation) {
-                    $result = $this->inventory->consumeVariation($variation, $quantity, $actor, 'order_sale', ['order_id' => $locked->id]);
-                } else {
-                    $result = $this->inventory->consumeProduct($product, $quantity, $actor, 'order_sale', ['order_id' => $locked->id]);
-                }
-                $lineSubtotal = (float) $result['totals']['revenue'];
-                $lineCost = (float) $result['totals']['cost'];
-                $locked->items()->create([
-                    'product_id' => $product->id, 'variation_id' => $variation?->id, 'seller_id' => $product->seller_id,
-                    'product_name' => $product->name, 'product_slug' => $product->slug, 'product_thumbnail' => $product->thumbnail,
-                    'product_gallery' => $product->gallery, 'product_image_variants' => $product->image_variants,
-                    'sku' => $variation?->sku, 'variation_attributes' => $variation?->attributes, 'quantity' => $quantity,
-                    'variation_labels' => $this->variationLabels($product, $variation), 'variation_image' => $variation?->image_url,
-                    'unit_selling_price' => round($lineSubtotal / $quantity, 2), 'unit_buying_price' => round($lineCost / $quantity, 2),
-                    'line_subtotal' => $lineSubtotal, 'line_cost' => $lineCost, 'line_profit' => (float) $result['totals']['profit'], 'commission_rate' => $product->seller?->commission_rate,
-                    'lot_allocations' => $result['allocations'], 'fulfillment_status' => $itemFulfillmentState, 'awaiting_stock' => $keepRequest,
-                ]);
-                $subtotal = round($subtotal + $lineSubtotal, 2);
+            foreach ($nexfData as $itemData) {
+                [$product, $lineSubtotal] = $this->addEditedLine($locked, $itemData, $actor, $itemFulfillmentState, $keepRequest);
                 $shippingLines[] = ['product' => $product, 'subtotal' => $lineSubtotal];
             }
 
@@ -488,25 +476,36 @@ class OrderController extends Controller
             $shipping = $this->storeShipping->quote($shippingLines, $shippingMethod, $data['store_shipping_methods'] ?? [], $data['store_delivery_options'] ?? []);
             $appliedDiscounts = $this->lockAppliedDiscounts($preview, $customer, $data['shipping_phone']);
             $coupon = $appliedDiscounts[0]['coupon'] ?? null;
-            $couponDiscount = round(array_sum(array_column($appliedDiscounts, 'amount')), 2);
-            $manualDiscount = $coupon ? 0.0 : $this->manualDiscountAmount($subtotal, $data['manual_discount_kind'] ?? null, (float) ($data['manual_discount_value'] ?? 0));
-            $discount = round($couponDiscount + $manualDiscount, 2);
+            $couponDiscount = round(array_sum(array_column($appliedDiscounts, 'amount')) + $keptRedemptions->sum(fn (CouponRedemption $r) => (float) $r->discount_amount), 2);
             $locked->storeGroups()->createMany(collect($shipping['groups'])->map(function (array $group) {
                 unset($group['shipping_options']);
                 return $group;
             })->all());
+
+            $this->subOrders->link($locked);
+            $groups = $locked->storeGroups()->with('items')->get();
+            if ($groups->where('ships_by', 'seller')->count() !== $storeParcels->count()) {
+                throw ValidationException::withMessages(['items' => ['NEXF can only add products it ships.']]);
+            }
+            $subtotal = round((float) $groups->flatMap->items->sum(fn (OrderItem $item) => (float) $item->line_subtotal), 2);
+            $shippingTotal = round((float) $groups->sum(fn (OrderStoreGroup $g) => (float) $g->shipping_charge), 2);
+            $storeDiscount = round((float) $storeParcels->sum(fn (OrderStoreGroup $g) => (float) $g->manual_discount), 2);
+            $nexfSubtotal = round((float) $groups->where('ships_by', 'nexf')->flatMap->items->sum(fn (OrderItem $item) => (float) $item->line_subtotal), 2);
+            $manualDiscount = $coupon ? 0.0 : $this->manualDiscountAmount($nexfSubtotal, $data['manual_discount_kind'] ?? null, (float) ($data['manual_discount_value'] ?? 0));
+            $discount = round($couponDiscount + $manualDiscount + $storeDiscount, 2);
+            $keptCoupon = $coupon ? null : $keptRedemptions->first();
             $locked->fill([
                 'customer_id' => $customer?->id, 'reseller_id' => $customer?->reseller_id,
-                'is_guest' => empty($data['customer_id']) || (bool) ($data['guest'] ?? false), 'status' => $itemFulfillmentState,
+                'is_guest' => empty($data['customer_id']) || (bool) ($data['guest'] ?? false),
                 'payment_method_id' => $paymentMethod->id, 'payment_method_code' => $paymentMethod->code, 'payment_method_name' => $paymentMethod->name,
                 'shipping_method_id' => $shippingMethod->id, 'shipping_method_code' => $shippingMethod->code, 'shipping_method_name' => $shippingMethod->name,
                 'shipping_currency' => $shippingMethod->currency, 'shipping_name' => $data['shipping_name'], 'shipping_phone' => $data['shipping_phone'],
                 'shipping_email' => $data['shipping_email'] ?? $customer?->email, 'shipping_address' => $data['shipping_address'],
                 'shipping_area' => $data['shipping_area'] ?? null, 'shipping_district' => $data['shipping_district'] ?? null,
                 'notes' => $data['notes'] ?? null, 'internal_note' => $data['internal_note'] ?? null, 'paid_amount' => $data['paid_amount'] ?? null,
-                'coupon_id' => $coupon?->id, 'coupon_code' => $coupon?->code, 'manual_discount_kind' => $data['manual_discount_kind'] ?? null,
+                'coupon_id' => $coupon?->id ?? $keptCoupon?->coupon_id, 'coupon_code' => $coupon?->code ?? $keptCoupon?->coupon_code, 'manual_discount_kind' => $data['manual_discount_kind'] ?? null,
                 'manual_discount_value' => $data['manual_discount_value'] ?? null, 'subtotal' => $subtotal,
-                'discount_total' => $discount, 'shipping_charge' => $shipping['total'], 'total' => round($subtotal + $shipping['total'] - $discount, 2),
+                'discount_total' => $discount, 'shipping_charge' => $shippingTotal, 'total' => round($subtotal + $shippingTotal - $discount, 2),
             ])->save();
             foreach ($appliedDiscounts as $appliedDiscount) {
                 $appliedCoupon = $appliedDiscount['coupon'];
@@ -514,6 +513,7 @@ class OrderController extends Controller
                 CouponRedemption::create(['coupon_id' => $appliedCoupon->id, 'customer_id' => $customer?->id, 'order_id' => $locked->id, 'coupon_code' => $appliedCoupon->code, 'coupon_name' => $appliedCoupon->name, 'is_automatic' => $appliedCoupon->is_automatic, 'order_subtotal' => $subtotal, 'discount_amount' => $appliedDiscount['amount']]);
             }
             $this->subOrders->sync($locked);
+            $this->refreshOrderStatus($locked);
             return $locked->fresh()->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
 
@@ -734,6 +734,82 @@ class OrderController extends Controller
 
             return $lockedOrder->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
+    }
+
+    /** A store may replace only its own unshipped parcel and fund its discount. */
+    public function updateSellerGroup(Request $request, Order $order, OrderStoreGroup $group): JsonResponse
+    {
+        /** @var Seller $seller */
+        $seller = $request->user();
+        abort_if($order->isHeldFromSeller(), 404);
+        if ((int) $group->order_id !== (int) $order->id || (int) $group->seller_id !== (int) $seller->id || $group->ships_by !== 'seller') {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+        $data = $request->validate([
+            'items' => ['required', 'array', 'min:1', 'max:50'],
+            'items.*.product_id' => ['required', 'integer'],
+            'items.*.variation_id' => ['nullable', 'integer'],
+            'items.*.quantity' => ['required', 'integer', 'min:1', 'max:100'],
+            'manual_discount_kind' => ['nullable', 'in:flat,percent'],
+            'manual_discount_value' => ['nullable', 'numeric', 'min:0'],
+        ]);
+        $actor = $request->attributes->get('seller_staff') ?? $seller;
+
+        $updated = DB::transaction(function () use ($order, $group, $seller, $data, $actor) {
+            $locked = Order::query()->lockForUpdate()->findOrFail($order->id);
+            $parcel = OrderStoreGroup::query()->lockForUpdate()->findOrFail($group->id);
+            $items = $parcel->items()->lockForUpdate()->get();
+            $states = $items->pluck('fulfillment_status')->unique();
+            if (!in_array($locked->status, ['pending', 'confirmed'], true) || $parcel->courier_consignment_id !== null || $parcel->shipped_at !== null
+                || $states->count() > 1 || ($states->isNotEmpty() && !in_array($states->first(), ['pending', 'confirmed'], true))) {
+                throw ValidationException::withMessages(['order' => ['Only a pending or confirmed parcel can be edited before shipping.']]);
+            }
+            if ($items->contains(fn (OrderItem $item) => $item->review()->exists()) || DB::table('return_requests')->whereIn('order_item_id', $items->pluck('id'))->exists()) {
+                throw ValidationException::withMessages(['order' => ['This parcel has review or return history and cannot have its lines replaced.']]);
+            }
+            $state = $states->first() ?? 'pending';
+            $deliveryGroups = DeliveryGroup::query()->where('ships_from_seller_id', $seller->id)->get();
+            $sellerIds = $deliveryGroups
+                ->flatMap(fn (DeliveryGroup $deliveryGroup) => array_map('intval', $deliveryGroup->seller_ids ?? []))
+                ->push($seller->id)->unique()->values()->all();
+            if ($deliveryGroups->contains('includes_house', true)) $sellerIds[] = null;
+
+            foreach ($items as $oldItem) {
+                $this->inventory->restoreOrderItem($oldItem, $actor, 'store_order_edit_restore');
+                $oldItem->delete();
+            }
+            $subtotal = 0.0;
+            foreach ($data['items'] as $itemData) {
+                [, $lineSubtotal] = $this->addEditedLine($locked, $itemData, $actor, $state, false, $sellerIds, ['store_group_id' => $parcel->id]);
+                $subtotal = round($subtotal + $lineSubtotal, 2);
+            }
+            $discount = $this->manualDiscountAmount($subtotal, $data['manual_discount_kind'] ?? null, (float) ($data['manual_discount_value'] ?? 0));
+            $discountTotal = round((float) $locked->discount_total - (float) $parcel->manual_discount + $discount, 2);
+            $parcel->update([
+                'manual_discount_kind' => $discount > 0 ? $data['manual_discount_kind'] : null,
+                'manual_discount_value' => $discount > 0 ? $data['manual_discount_value'] : null,
+                'manual_discount' => $discount,
+            ]);
+            $orderSubtotal = round((float) $locked->items()->sum('line_subtotal'), 2);
+            $locked->update([
+                'subtotal' => $orderSubtotal,
+                'discount_total' => $discountTotal,
+                'total' => round($orderSubtotal + (float) $locked->shipping_charge - $discountTotal, 2),
+            ]);
+            $this->subOrders->sync($locked);
+            $this->refreshOrderStatus($locked);
+            return $locked;
+        });
+
+        return response()->json([
+            'message' => 'Parcel updated.',
+            'order' => $this->sellerView($updated->fresh()->load([
+                'customer:id,name,email,phone',
+                'items' => fn ($query) => $query->where('seller_id', $seller->id),
+                'storeGroups' => $this->sellerGroups($seller->id),
+                'shippingMethod',
+            ])->toArray(), $seller->id),
+        ]);
     }
 
     public function fulfillSellerGroup(Request $request, Order $order, OrderStoreGroup $group): JsonResponse
@@ -1309,6 +1385,67 @@ class OrderController extends Controller
         if (!preg_match('/^01[3-9][0-9]{8}$/', $phone)) {
             throw ValidationException::withMessages(['shipping_phone' => ['Enter a valid Bangladesh mobile number.']]);
         }
+    }
+
+    /**
+     * Sell one requested line on an order being edited: check the product and
+     * variation, take the stock (unless the order waits on a stock request) and
+     * create the line. `$sellerIds`, when given, limits whose products it takes.
+     */
+    private function addEditedLine(Order $order, array $itemData, $actor, string $state, bool $keepRequest, ?array $sellerIds = null, array $attributes = []): array
+    {
+        $product = Product::query()->with('seller')->availableForSale()->find($itemData['product_id']);
+        if (!$product || ($product->seller_id !== null && (!$product->seller || $product->seller->status !== 'approved' || !$product->seller->is_active))) {
+            throw ValidationException::withMessages(['items' => ['One or more products are unavailable.']]);
+        }
+        if ($sellerIds !== null && !in_array($product->seller_id, $sellerIds, true)) {
+            throw ValidationException::withMessages(['items' => ["{$product->name} doesn't ship in this parcel."]]);
+        }
+        $quantity = (int) $itemData['quantity'];
+        $variation = null;
+        if ($product->product_type === 'variable' && empty($itemData['variation_id'])) {
+            throw ValidationException::withMessages(['items' => ["A variation must be selected for {$product->name}."]]);
+        }
+        if ($product->product_type === 'simple' && !empty($itemData['variation_id'])) {
+            throw ValidationException::withMessages(['items' => ["{$product->name} does not have purchasable variations."]]);
+        }
+        if (!empty($itemData['variation_id'])) {
+            $variation = ProductVariation::query()->where('product_id', $product->id)->where('is_active', true)->find($itemData['variation_id']);
+            if (!$variation) throw ValidationException::withMessages(['items' => ["Selected variation for {$product->name} is unavailable."]]);
+        }
+        if ($keepRequest) {
+            $revenue = round($this->inventory->unitSellingPrice($product, $variation) * $quantity, 2);
+            $result = ['allocations' => [], 'totals' => ['cost' => 0.0, 'revenue' => $revenue, 'profit' => $revenue]];
+        } elseif ($variation) {
+            $result = $this->inventory->consumeVariation($variation, $quantity, $actor, 'order_sale', ['order_id' => $order->id]);
+        } else {
+            $result = $this->inventory->consumeProduct($product, $quantity, $actor, 'order_sale', ['order_id' => $order->id]);
+        }
+        $lineSubtotal = (float) $result['totals']['revenue'];
+        $lineCost = (float) $result['totals']['cost'];
+        $order->items()->create([
+            'product_id' => $product->id, 'variation_id' => $variation?->id, 'seller_id' => $product->seller_id,
+            'product_name' => $product->name, 'product_slug' => $product->slug, 'product_thumbnail' => $product->thumbnail,
+            'product_gallery' => $product->gallery, 'product_image_variants' => $product->image_variants,
+            'sku' => $variation?->sku, 'variation_attributes' => $variation?->attributes, 'quantity' => $quantity,
+            'variation_labels' => $this->variationLabels($product, $variation), 'variation_image' => $variation?->image_url,
+            'unit_selling_price' => round($lineSubtotal / $quantity, 2), 'unit_buying_price' => round($lineCost / $quantity, 2),
+            'line_subtotal' => $lineSubtotal, 'line_cost' => $lineCost, 'line_profit' => (float) $result['totals']['profit'], 'commission_rate' => $product->seller?->commission_rate,
+            'lot_allocations' => $result['allocations'], 'fulfillment_status' => $state, 'awaiting_stock' => $keepRequest,
+        ] + $attributes);
+        return [$product, $lineSubtotal];
+    }
+
+    /** Lines (order items or submitted lines) as "product:variation" => quantity, to tell whether a parcel's lines changed. */
+    private function lineKeys($items): array
+    {
+        $keys = [];
+        foreach ($items as $item) {
+            $key = data_get($item, 'product_id') . ':' . (data_get($item, 'variation_id') ?? '');
+            $keys[$key] = ($keys[$key] ?? 0) + (int) data_get($item, 'quantity');
+        }
+        ksort($keys);
+        return $keys;
     }
 
     private function manualDiscountAmount(float $subtotal, ?string $kind, float $value): float
