@@ -1259,13 +1259,15 @@ class OrderController extends Controller
         if (!$variation) return null;
         $attributes = $variation->attributes ?? [];
         $labels = [];
+        $handledKeys = [];
         foreach ($product->option_groups ?? [] as $group) {
             $key = (string) ($group['key'] ?? '');
             if ($key === '' || !array_key_exists($key, $attributes)) continue;
             $selected = collect($group['values'] ?? [])->first(fn (array $value) => (string) ($value['value'] ?? '') === (string) $attributes[$key]);
             $labels[] = ['group' => $group['label'] ?? $key, 'value' => $selected['label'] ?? (string) $attributes[$key], 'swatch' => $selected['swatch'] ?? null];
+            $handledKeys[] = $key;
         }
-        foreach ($attributes as $key => $value) if (!collect($labels)->contains('group', $key) && !collect($labels)->contains('value', (string) $value)) $labels[] = ['group' => (string) $key, 'value' => (string) $value, 'swatch' => null];
+        foreach ($attributes as $key => $value) if (!in_array((string) $key, $handledKeys, true)) $labels[] = ['group' => (string) $key, 'value' => (string) $value, 'swatch' => null];
         return $labels;
     }
 
