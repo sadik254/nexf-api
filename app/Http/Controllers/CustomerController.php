@@ -18,8 +18,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
-use Uploadcare\Api;
-use Uploadcare\Configuration;
 
 class CustomerController extends Controller
 {
@@ -143,8 +141,7 @@ class CustomerController extends Controller
 
         $profileUrl = null;
         if ($request->hasFile('profile_picture')) {
-            $configuration = Configuration::create(config('services.uploadcare.public_key'), config('services.uploadcare.secret_key'));
-            $profileUrl = 'https://ucarecdn.com/' . (new Api($configuration))->uploader()->fromPath($request->file('profile_picture')->getPathname())->getUuid() . '/-/preview/';
+            $profileUrl = app(\App\Services\MediaUploadService::class)->upload($request->file('profile_picture'), 'customers');
         }
 
         // A repeated sign-up replaces the waiting details and invalidates its old code.
@@ -402,17 +399,7 @@ class CustomerController extends Controller
 
         $profileUrl = $request->boolean('remove_profile_picture') ? null : $customer->profile_picture;
         if ($request->hasFile('profile_picture')) {
-            $configuration = Configuration::create(
-                config('services.uploadcare.public_key'),
-                config('services.uploadcare.secret_key')
-            );
-            $api = new Api($configuration);
-
-            $file = $api->uploader()->fromPath(
-                $request->file('profile_picture')->getPathname()
-            );
-
-            $profileUrl = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
+            $profileUrl = app(\App\Services\MediaUploadService::class)->upload($request->file('profile_picture'), 'customers');
         }
 
         $customer->fill([

@@ -9,8 +9,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
-use Uploadcare\Api;
-use Uploadcare\Configuration;
 
 class InitialSetupController extends Controller
 {
@@ -60,7 +58,7 @@ class InitialSetupController extends Controller
         ]);
 
         $storeLogo = $request->hasFile('store_logo')
-            ? $this->upload($this->uploadcare(), $request->file('store_logo')->getPathname())
+            ? app(\App\Services\MediaUploadService::class)->upload($request->file('store_logo'), 'stores')
             : null;
 
         try {
@@ -110,17 +108,4 @@ class InitialSetupController extends Controller
         return $areas ??= json_decode((string) file_get_contents(resource_path('brand/bd-areas.json')), true, 512, JSON_THROW_ON_ERROR);
     }
 
-    private function uploadcare(): Api
-    {
-        return new Api(Configuration::create(
-            config('services.uploadcare.public_key'),
-            config('services.uploadcare.secret_key')
-        ));
-    }
-
-    private function upload(Api $uploadcare, string $path): string
-    {
-        $file = $uploadcare->uploader()->fromPath($path);
-        return "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
-    }
 }

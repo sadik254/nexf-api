@@ -15,8 +15,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
-use Uploadcare\Api;
-use Uploadcare\Configuration;
 
 class SellerController extends Controller
 {
@@ -184,7 +182,7 @@ class SellerController extends Controller
         if ($request->has('email')) $request->merge(['email'=>strtolower(trim((string)$request->input('email')))]);
         $data=$request->validate(['store_name'=>['sometimes','required','string','max:255'],'email'=>['sometimes','required','email','max:255',\Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],'phone'=>['sometimes','required','regex:/^01[3-9][0-9]{8}$/',\Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],'address_line'=>['sometimes','required_with:address_area,address_district','string','max:255'],'address_area'=>['sometimes','required_with:address_line,address_district','string','max:255'],'address_district'=>['sometimes','required_with:address_line,address_area','string','max:255'],'support_email'=>['sometimes','nullable','email','max:255'],'support_phone'=>['sometimes','nullable','string','max:32'],'store_logo'=>['nullable','file','image','max:5120'],'clear_store_logo'=>['sometimes','boolean']]);
         if (isset($data['email'])) $this->assertNoStaffEmail($data['email']);
-        $logo=$request->boolean('clear_store_logo')?null:$seller->store_logo;if($request->hasFile('store_logo')){$api=new Api(Configuration::create(config('services.uploadcare.public_key'),config('services.uploadcare.secret_key')));$logo='https://ucarecdn.com/'.$api->uploader()->fromPath($request->file('store_logo')->getPathname())->getUuid().'/-/preview/';}unset($data['store_logo'],$data['clear_store_logo']);$data['store_logo']=$logo;$addressSent=array_key_exists('address_line',$data)||array_key_exists('address_area',$data)||array_key_exists('address_district',$data);if($addressSent){$data['store_address']=implode(', ',[$data['address_line'],$data['address_area'],$data['address_district']]);$data['city']=$data['address_district'];}$seller->update($data);return response()->json(['message'=>'Store updated.','seller'=>$seller->fresh()]);
+        $logo=$request->boolean('clear_store_logo')?null:$seller->store_logo;if($request->hasFile('store_logo')){$logo=$this->uploadToCdn($request->file('store_logo'), 'stores');}unset($data['store_logo'],$data['clear_store_logo']);$data['store_logo']=$logo;$addressSent=array_key_exists('address_line',$data)||array_key_exists('address_area',$data)||array_key_exists('address_district',$data);if($addressSent){$data['store_address']=implode(', ',[$data['address_line'],$data['address_area'],$data['address_district']]);$data['city']=$data['address_district'];}$seller->update($data);return response()->json(['message'=>'Store updated.','seller'=>$seller->fresh()]);
     }
 
     public function archive(Request $request, Seller $seller): JsonResponse
@@ -239,42 +237,24 @@ class SellerController extends Controller
             return response()->json(['message' => 'Phone already taken.'], 422);
         }
 
-        $configuration = Configuration::create(
-            config('services.uploadcare.public_key'),
-            config('services.uploadcare.secret_key')
-        );
-        $api = new Api($configuration);
-
         $storeLogoUrl = null;
         if ($request->hasFile('store_logo')) {
-            $file = $api->uploader()->fromPath(
-                $request->file('store_logo')->getPathname()
-            );
-            $storeLogoUrl = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
+            $storeLogoUrl = $this->uploadToCdn($request->file('store_logo'), 'stores');
         }
 
         $storeImageUrl = null;
         if ($request->hasFile('store_image')) {
-            $file = $api->uploader()->fromPath(
-                $request->file('store_image')->getPathname()
-            );
-            $storeImageUrl = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
+            $storeImageUrl = $this->uploadToCdn($request->file('store_image'), 'stores');
         }
 
         $sellerImageUrl = null;
         if ($request->hasFile('seller_image')) {
-            $file = $api->uploader()->fromPath(
-                $request->file('seller_image')->getPathname()
-            );
-            $sellerImageUrl = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
+            $sellerImageUrl = $this->uploadToCdn($request->file('seller_image'), 'sellers');
         }
 
         $kycDocumentUrl = null;
         if ($request->hasFile('kyc_document')) {
-            $file = $api->uploader()->fromPath(
-                $request->file('kyc_document')->getPathname()
-            );
-            $kycDocumentUrl = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
+            $kycDocumentUrl = $this->uploadToCdn($request->file('kyc_document'), 'kyc');
         }
 
         $storeSlug = $this->uniqueStoreSlug($data['store_name']);
@@ -491,10 +471,9 @@ class SellerController extends Controller
         return response()->json(['message' => 'Seller rejected.']);
     }
 
-    private function uploadToCdn(\Illuminate\Http\UploadedFile $file): string
+    private function uploadToCdn(\Illuminate\Http\UploadedFile $file, string $directory = 'media'): string
     {
-        $api = new Api(Configuration::create(config('services.uploadcare.public_key'), config('services.uploadcare.secret_key')));
-        return 'https://ucarecdn.com/'.$api->uploader()->fromPath($file->getPathname())->getUuid().'/-/preview/';
+        return app(\App\Services\MediaUploadService::class)->upload($file, $directory);
     }
 
     private function uniqueStoreSlug(string $storeName): string

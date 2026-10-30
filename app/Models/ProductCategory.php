@@ -13,18 +13,12 @@ class ProductCategory extends Model
 
     public function getOriginalImageAttribute(): ?string
     {
-        return $this->originalUploadcareUrl($this->attributes['image'] ?? null);
+        return $this->attributes['image'] ?? null;
     }
 
     public function getOriginalPromoImageAttribute(): ?string
     {
-        return $this->originalUploadcareUrl($this->attributes['promo_image'] ?? null);
-    }
-
-    private function originalUploadcareUrl(?string $image): ?string
-    {
-        if (!$image || !preg_match('~^https://ucarecdn\.com/([a-f0-9-]{36})(?:/.*)?$~i', $image, $matches)) return $image;
-        return 'https://ucarecdn.com/'.$matches[1].'/';
+        return $this->attributes['promo_image'] ?? null;
     }
     protected $fillable = [
         'parent_id',

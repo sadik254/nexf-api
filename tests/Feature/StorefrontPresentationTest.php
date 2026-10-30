@@ -29,10 +29,10 @@ class StorefrontPresentationTest extends TestCase
         $categoryRow = collect($this->getJson('/api/store/categories')->assertOk()->json())
             ->firstWhere('id', $category->id);
         $this->assertSame($category->image, $categoryRow['image']);
-        $this->assertSame('https://ucarecdn.com/123e4567-e89b-12d3-a456-426614174000/', $categoryRow['original_image']);
+        $this->assertSame($category->image, $categoryRow['original_image']);
         $this->assertSame('Shop fashion', $categoryRow['menu_heading']);
         $this->assertSame($category->promo_image, $categoryRow['promo_image']);
-        $this->assertSame('https://ucarecdn.com/123e4567-e89b-12d3-a456-426614174001/', $categoryRow['original_promo_image']);
+        $this->assertSame($category->promo_image, $categoryRow['original_promo_image']);
         $this->assertSame('/collections/fashion', $categoryRow['promo_href']);
         $this->assertSame('New season', $categoryRow['promo_title']);
         $this->assertSame('Made for every day', $categoryRow['promo_caption']);

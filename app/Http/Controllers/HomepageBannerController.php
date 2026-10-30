@@ -7,8 +7,6 @@ use App\Models\HomepageBanner;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
-use Uploadcare\Api;
-use Uploadcare\Configuration;
 
 class HomepageBannerController extends Controller
 {
@@ -116,8 +114,6 @@ class HomepageBannerController extends Controller
 
     private function upload($file): string
     {
-        $api = new Api(Configuration::create(config('services.uploadcare.public_key'), config('services.uploadcare.secret_key')));
-        $uploaded = $api->uploader()->fromPath($file->getPathname());
-        return "https://ucarecdn.com/{$uploaded->getUuid()}/-/preview/";
+        return app(\App\Services\MediaUploadService::class)->upload($file, 'banners');
     }
 }

@@ -70,28 +70,23 @@ class Product extends Model
     protected function imageVariants(): Attribute
     {
         return Attribute::get(fn () => [
-            'thumbnail' => $this->uploadcareVariants($this->thumbnail),
+            'thumbnail' => $this->variantsForUrl($this->thumbnail),
             'gallery' => array_map(
-                fn (string $url) => $this->uploadcareVariants($url),
+                fn (string $url) => $this->variantsForUrl($url),
                 $this->gallery ?? []
             ),
         ]);
     }
 
-    private function uploadcareVariants(?string $url): ?array
+    private function variantsForUrl(?string $url): ?array
     {
-        if (!$url || !str_starts_with($url, 'https://ucarecdn.com/')) {
-            return null;
-        }
-
-        $baseUrl = rtrim((string) preg_replace('#/-/.*$#', '', $url), '/');
-
+        $uploads = app(\App\Services\MediaUploadService::class);
         return [
             'preview' => $url,
-            'card' => "{$baseUrl}/-/scale_crop/750x1000/smart/-/format/auto/-/quality/smart/",
-            'pdp_defaults' => "{$baseUrl}/-/resize/x1000/-/format/auto/-/quality/smart/",
-            'pdp_zoom' => "{$baseUrl}/-/resize/x2000/-/format/auto/-/quality/better/",
-            'thumb' => "{$baseUrl}/-/scale_crop/256x256/smart/-/format/auto/",
+            'card' => $uploads->imageVariant($url, 'card'),
+            'pdp_defaults' => $uploads->imageVariant($url, 'pdp_defaults'),
+            'pdp_zoom' => $uploads->imageVariant($url, 'pdp_zoom'),
+            'thumb' => $uploads->imageVariant($url, 'thumb'),
         ];
     }
 

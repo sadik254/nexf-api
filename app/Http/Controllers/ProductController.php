@@ -12,14 +12,13 @@ use App\Models\Seller;
 use App\Models\SizeChart;
 use App\Models\MediaAsset;
 use App\Services\ProductHtmlSanitizer;
+use App\Services\MediaUploadService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
-use Uploadcare\Api;
-use Uploadcare\Configuration;
 
 class ProductController extends Controller
 {
@@ -229,14 +228,11 @@ class ProductController extends Controller
 
         $slug = $data['slug'] ?? $this->uniqueSlug($data['name']);
 
-        $uploadcare = $this->uploadcare();
+        $uploads = app(MediaUploadService::class);
 
         $thumbnailUrl = null;
         if ($request->hasFile('thumbnail')) {
-            $file = $uploadcare->uploader()->fromPath(
-                $request->file('thumbnail')->getPathname()
-            );
-            $thumbnailUrl = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
+            $thumbnailUrl = $uploads->upload($request->file('thumbnail'), 'products');
         }
         if (!empty($data['thumbnail_media_id'])) {
             $thumbnailUrl = $this->imageMediaUrl((int) $data['thumbnail_media_id'], $actor instanceof Seller ? $actor->id : null);
@@ -246,8 +242,7 @@ class ProductController extends Controller
         if ($request->hasFile('gallery')) {
             $galleryUrls = [];
             foreach ($request->file('gallery') as $image) {
-                $file = $uploadcare->uploader()->fromPath($image->getPathname());
-                $galleryUrls[] = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
+                $galleryUrls[] = $uploads->upload($image, 'products');
             }
         }
         if (!empty($data['gallery_media_ids'])) {
@@ -437,14 +432,11 @@ class ProductController extends Controller
             $this->authorizeSizeChart($data['size_chart_id'], $request->user(), $product->seller_id);
         }
 
-        $uploadcare = $this->uploadcare();
+        $uploads = app(MediaUploadService::class);
 
         $thumbnailUrl = $product->thumbnail;
         if ($request->hasFile('thumbnail')) {
-            $file = $uploadcare->uploader()->fromPath(
-                $request->file('thumbnail')->getPathname()
-            );
-            $thumbnailUrl = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
+            $thumbnailUrl = $uploads->upload($request->file('thumbnail'), 'products');
         }
         if (!empty($data['thumbnail_media_id'])) {
             $thumbnailUrl = $this->imageMediaUrl((int) $data['thumbnail_media_id'], $product->seller_id, $request->user() instanceof Admin);
@@ -459,8 +451,7 @@ class ProductController extends Controller
         if ($request->hasFile('gallery')) {
             $galleryUrls = [];
             foreach ($request->file('gallery') as $image) {
-                $file = $uploadcare->uploader()->fromPath($image->getPathname());
-                $galleryUrls[] = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
+                $galleryUrls[] = $uploads->upload($image, 'products');
             }
         }
         if (array_key_exists('gallery_media_ids', $data)) {
@@ -664,15 +655,6 @@ class ProductController extends Controller
         }
 
         return $slug;
-    }
-
-    private function uploadcare(): Api
-    {
-        $configuration = Configuration::create(
-            config('services.uploadcare.public_key'),
-            config('services.uploadcare.secret_key')
-        );
-        return new Api($configuration);
     }
 
     private function imageMediaUrl(int $assetId, ?int $sellerId, bool $adminActor = false): string

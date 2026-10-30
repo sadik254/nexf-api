@@ -11,9 +11,7 @@ class HomepageBanner extends Model
 
     public function getOriginalImageAttribute(): ?string
     {
-        $image = $this->attributes['image'] ?? null;
-        if (!$image || !preg_match('~^https://ucarecdn\.com/([a-f0-9-]{36})(?:/.*)?$~i', $image, $matches)) return $image;
-        return 'https://ucarecdn.com/'.$matches[1].'/';
+        return $this->attributes['image'] ?? null;
     }
     protected $fillable = ['placement', 'image', 'href', 'title', 'emphasis', 'subtitle', 'eyebrow', 'text_alignment', 'cta', 'theme', 'is_active', 'sort_order'];
     protected function casts(): array { return ['is_active' => 'boolean', 'sort_order' => 'integer']; }

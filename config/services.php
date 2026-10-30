@@ -28,11 +28,6 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
-    'uploadcare' => [
-        'public_key' => env('UPLOADCARE_PUBLIC_KEY'),
-        'secret_key' => env('UPLOADCARE_SECRET_KEY'),
-    ],
-
     'turnstile' => [
         // Cloudflare Turnstile. Unset = checkout does not ask for a token.
         'secret_key' => env('TURNSTILE_SECRET_KEY'),

@@ -10,8 +10,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\DB;
-use Uploadcare\Api;
-use Uploadcare\Configuration;
 use App\Mail\AdminCreatedMail;
 use App\Mail\AdminPasswordResetMail;
 use App\Services\PasswordResetCodeService;
@@ -150,17 +148,7 @@ class AdminController extends Controller
 
         $imageUrl = null;
         if ($request->hasFile('image')) {
-            $configuration = Configuration::create(
-                config('services.uploadcare.public_key'),
-                config('services.uploadcare.secret_key')
-            );
-            $api = new Api($configuration);
-
-            $file = $api->uploader()->fromPath(
-                $request->file('image')->getPathname()
-            );
-
-            $imageUrl = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
+            $imageUrl = app(\App\Services\MediaUploadService::class)->upload($request->file('image'), 'admins');
         }
 
         // The initial password is deliberately never disclosed. The invite code below
@@ -252,17 +240,7 @@ class AdminController extends Controller
 
         $imageUrl = $admin->image;
         if ($request->hasFile('image')) {
-            $configuration = Configuration::create(
-                config('services.uploadcare.public_key'),
-                config('services.uploadcare.secret_key')
-            );
-            $api = new Api($configuration);
-
-            $file = $api->uploader()->fromPath(
-                $request->file('image')->getPathname()
-            );
-
-            $imageUrl = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
+            $imageUrl = app(\App\Services\MediaUploadService::class)->upload($request->file('image'), 'admins');
         }
 
         $admin->fill([
@@ -359,17 +337,7 @@ class AdminController extends Controller
 
         $imageUrl = !empty($data['clear_image']) ? null : $admin->image;
         if ($request->hasFile('image')) {
-            $configuration = Configuration::create(
-                config('services.uploadcare.public_key'),
-                config('services.uploadcare.secret_key')
-            );
-            $api = new Api($configuration);
-
-            $file = $api->uploader()->fromPath(
-                $request->file('image')->getPathname()
-            );
-
-            $imageUrl = "https://ucarecdn.com/{$file->getUuid()}/-/preview/";
+            $imageUrl = app(\App\Services\MediaUploadService::class)->upload($request->file('image'), 'admins');
         }
 
         $admin->fill([
