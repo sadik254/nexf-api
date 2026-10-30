@@ -207,6 +207,7 @@ class OrderController extends Controller
         $seller = $request->user();
         return response()->json($this->paginateOrderList(
             Order::query()
+                ->visibleToSeller()
                 ->whereHas('items', fn ($query) => $query->where('seller_id', $seller->id))
                 ->with([
                     'customer:id,name,email,phone',
@@ -222,9 +223,7 @@ class OrderController extends Controller
     {
         /** @var Seller $seller */
         $seller = $request->user();
-        if (!$order->items()->where('seller_id', $seller->id)->exists()) {
-            return response()->json(['message' => 'Forbidden.'], 403);
-        }
+        abort_unless(! $order->isHeldFromSeller() && $order->items()->where('seller_id', $seller->id)->exists(), 404);
 
         return response()->json($this->sellerView($order->load([
             'customer:id,name,email,phone',
@@ -345,10 +344,15 @@ class OrderController extends Controller
                 $this->refreshOrderStatus($locked);
             });
         }
+        $wasHeldFromSeller = $order->isHeldFromSeller();
         $order->update($data);
+        $freshOrder = $order->fresh();
+        if ($wasHeldFromSeller && ! $freshOrder->isHeldFromSeller()) {
+            $this->notifications->manualPaymentReceived($freshOrder->load(['items.seller']));
+        }
         return response()->json([
             'message' => 'Order details updated successfully. Fulfilment status is derived from item fulfilment.',
-            'order' => $order->fresh()->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']),
+            'order' => $freshOrder->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']),
         ]);
     }
 
@@ -503,6 +507,7 @@ class OrderController extends Controller
     {
         /** @var Seller $seller */
         $seller = $request->user();
+        abort_if($order->isHeldFromSeller(), 404);
         if ((int) $item->order_id !== (int) $order->id || (int) $item->seller_id !== (int) $seller->id) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
@@ -702,6 +707,7 @@ class OrderController extends Controller
     {
         /** @var Seller $seller */
         $seller = $request->user();
+        abort_if($order->isHeldFromSeller(), 404);
         if ((int) $group->order_id !== (int) $order->id || (int) $group->seller_id !== (int) $seller->id) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }

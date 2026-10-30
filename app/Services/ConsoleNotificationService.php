@@ -29,6 +29,12 @@ class ConsoleNotificationService
     {
         $data = $this->orderData($order);
         $this->admins('order_new', 'New order '.$order->order_number, 'A new order needs review.', $data, "order:{$order->id}:new");
+        if (! $order->isHeldFromSeller()) $this->orderReleased($order);
+    }
+
+    public function orderReleased(Order $order): void
+    {
+        $data = $this->orderData($order);
         $order->items()->whereNotNull('seller_id')->pluck('seller_id')->unique()->each(fn (int $sellerId) => $this->seller($sellerId, 'order_new', 'New order '.$order->order_number, 'A new order contains your products.', $data, "order:{$order->id}:new"));
     }
 

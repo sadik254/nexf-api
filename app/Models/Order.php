@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Order extends Model
 {
     use SoftDeletes;
+    public const MANUAL_PAYMENT_CODES = ['bkash', 'nagad', 'rocket', 'upay', 'bank'];
     protected $with = ['couponRedemptions'];
     protected $appends = ['applied_discounts', 'payable'];
     protected $hidden = ['couponRedemptions'];
@@ -121,6 +122,23 @@ class Order extends Model
     public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class);
+    }
+
+    /** Manual transfers stay private to NEXF until payment is received. */
+    public function scopeVisibleToSeller($query)
+    {
+        return $query->where(function ($orders): void {
+            $orders->whereNotIn('payment_method_code', self::MANUAL_PAYMENT_CODES)
+                ->orWhere('paid_amount', '>', 0)
+                ->orWhereHas('items', fn ($items) => $items->whereIn('fulfillment_status', ['confirmed', 'packed', 'shipped', 'delivered', 'return_pending', 'returned']));
+        });
+    }
+
+    public function isHeldFromSeller(): bool
+    {
+        return in_array($this->payment_method_code, self::MANUAL_PAYMENT_CODES, true)
+            && (float) ($this->paid_amount ?? 0) <= 0
+            && ! $this->items()->whereIn('fulfillment_status', ['confirmed', 'packed', 'shipped', 'delivered', 'return_pending', 'returned'])->exists();
     }
 
     public function storeGroups(): HasMany

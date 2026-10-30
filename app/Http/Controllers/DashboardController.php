@@ -135,18 +135,18 @@ class DashboardController extends Controller
 
     private function orders(?Seller $seller): Builder
     {
-        return Order::query()->when($seller, fn (Builder $q) => $q->whereHas('items', fn (Builder $items) => $items->where('seller_id', $seller->id)));
+        return Order::query()->when($seller, fn (Builder $q) => $q->visibleToSeller()->whereHas('items', fn (Builder $items) => $items->where('seller_id', $seller->id)));
     }
 
     private function items(?Seller $seller): Builder
     {
-        return OrderItem::query()->when($seller, fn (Builder $q) => $q->where('order_items.seller_id', $seller->id));
+        return OrderItem::query()->when($seller, fn (Builder $q) => $q->where('order_items.seller_id', $seller->id)->whereHas('order', fn (Builder $orders) => $orders->visibleToSeller()));
     }
 
     private function revenue(?Seller $seller, CarbonImmutable $from, CarbonImmutable $to): float
     {
         if (!$seller) return (float) Order::whereBetween('created_at', [$from, $to])->where('status', '!=', 'cancelled')->sum('total');
-        return (float) OrderItem::where('seller_id', $seller->id)->whereHas('order', fn (Builder $q) => $q->whereBetween('created_at', [$from, $to])->where('status', '!=', 'cancelled'))->sum('line_subtotal');
+        return (float) OrderItem::where('seller_id', $seller->id)->whereHas('order', fn (Builder $q) => $q->visibleToSeller()->whereBetween('created_at', [$from, $to])->where('status', '!=', 'cancelled'))->sum('line_subtotal');
     }
 
     private function change(float|int $current, float|int $previous): ?float
