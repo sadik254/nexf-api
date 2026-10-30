@@ -44,7 +44,7 @@ class ProductEngagementController extends Controller
             ->where('fulfillment_status', 'delivered')
             ->when($request->filled('product_id'),fn($q)=>$q->where('product_id',(int)$request->query('product_id')))
             ->whereHas('order', fn ($query) => $query->where('customer_id', $customer->id))
-            ->whereDoesntHave('review')->with('seller:id,store_name')
+            ->whereDoesntHave('review', fn ($query) => $query->whereIn('status', ['pending', 'approved']))->with('seller:id,store_name')
             ->latest()->paginate($perPage)->through(function($item){$item->setAttribute('seller_store_name',$item->seller_id === null ? (\App\Models\Store::primary()?->name ?? config('app.name')) : $item->seller?->store_name);return $item;}));
     }
 
@@ -149,22 +149,44 @@ class ProductEngagementController extends Controller
         $customer = $request->user();
         abort_unless($customer instanceof Customer, 403);
         $data = $request->validate(['order_item_id' => ['sometimes', 'integer', 'exists:order_items,id'], 'rating' => ['required', 'integer', 'between:1,5'], 'comment' => ['nullable', 'string', 'max:3000'], 'images' => ['sometimes','array','max:6'], 'images.*' => ['url:http,https','max:2048'], 'videos' => ['sometimes','array','max:2'], 'videos.*' => ['url:http,https','max:2048']]);
-        $item = OrderItem::query()
-            ->when(isset($data['order_item_id']), fn ($query) => $query->whereKey($data['order_item_id']))
-            ->where('product_id', $product->id)
-            ->where('fulfillment_status', 'delivered')
-            ->whereHas('order', fn ($query) => $query->where('customer_id', $customer->id))
-            ->latest('id')
-            ->first();
-        if (!$item) return response()->json(['message' => 'Only customers with a delivered purchase can review this product.'], 422);
+        $hasDeliveredPurchase = OrderItem::query()->where('product_id', $product->id)->where('fulfillment_status', 'delivered')
+            ->whereHas('order', fn ($query) => $query->where('customer_id', $customer->id))->exists();
+        if (!$hasDeliveredPurchase) return response()->json(['message' => 'Only customers with a delivered purchase can review this product.'], 422);
         foreach (['images' => 'image/', 'videos' => 'video/'] as $field => $mime) {
             foreach ($data[$field] ?? [] as $url) {
                 if (!MediaAsset::where('owner_type', 'customer')->where('owner_id', $customer->id)->where('url', $url)->where('mime_type', 'like', $mime.'%')->exists()) throw ValidationException::withMessages([$field => ['Select media uploaded by your own account.']]);
             }
         }
-        $review = Review::updateOrCreate(['customer_id' => $customer->id, 'order_item_id' => $item->id], ['product_id' => $product->id, 'rating' => $data['rating'], 'comment' => $data['comment'] ?? null, 'images' => $data['images'] ?? [], 'videos' => $data['videos'] ?? [], 'status' => 'pending', 'rejection_note' => null, 'moderated_at' => null]);
+        [$review, $created] = DB::transaction(function () use ($data, $product, $customer) {
+            $items = OrderItem::query()
+                ->when(isset($data['order_item_id']), fn ($query) => $query->whereKey($data['order_item_id']))
+                ->where('product_id', $product->id)
+                ->where('fulfillment_status', 'delivered')
+                ->whereHas('order', fn ($query) => $query->where('customer_id', $customer->id));
+
+            // Legacy callers without a line id use the newest line that has
+            // not been reviewed yet, or whose only review was rejected.
+            if (!isset($data['order_item_id'])) {
+                $items->whereDoesntHave('review', fn ($query) => $query->whereIn('status', ['pending', 'approved']));
+            }
+            $item = $items->latest('id')->lockForUpdate()->first();
+            if (!$item) {
+                throw ValidationException::withMessages(['order_item_id' => ["You've already reviewed this item."]]);
+            }
+
+            $existing = Review::query()->where('customer_id', $customer->id)->where('order_item_id', $item->id)->lockForUpdate()->first();
+            if ($existing && in_array($existing->status, ['pending', 'approved'], true)) {
+                throw ValidationException::withMessages(['order_item_id' => ["You've already reviewed this item."]]);
+            }
+            $attributes = ['product_id' => $product->id, 'rating' => $data['rating'], 'comment' => $data['comment'] ?? null, 'images' => $data['images'] ?? [], 'videos' => $data['videos'] ?? [], 'status' => 'pending', 'rejection_note' => null, 'moderated_at' => null];
+            if ($existing) {
+                $existing->update($attributes);
+                return [$existing->fresh(), false];
+            }
+            return [Review::create(['customer_id' => $customer->id, 'order_item_id' => $item->id] + $attributes), true];
+        });
         app(\App\Services\ConsoleNotificationService::class)->moderation($product->seller_id, 'review_pending', 'Review waiting for approval', '/dashboard/reviews');
-        return response()->json(['message' => 'Review submitted for approval.', 'review' => $review], $review->wasRecentlyCreated ? 201 : 200);
+        return response()->json(['message' => 'Review submitted for approval.', 'review' => $review], $created ? 201 : 200);
     }
 
     private function questionPayload(ProductQuestion $question): array

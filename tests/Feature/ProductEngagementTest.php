@@ -79,6 +79,35 @@ class ProductEngagementTest extends TestCase
             ->assertJsonPath('data.0.status', 'pending');
     }
 
+    public function test_each_delivered_line_can_have_only_one_pending_or_approved_review(): void
+    {
+        [$customer, $product] = $this->fixtures();
+        $order = Order::create(['order_number' => 'ORD-REVIEW-LINES', 'customer_id' => $customer->id, 'status' => 'delivered', 'payment_status' => 'paid', 'subtotal' => 200, 'total' => 200, 'shipping_name' => 'Customer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka']);
+        $makeItem = fn () => OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => $product->name, 'product_slug' => $product->slug, 'quantity' => 1, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 100, 'line_cost' => 50, 'line_profit' => 50, 'fulfillment_status' => 'delivered']);
+        $first = $makeItem();
+        $second = $makeItem();
+        $approved = Review::create(['product_id' => $product->id, 'customer_id' => $customer->id, 'order_item_id' => $first->id, 'rating' => 5, 'comment' => 'Original', 'status' => 'approved']);
+        $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+        $url = "/api/customers/products/{$product->slug}/reviews";
+
+        $this->withToken($token)->postJson($url, ['order_item_id' => $first->id, 'rating' => 1, 'comment' => 'Overwrite'])
+            ->assertUnprocessable()->assertJsonValidationErrors('order_item_id')
+            ->assertJsonPath('errors.order_item_id.0', "You've already reviewed this item.");
+        $this->assertDatabaseHas('reviews', ['id' => $approved->id, 'status' => 'approved', 'comment' => 'Original']);
+
+        // The legacy request chooses the remaining eligible delivered line.
+        $this->withToken($token)->postJson($url, ['rating' => 4, 'comment' => 'Second line'])->assertCreated()
+            ->assertJsonPath('review.order_item_id', $second->id);
+        $this->withToken($token)->postJson($url, ['rating' => 4, 'comment' => 'Again'])
+            ->assertUnprocessable()->assertJsonValidationErrors('order_item_id');
+
+        // A rejected review is the one deliberate exception: resubmitting it
+        // updates the same row and returns it to moderation.
+        $approved->update(['status' => 'rejected', 'rejection_note' => 'Please revise']);
+        $this->withToken($token)->postJson($url, ['order_item_id' => $first->id, 'rating' => 3, 'comment' => 'Revised'])
+            ->assertOk()->assertJsonPath('review.id', $approved->id)->assertJsonPath('review.status', 'pending');
+    }
+
     public function test_review_moderation_is_scoped_to_the_product_owner(): void
     {
         [$customer, $houseProduct] = $this->fixtures();
