@@ -5,16 +5,19 @@
         $site = [];
     }
     $brand = trim($site['name'] ?? '') ?: 'NEXF Lifestyle';
-    $supportEmail = trim($site['email'] ?? '');
+    // Emails always point customers at the support inbox, whatever Site info lists.
+    $supportEmail = 'hello@nexflifestyle.com';
     $helpline = trim($site['helpline'] ?? '');
     // Same as the storefront footer: a fixed "© <year>" then the Site info text, minus any legacy "© 2025" lead-in.
     $copyrightText = trim(preg_replace('/^\s*(©|\(c\))?\s*(\{year\}|\d{4})?\s*/iu', '', (string) ($site['copyright'] ?? '')));
     $copyright = '© '.date('Y').' '.($copyrightText ?: 'NEXF Lifestyle Ltd.');
     $siteUrl = rtrim((string) config('app.frontend_url'), '/');
-    // Embedded (cid:) so the logo shows without hosting and in clients that block remote images.
-    // $message is only set when the mail is actually sent; previews fall back to a data URI.
-    $logoPath = resource_path('email/logo.png');
-    $logoSrc = isset($message) ? $message->embed($logoPath) : 'data:image/png;base64,'.base64_encode(file_get_contents($logoPath));
+    // Hosted on the API (public/email/logo.png) so Gmail shows it inline instead of as an attachment.
+    // Without a public https APP_URL (local dev) it falls back to embedding; previews use a data URI.
+    $logoPath = public_path('email/logo.png');
+    $logoUrl = rtrim((string) config('app.url'), '/').'/email/logo.png';
+    $logoSrc = str_starts_with($logoUrl, 'https://') ? $logoUrl
+        : (isset($message) ? $message->embed($logoPath) : 'data:image/png;base64,'.base64_encode(file_get_contents($logoPath)));
 @endphp
 <!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">

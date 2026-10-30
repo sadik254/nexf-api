@@ -15,7 +15,9 @@
         $attributes = $item->variation_attributes;
         if (!is_array($attributes) || !$attributes) return '';
         $groups = collect($item->product?->option_groups ?? [])->keyBy('key');
-        return collect($attributes)->map(function ($value, $key) use ($groups) {
+        // Follow the product's option order (as the cart does), not the order the line saved them in.
+        $position = $groups->keys()->flip();
+        return collect($attributes)->sortBy(fn ($value, $key) => $position[$key] ?? PHP_INT_MAX)->map(function ($value, $key) use ($groups) {
             if (is_array($value)) {
                 $name = $value['name'] ?? $value['attribute'] ?? null;
                 $val = $value['value'] ?? $value['option'] ?? null;
@@ -111,7 +113,7 @@
                 <td style="padding:12px 0;border-bottom:1px solid #e4e4e7;vertical-align:top;">
                     <div style="font-size:14px;line-height:20px;font-weight:600;color:#09090b;">{{ $item->product_name }}</div>
                     <div style="font-size:13px;line-height:18px;color:#71717a;">
-                        Qty {{ $item->quantity }}@if ($variantText) &middot; {{ $variantText }}@endif
+                        @if ($variantText){{ $variantText }} &middot; @endif Qty {{ $item->quantity }}
                     </div>
                 </td>
                 <td align="right" style="padding:12px 0 12px 12px;border-bottom:1px solid #e4e4e7;vertical-align:top;white-space:nowrap;font-size:14px;line-height:20px;color:#09090b;">{{ $money($item->line_subtotal) }}</td>
@@ -150,13 +152,12 @@
                         <div style="font-size:12px;line-height:16px;font-weight:500;color:#71717a;padding-bottom:4px;">Delivery</div>
                         @if ($order->shipping_name)<div style="color:#09090b;font-weight:600;">{{ $order->shipping_name }}</div>@endif
                         @if ($order->shipping_phone)<div>{{ $order->shipping_phone }}</div>@endif
-                        @if ($isStaff && $order->shipping_email)<div>{{ $order->shipping_email }}</div>@endif
                         @if ($street)<div>{{ $street }}</div>@endif
                         @if ($locality)<div>{{ $locality }}</div>@endif
                     </td>
                 @endif
                 @if ($order->payment_method_name)
-                    <td style="vertical-align:top;font-size:13px;line-height:20px;color:#52525b;">
+                    <td align="right" style="vertical-align:top;text-align:right;font-size:13px;line-height:20px;color:#52525b;">
                         <div style="font-size:12px;line-height:16px;font-weight:500;color:#71717a;padding-bottom:4px;">Payment</div>
                         <div style="color:#09090b;font-weight:600;">{{ $order->payment_method_name }}</div>
                         @if ($order->payment_status)<div>{{ ucwords(str_replace('_', ' ', $order->payment_status)) }}</div>@endif
