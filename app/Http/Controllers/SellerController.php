@@ -134,7 +134,11 @@ class SellerController extends Controller
             'kyc_type' => ['sometimes', 'nullable', 'in:nid,passport'],
             'kyc_number' => ['sometimes', 'nullable', 'string', 'max:64'],
             'kyc_document' => ['sometimes', 'nullable', 'file', 'mimetypes:image/jpeg,image/png,image/webp,image/gif,application/pdf', 'max:10240'],
+            'kyc_document_media_id' => ['sometimes', 'nullable', 'integer', 'exists:media_assets,id'],
+            'kyc_document_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
             'store_logo' => ['sometimes', 'nullable', 'file', 'image', 'max:5120'],
+            'store_logo_media_id' => ['sometimes', 'nullable', 'integer', 'exists:media_assets,id'],
+            'store_logo_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
             'clear_store_logo' => ['sometimes', 'boolean'],
             'is_featured' => ['sometimes', 'boolean'],
         ]);
@@ -147,8 +151,10 @@ class SellerController extends Controller
         }
         $logo = $request->boolean('clear_store_logo') ? null : $seller?->store_logo;
         if ($request->hasFile('store_logo')) $logo = $this->uploadToCdn($request->file('store_logo'));
+        elseif (! $request->boolean('clear_store_logo') && ($request->has('store_logo_media_id') || $request->has('store_logo_url'))) $logo = app(\App\Services\LibraryMediaService::class)->image($data['store_logo_media_id'] ?? null, $data['store_logo_url'] ?? null, $seller);
         if ($request->hasFile('kyc_document')) $data['kyc_document_url'] = $this->uploadToCdn($request->file('kyc_document'));
-        unset($data['store_logo'], $data['clear_store_logo'], $data['kyc_document']); $data['store_logo'] = $logo;
+        elseif ($request->has('kyc_document_media_id') || $request->has('kyc_document_url')) $data['kyc_document_url'] = app(\App\Services\LibraryMediaService::class)->document($data['kyc_document_media_id'] ?? null, $data['kyc_document_url'] ?? null, $seller);
+        unset($data['store_logo'], $data['store_logo_media_id'], $data['store_logo_url'], $data['clear_store_logo'], $data['kyc_document'], $data['kyc_document_media_id']); $data['store_logo'] = $logo;
         $created = $seller === null;
         $saved = \Illuminate\Support\Facades\DB::transaction(function () use ($seller, $data, $actor) {
             if ($seller) {
@@ -180,9 +186,9 @@ class SellerController extends Controller
     {
         $seller = $request->user(); abort_unless($seller instanceof Seller && !$request->attributes->has('seller_staff'), 403);
         if ($request->has('email')) $request->merge(['email'=>strtolower(trim((string)$request->input('email')))]);
-        $data=$request->validate(['store_name'=>['sometimes','required','string','max:255'],'email'=>['sometimes','required','email','max:255',\Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],'phone'=>['sometimes','required','regex:/^01[3-9][0-9]{8}$/',\Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],'address_line'=>['sometimes','required_with:address_area,address_district','string','max:255'],'address_area'=>['sometimes','required_with:address_line,address_district','string','max:255'],'address_district'=>['sometimes','required_with:address_line,address_area','string','max:255'],'support_email'=>['sometimes','nullable','email','max:255'],'support_phone'=>['sometimes','nullable','string','max:32'],'store_logo'=>['nullable','file','image','max:5120'],'clear_store_logo'=>['sometimes','boolean']]);
+        $data=$request->validate(['store_name'=>['sometimes','required','string','max:255'],'email'=>['sometimes','required','email','max:255',\Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],'phone'=>['sometimes','required','regex:/^01[3-9][0-9]{8}$/',\Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],'address_line'=>['sometimes','required_with:address_area,address_district','string','max:255'],'address_area'=>['sometimes','required_with:address_line,address_district','string','max:255'],'address_district'=>['sometimes','required_with:address_line,address_area','string','max:255'],'support_email'=>['sometimes','nullable','email','max:255'],'support_phone'=>['sometimes','nullable','string','max:32'],'store_logo'=>['nullable','file','image','max:5120'],'store_logo_media_id'=>['sometimes','nullable','integer','exists:media_assets,id'],'store_logo_url'=>['sometimes','nullable','url','max:2048'],'clear_store_logo'=>['sometimes','boolean']]);
         if (isset($data['email'])) $this->assertNoStaffEmail($data['email']);
-        $logo=$request->boolean('clear_store_logo')?null:$seller->store_logo;if($request->hasFile('store_logo')){$logo=$this->uploadToCdn($request->file('store_logo'), 'stores');}unset($data['store_logo'],$data['clear_store_logo']);$data['store_logo']=$logo;$addressSent=array_key_exists('address_line',$data)||array_key_exists('address_area',$data)||array_key_exists('address_district',$data);if($addressSent){$data['store_address']=implode(', ',[$data['address_line'],$data['address_area'],$data['address_district']]);$data['city']=$data['address_district'];}$seller->update($data);return response()->json(['message'=>'Store updated.','seller'=>$seller->fresh()]);
+        $logo=$request->boolean('clear_store_logo')?null:$seller->store_logo;if($request->hasFile('store_logo')){$logo=$this->uploadToCdn($request->file('store_logo'), 'stores');}elseif(!$request->boolean('clear_store_logo')&&($request->has('store_logo_media_id')||$request->has('store_logo_url'))){$logo=app(\App\Services\LibraryMediaService::class)->image($data['store_logo_media_id']??null,$data['store_logo_url']??null,$seller);}unset($data['store_logo'],$data['store_logo_media_id'],$data['store_logo_url'],$data['clear_store_logo']);$data['store_logo']=$logo;$addressSent=array_key_exists('address_line',$data)||array_key_exists('address_area',$data)||array_key_exists('address_district',$data);if($addressSent){$data['store_address']=implode(', ',[$data['address_line'],$data['address_area'],$data['address_district']]);$data['city']=$data['address_district'];}$seller->update($data);return response()->json(['message'=>'Store updated.','seller'=>$seller->fresh()]);
     }
 
     public function archive(Request $request, Seller $seller): JsonResponse
@@ -355,6 +361,8 @@ class SellerController extends Controller
             'email' => ['sometimes', 'required', 'email', 'max:255', \Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],
             'phone' => ['sometimes', 'nullable', 'string', 'max:32', \Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],
             'image' => ['sometimes', 'file', 'image', 'max:5120'],
+            'image_media_id' => ['sometimes', 'nullable', 'integer', 'exists:media_assets,id'],
+            'image_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
             'clear_image' => ['sometimes', 'boolean'],
         ]);
         if (isset($data['email'])) $this->assertNoStaffEmail($data['email']);
@@ -362,7 +370,8 @@ class SellerController extends Controller
         unset($data['email']);
         if (!empty($data['clear_image'])) $data['seller_image'] = null;
         if ($request->hasFile('image')) $data['seller_image'] = app(\App\Services\MediaUploadService::class)->upload($request->file('image'));
-        unset($data['image'], $data['clear_image']);
+        elseif (!empty($data['image_media_id']) || !empty($data['image_url'])) $data['seller_image'] = app(\App\Services\LibraryMediaService::class)->image($data['image_media_id'] ?? null, $data['image_url'] ?? null, $seller);
+        unset($data['image'], $data['image_media_id'], $data['image_url'], $data['clear_image']);
         $seller->fill($data)->save();
         return response()->json(['message' => 'Profile updated.', 'seller' => $seller]);
     }

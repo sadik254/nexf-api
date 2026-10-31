@@ -108,4 +108,21 @@ class MediaAssetTest extends TestCase
         $this->assertDatabaseMissing('media_asset_store_libraries', ['media_asset_id' => $asset['id'], 'seller_id' => $first->id]);
         $this->assertDatabaseHas('media_asset_store_libraries', ['media_asset_id' => $asset['id'], 'seller_id' => $second->id]);
     }
+
+    public function test_account_and_store_forms_can_use_existing_library_images_without_a_browser_reupload(): void
+    {
+        $admin = Admin::create(['name' => 'Super', 'email' => 'profile-library@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $asset = MediaAsset::create([
+            'owner_type' => 'admin', 'owner_id' => $admin->id, 'uploaded_by_type' => 'admin', 'uploaded_by_id' => $admin->id,
+            'uploader_name' => $admin->name, 'source' => 'url', 'url' => 'https://media.example.test/profiles/super.webp',
+            'file_name' => 'super.webp', 'mime_type' => 'image/webp',
+        ]);
+        $asset->storeLibraries()->create(['seller_id' => null, 'library_key' => 'house']);
+        $token = $admin->createToken('test', ['admin'])->plainTextToken;
+
+        $this->withToken($token)->postJson('/api/admin/me', ['image_media_id' => $asset->id])
+            ->assertOk()->assertJsonPath('admin.image', $asset->url);
+        $this->withToken($token)->postJson('/api/admin/house-store', ['store_logo_media_id' => $asset->id])
+            ->assertOk()->assertJsonPath('store_logo', $asset->url);
+    }
 }

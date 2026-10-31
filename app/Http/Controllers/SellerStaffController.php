@@ -120,12 +120,13 @@ class SellerStaffController extends Controller
     public function me(Request $request): JsonResponse
     {
         $staff = $request->attributes->get('seller_staff'); abort_unless($staff instanceof SellerStaff, 403);
-        $data = $request->validate(['name' => ['sometimes', 'string', 'max:255'], 'email' => ['sometimes', 'email', 'max:255'], 'phone' => ['sometimes', 'nullable', 'string', 'max:32'], 'image' => ['sometimes', 'file', 'image', 'max:5120'], 'clear_image' => ['sometimes', 'boolean']]);
+        $data = $request->validate(['name' => ['sometimes', 'string', 'max:255'], 'email' => ['sometimes', 'email', 'max:255'], 'phone' => ['sometimes', 'nullable', 'string', 'max:32'], 'image' => ['sometimes', 'file', 'image', 'max:5120'], 'image_media_id' => ['sometimes', 'nullable', 'integer', 'exists:media_assets,id'], 'image_url' => ['sometimes', 'nullable', 'url', 'max:2048'], 'clear_image' => ['sometimes', 'boolean']]);
         if (isset($data['email']) && strcasecmp($data['email'], $staff->email) !== 0) throw ValidationException::withMessages(['email' => ['Verify the new email to change it.']]);
         unset($data['email']);
         if (!empty($data['clear_image'])) $data['image'] = null;
         if ($request->hasFile('image')) $data['image'] = app(MediaUploadService::class)->upload($request->file('image'));
-        unset($data['clear_image']); $staff->update($data);
+        elseif (!empty($data['image_media_id']) || !empty($data['image_url'])) $data['image'] = app(\App\Services\LibraryMediaService::class)->image($data['image_media_id'] ?? null, $data['image_url'] ?? null, $staff->seller);
+        unset($data['image_media_id'], $data['image_url'], $data['clear_image']); $staff->update($data);
         return response()->json(['message' => 'Profile updated.', 'staff' => $staff->fresh()]);
     }
 

@@ -209,6 +209,8 @@ class AdminController extends Controller
             'phone' => ['sometimes', 'string', 'max:32'],
             'address' => ['sometimes', 'string'],
             'image' => ['sometimes', 'file', 'image', 'max:5120'],
+            'image_media_id' => ['sometimes', 'nullable', 'integer', 'exists:media_assets,id'],
+            'image_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
             'role' => ['sometimes', 'in:admin,super_admin'],
             'is_active' => ['sometimes', 'boolean'],
         ]);
@@ -241,6 +243,8 @@ class AdminController extends Controller
         $imageUrl = $admin->image;
         if ($request->hasFile('image')) {
             $imageUrl = app(\App\Services\MediaUploadService::class)->upload($request->file('image'), 'admins');
+        } elseif (!empty($data['image_media_id']) || !empty($data['image_url'])) {
+            $imageUrl = app(\App\Services\LibraryMediaService::class)->image($data['image_media_id'] ?? null, $data['image_url'] ?? null, null, true);
         }
 
         $admin->fill([
@@ -310,6 +314,8 @@ class AdminController extends Controller
             'phone' => ['sometimes', 'nullable', 'string', 'max:32'],
             'address' => ['sometimes', 'string'],
             'image' => ['sometimes', 'file', 'image', 'max:5120'],
+            'image_media_id' => ['sometimes', 'nullable', 'integer', 'exists:media_assets,id'],
+            'image_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
             'clear_image' => ['sometimes', 'boolean'],
         ]);
 
@@ -338,6 +344,8 @@ class AdminController extends Controller
         $imageUrl = !empty($data['clear_image']) ? null : $admin->image;
         if ($request->hasFile('image')) {
             $imageUrl = app(\App\Services\MediaUploadService::class)->upload($request->file('image'), 'admins');
+        } elseif (!empty($data['image_media_id']) || !empty($data['image_url'])) {
+            $imageUrl = app(\App\Services\LibraryMediaService::class)->image($data['image_media_id'] ?? null, $data['image_url'] ?? null, null, true);
         }
 
         $admin->fill([

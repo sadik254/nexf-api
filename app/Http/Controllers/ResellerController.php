@@ -117,13 +117,16 @@ class ResellerController extends Controller
             'address_area' => ['sometimes', 'nullable', 'string', 'max:255'],
             'address_district' => ['sometimes', 'nullable', 'string', 'max:255'],
             'image' => ['sometimes', 'file', 'image', 'max:5120'],
+            'image_media_id' => ['sometimes', 'nullable', 'integer', 'exists:media_assets,id'],
+            'image_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
             'clear_image' => ['sometimes', 'boolean'],
         ]);
         if (array_key_exists('email', $data) && strcasecmp((string) $data['email'], (string) $reseller->email) !== 0) throw ValidationException::withMessages(['email' => ['Verify the new email to change it.']]);
         unset($data['email']);
         if (!empty($data['clear_image'])) $data['image'] = null;
         if ($request->hasFile('image')) $data['image'] = app(\App\Services\MediaUploadService::class)->upload($request->file('image'));
-        unset($data['clear_image']);
+        elseif (!empty($data['image_media_id']) || !empty($data['image_url'])) $data['image'] = app(\App\Services\LibraryMediaService::class)->image($data['image_media_id'] ?? null, $data['image_url'] ?? null);
+        unset($data['image_media_id'], $data['image_url'], $data['clear_image']);
         $reseller->fill($data)->save();
         return response()->json($reseller->fresh());
     }
