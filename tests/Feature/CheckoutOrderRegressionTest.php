@@ -36,6 +36,21 @@ class CheckoutOrderRegressionTest extends TestCase
             ->assertJsonPath('shipping_charge', 80);
     }
 
+    public function test_guest_preview_uses_suburb_dhaka_for_configured_districts_and_thanas(): void
+    {
+        config(['services.turnstile.secret_key' => 'configured']);
+        [, $product, $payment, , $outside] = $this->fixtures();
+        $suburb = ShippingMethod::create(['name' => 'Suburb Dhaka', 'code' => 'suburb_dhaka', 'charge' => 110, 'currency' => 'BDT', 'is_active' => true]);
+
+        $payload = $this->payload($product, $payment, $outside) + [
+            'shipping_name' => 'Guest', 'shipping_phone' => '01712345678', 'shipping_address' => 'Address',
+        ];
+        $this->postJson('/api/guest/orders/preview', $payload + ['shipping_district' => 'Gazipur'])
+            ->assertOk()->assertJsonPath('shipping_method.id', $suburb->id);
+        $this->postJson('/api/guest/orders/preview', $payload + ['shipping_district' => 'Dhaka', 'shipping_area' => 'Savar'])
+            ->assertOk()->assertJsonPath('shipping_method.id', $suburb->id);
+    }
+
     public function test_details_only_order_update_keeps_address_parts(): void
     {
         [$customer, $product, $payment, $inside] = $this->fixtures();

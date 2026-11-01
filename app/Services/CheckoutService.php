@@ -104,7 +104,15 @@ class CheckoutService
         $methods = ShippingMethod::query()->whereNull('seller_id')->where('is_store_option', false)->active();
         $district = mb_strtolower(trim((string) ($data['shipping_district'] ?? '')));
         if ($district !== '') {
-            $code = $district === 'dhaka' ? 'inside_dhaka' : 'outside_dhaka';
+            $area = mb_strtolower(trim((string) ($data['shipping_area'] ?? '')));
+            $suburbAreas = [
+                'ashulia', 'demra', 'dhamrai', 'dohar', 'hemayetpur',
+                'keraniganj model', 'nawabganj', 'savar', 'south keraniganj',
+            ];
+            $code = in_array($district, ['gazipur', 'narayanganj'], true)
+                || ($district === 'dhaka' && in_array($area, $suburbAreas, true))
+                ? 'suburb_dhaka'
+                : ($district === 'dhaka' ? 'inside_dhaka' : 'outside_dhaka');
             $districtMethod = (clone $methods)->where('code', $code)->first();
             if ($districtMethod) return $districtMethod;
         }

@@ -14,17 +14,25 @@ class ShippingMethodSeeder extends Seeder
                 'name' => 'Inside Dhaka',
                 'code' => 'inside_dhaka',
                 'description' => 'Flat delivery charge inside Dhaka.',
-                'charge' => 80,
+                'charge' => 70,
                 'currency' => 'BDT',
                 'sort_order' => 1,
+            ],
+            [
+                'name' => 'Suburb Dhaka',
+                'code' => 'suburb_dhaka',
+                'description' => 'Flat delivery charge for Gazipur, Narayanganj, and suburban Dhaka thanas.',
+                'charge' => 110,
+                'currency' => 'BDT',
+                'sort_order' => 2,
             ],
             [
                 'name' => 'Outside Dhaka',
                 'code' => 'outside_dhaka',
                 'description' => 'Flat delivery charge outside Dhaka.',
-                'charge' => 120,
+                'charge' => 130,
                 'currency' => 'BDT',
-                'sort_order' => 2,
+                'sort_order' => 3,
             ],
         ];
 

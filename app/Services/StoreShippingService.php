@@ -76,7 +76,13 @@ class StoreShippingService
                     $selected = $selectedId ? collect($options)->firstWhere('shipping_method_id', (int) $selectedId) : null;
                     if ($selectedId && !$selected) throw ValidationException::withMessages(['store_shipping_methods'=>["Selected delivery option for {$selectionKey} is unavailable."]]);
                     if (!$selected) {
-                        $selected = collect($options)->first(fn ($option) => Str::slug($option['name'], '_') === Str::slug($shippingMethod->name, '_')) ?? $options[0];
+                        $selected = collect($options)->first(fn ($option) => Str::slug($option['name'], '_') === Str::slug($shippingMethod->name, '_'));
+                        // Stores that have not added a separate Suburb Dhaka rate
+                        // charge their Outside Dhaka option for the suburb zone.
+                        if (!$selected && $shippingMethod->code === 'suburb_dhaka') {
+                            $selected = collect($options)->first(fn ($option) => Str::slug($option['name'], '_') === 'outside_dhaka');
+                        }
+                        $selected ??= $options[0];
                     }
                     if (!$selected) throw ValidationException::withMessages(['store_shipping_methods'=>["Selected delivery option for {$selectionKey} is unavailable."]]);
                     $groups[$key] = $this->groupRow($billingSellerId, $memberNames, $selected['shipping_method_id'], $selected, $options);

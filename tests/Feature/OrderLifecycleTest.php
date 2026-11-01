@@ -612,6 +612,25 @@ class OrderLifecycleTest extends TestCase
         $this->postJson('/api/customers/orders/preview',array_replace($payload,['shipping_method_id'=>$foreignMethod->id]))->assertUnprocessable();
     }
 
+    public function test_store_without_suburb_rate_uses_its_outside_dhaka_rate(): void
+    {
+        [$customer, $product] = $this->checkoutFixtures(4);
+        $seller = Seller::create(['seller_name'=>'Suburb Owner','email'=>'suburb-owner@example.test','store_name'=>'Suburb Store','store_slug'=>'suburb-store','kyc_type'=>'nid','kyc_number'=>'suburb','kyc_document_url'=>'https://example.test/id','product_category'=>'Clothing','status'=>'approved','is_active'=>true,'password'=>'password123']);
+        $product->update(['seller_id' => $seller->id]);
+        $sellerToken = $seller->createToken('test', ['seller:basic'])->plainTextToken;
+        $this->withToken($sellerToken)->postJson('/api/seller/delivery-rates', ['options' => [
+            ['name' => 'Inside Dhaka', 'charge' => 70],
+            ['name' => 'Outside Dhaka', 'charge' => 130],
+        ]])->assertOk();
+        $suburb = ShippingMethod::create(['name' => 'Suburb Dhaka', 'code' => 'suburb_dhaka', 'charge' => 110, 'currency' => 'BDT', 'is_active' => true]);
+        $payload = ['items' => [['product_id' => $product->id, 'quantity' => 1]], 'payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id, 'shipping_method_id' => $suburb->id];
+
+        $this->withToken($customer->createToken('test', ['customer:basic'])->plainTextToken)
+            ->postJson('/api/customers/orders/preview', $payload)
+            ->assertOk()->assertJsonPath('shipping_groups.0.shipping_method_name', 'Outside Dhaka')
+            ->assertJsonPath('shipping_charge', 130);
+    }
+
     public function test_product_delivery_options_are_quoted_and_selected_per_store(): void
     {
         [$customer, $product] = $this->checkoutFixtures(3);
