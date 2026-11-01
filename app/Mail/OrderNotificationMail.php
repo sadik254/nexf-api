@@ -17,6 +17,7 @@ class OrderNotificationMail extends Mailable
         public string $messageLine,
         public string $audience = 'customer',
         public ?int $sellerId = null,
+        public ?string $heading = null,
     ) {}
     public function envelope(): Envelope { return new Envelope(subject: $this->subjectLine); }
     public function content(): Content { return new Content(view: 'emails.order-notification'); }

@@ -23,11 +23,11 @@ class PasswordResetCodeMail extends Mailable
 
     public function envelope(): Envelope
     {
-        return new Envelope(subject: 'Password Reset Code');
+        return new Envelope(subject: $this->invite ? 'Set up your NEXF account' : 'Your NEXF password reset code');
     }
 
     public function content(): Content
     {
-        return new Content(view: 'emails.password-reset-code');
+        return new Content(view: 'emails.password-reset-code', text: 'emails.code-text');
     }
 }

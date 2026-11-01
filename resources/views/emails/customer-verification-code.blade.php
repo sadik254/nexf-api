@@ -2,7 +2,7 @@
 @php
     [$heading, $intro] = match ($type) {
         'password_reset' => ['Reset your password', 'Use this code to reset your password:'],
-        'email_change_current' => ['Confirm your email change', 'You asked to change the email on your account. Enter this code to confirm it\'s you:'],
+        'email_change_current' => ["Verify it's you", 'You asked to change the email on your account. Enter this code to continue:'],
         'email_change_new' => ['Confirm your new email', 'Enter this code to confirm this is your new account email:'],
         default => ['Verify your email', 'Thanks for signing up. Enter this code to verify your email address:'],
     };

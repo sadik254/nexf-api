@@ -9,11 +9,11 @@
         : $base.'/seller');
 @endphp
 
-@section('title', 'Seller account approved')
+@section('title', "You're ready to start selling")
 @section('preheader', $code
     ? 'Your seller account is approved. Create your password to sign in.'
     : 'Your seller account is approved. Sign in to manage your store.')
-@section('heading', 'Your seller account is approved')
+@section('heading', "You're ready to start selling")
 
 @section('content')
     <p style="margin:0 0 16px;">Hello {{ $seller->seller_name }},</p>

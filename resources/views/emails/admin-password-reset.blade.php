@@ -8,9 +8,9 @@
         : null;
 @endphp
 
-@section('title', 'Admin password reset')
+@section('title', 'Create a new password')
 @section('preheader', 'A super admin reset your password. Create a new one to sign in.')
-@section('heading', 'Your password was reset')
+@section('heading', 'Create a new password')
 
 @section('content')
     <p style="margin:0 0 16px;">Hello {{ $admin->name }},</p>

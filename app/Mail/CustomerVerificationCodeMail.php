@@ -24,9 +24,10 @@ class CustomerVerificationCodeMail extends Mailable
     public function envelope(): Envelope
     {
         $subject = match ($this->type) {
-            'password_reset' => 'Password Reset Code',
-            'email_change_current', 'email_change_new' => 'Email Change Code',
-            default => 'Email Verification Code',
+            'password_reset' => 'Your NEXF password reset code',
+            'email_change_current' => 'Your NEXF security code',
+            'email_change_new' => 'Your NEXF verification code',
+            default => 'Your NEXF verification code',
         };
 
         return new Envelope(
@@ -38,6 +39,7 @@ class CustomerVerificationCodeMail extends Mailable
     {
         return new Content(
             view: 'emails.customer-verification-code',
+            text: 'emails.code-text',
         );
     }
 }

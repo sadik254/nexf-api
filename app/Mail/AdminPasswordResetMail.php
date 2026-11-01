@@ -17,7 +17,7 @@ class AdminPasswordResetMail extends Mailable
 
     public function envelope(): Envelope
     {
-        return new Envelope(subject: 'Create a new admin password');
+        return new Envelope(subject: 'Your NEXF admin password was reset');
     }
 
     public function content(): Content

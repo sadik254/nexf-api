@@ -52,7 +52,7 @@
 
 @section('title', $subjectLine)
 @section('preheader', $messageLine.' Order '.$order->order_number.'.')
-@section('heading', $subjectLine)
+@section('heading', $heading ?? $subjectLine)
 
 @section('content')
     @if ($isStaff)

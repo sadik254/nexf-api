@@ -17,7 +17,7 @@ class AdminCreatedMail extends Mailable
 
     public function envelope(): Envelope
     {
-        return new Envelope(subject: 'Create your admin password');
+        return new Envelope(subject: 'Your NEXF admin account is ready');
     }
 
     public function content(): Content

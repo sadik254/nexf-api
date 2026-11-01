@@ -1,12 +1,12 @@
 @extends('emails.layout')
 
-@section('title', 'Password changed')
+@section('title', 'Password updated')
 @section('preheader', 'The password for your account has been changed.')
-@section('heading', 'Password changed')
+@section('heading', 'Password updated')
 
 @section('content')
     <p style="margin:0 0 16px;">Hello{{ $name ? ' '.$name : '' }},</p>
-    <p style="margin:0 0 16px;">The password for your account has been changed. For your security, you've been signed out on all devices.</p>
+    <p style="margin:0 0 16px;">Your password was just changed, and you've been signed out on all devices.</p>
 
     {{-- Labels take the narrowest column (width:1% + nowrap) so the time and IP fit on one line. --}}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;background:#fafafa;border:1px solid #e4e4e7;border-radius:10px;font-size:14px;line-height:20px;">
@@ -20,12 +20,12 @@
         </tr>
     </table>
 
-    <p style="margin:0 0 16px;">If this was you, there's nothing else to do.</p>
+    <p style="margin:0 0 16px;">If this was you, no action is needed.</p>
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 4px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;">
         <tr>
             <td style="padding:14px 20px;font-size:14px;line-height:21px;color:#7f1d1d;">
-                <strong>Didn't change your password?</strong> If you think someone else is using the account reset your password right away or contact our support.
+                <strong>Wasn't you?</strong> Reset your password now and contact support.
             </td>
         </tr>
     </table>

@@ -13,6 +13,6 @@ class PasswordChangedMail extends Mailable
     use Queueable, SerializesModels;
 
     public function __construct(public array $data) {}
-    public function envelope(): Envelope { return new Envelope(subject: 'Your password was changed'); }
+    public function envelope(): Envelope { return new Envelope(subject: 'Your NEXF password was changed'); }
     public function content(): Content { return new Content(view: 'emails.password-changed', with: $this->data); }
 }

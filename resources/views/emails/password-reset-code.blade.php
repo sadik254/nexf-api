@@ -5,7 +5,7 @@
     // instead of a fresh request that would replace the code in this email.
     $url = $base && !empty($email)
         ? $base.'/forgot-password?'.http_build_query(['actor' => $accountType, 'email' => $email, 'code' => $code]) : null;
-    $heading = $invite ? "You're invited to be a {$accountType}" : 'Reset your password';
+    $heading = $invite ? 'Create your password' : 'Reset your password';
 @endphp
 
 @section('title', $heading)
@@ -15,13 +15,13 @@
 @section('content')
     <p style="margin:0 0 16px;">Hello{{ !empty($name) ? ' '.$name : '' }},</p>
     @if ($invite)
-        <p style="margin:0 0 8px;">You've been added as a {{ $accountType }}. Tap the button below to create your password. If it asks, this is your code:</p>
+        <p style="margin:0 0 8px;">Use the button below to create your password.</p>
     @else
-        <p style="margin:0 0 8px;">Use this code to reset your {{ $accountType }} account password:</p>
+        <p style="margin:0 0 8px;">Enter this code to reset your password:</p>
     @endif
     @include('emails.partials.code', ['code' => $code, 'expires' => '10 minutes'])
     @if ($url)
-        @include('emails.partials.button', ['url' => $url, 'label' => $invite ? 'Set password' : 'Reset password'])
+        @include('emails.partials.button', ['url' => $url, 'label' => $invite ? 'Create password' : 'Reset password'])
     @endif
     <p style="margin:0;font-size:13px;line-height:20px;color:#71717a;">
         @if ($invite)

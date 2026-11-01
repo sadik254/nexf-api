@@ -123,7 +123,7 @@ class SellerController extends Controller
             'store_name' => ['required', 'string', 'max:255'],
             'sku_prefix' => ['required', 'regex:/^[A-Z0-9]{4}$/', \Illuminate\Validation\Rule::unique('sellers')->ignore($seller?->id)],
             'email' => ['required', 'email', 'max:255', \Illuminate\Validation\Rule::unique('sellers')->ignore($seller?->id)],
-            'phone' => ['required', 'regex:/^01[3-9][0-9]{8}$/', \Illuminate\Validation\Rule::unique('sellers')->ignore($seller?->id)],
+            'phone' => ['required', 'regex:/^01[3-9][0-9]{8}$/'],
             'address_line' => ['required', 'string', 'max:255'],
             'address_area' => ['required', 'string', 'max:255'],
             'address_district' => ['required', 'string', 'max:255'],
@@ -186,7 +186,7 @@ class SellerController extends Controller
     {
         $seller = $request->user(); abort_unless($seller instanceof Seller && !$request->attributes->has('seller_staff'), 403);
         if ($request->has('email')) $request->merge(['email'=>strtolower(trim((string)$request->input('email')))]);
-        $data=$request->validate(['store_name'=>['sometimes','required','string','max:255'],'email'=>['sometimes','required','email','max:255',\Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],'phone'=>['sometimes','required','regex:/^01[3-9][0-9]{8}$/',\Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],'address_line'=>['sometimes','required_with:address_area,address_district','string','max:255'],'address_area'=>['sometimes','required_with:address_line,address_district','string','max:255'],'address_district'=>['sometimes','required_with:address_line,address_area','string','max:255'],'support_email'=>['sometimes','nullable','email','max:255'],'support_phone'=>['sometimes','nullable','string','max:32'],'store_logo'=>['nullable','file','image','max:5120'],'store_logo_media_id'=>['sometimes','nullable','integer','exists:media_assets,id'],'store_logo_url'=>['sometimes','nullable','url','max:2048'],'clear_store_logo'=>['sometimes','boolean']]);
+        $data=$request->validate(['store_name'=>['sometimes','required','string','max:255'],'email'=>['sometimes','required','email','max:255',\Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],'phone'=>['sometimes','required','regex:/^01[3-9][0-9]{8}$/'],'address_line'=>['sometimes','required_with:address_area,address_district','string','max:255'],'address_area'=>['sometimes','required_with:address_line,address_district','string','max:255'],'address_district'=>['sometimes','required_with:address_line,address_area','string','max:255'],'support_email'=>['sometimes','nullable','email','max:255'],'support_phone'=>['sometimes','nullable','string','max:32'],'store_logo'=>['nullable','file','image','max:5120'],'store_logo_media_id'=>['sometimes','nullable','integer','exists:media_assets,id'],'store_logo_url'=>['sometimes','nullable','url','max:2048'],'clear_store_logo'=>['sometimes','boolean']]);
         if (isset($data['email'])) $this->assertNoStaffEmail($data['email']);
         $logo=$request->boolean('clear_store_logo')?null:$seller->store_logo;if($request->hasFile('store_logo')){$logo=$this->uploadToCdn($request->file('store_logo'), 'stores');}elseif(!$request->boolean('clear_store_logo')&&($request->has('store_logo_media_id')||$request->has('store_logo_url'))){$logo=app(\App\Services\LibraryMediaService::class)->image($data['store_logo_media_id']??null,$data['store_logo_url']??null,$seller);}unset($data['store_logo'],$data['store_logo_media_id'],$data['store_logo_url'],$data['clear_store_logo']);$data['store_logo']=$logo;$addressSent=array_key_exists('address_line',$data)||array_key_exists('address_area',$data)||array_key_exists('address_district',$data);if($addressSent){$data['store_address']=implode(', ',[$data['address_line'],$data['address_area'],$data['address_district']]);$data['city']=$data['address_district'];}$seller->update($data);return response()->json(['message'=>'Store updated.','seller'=>$seller->fresh()]);
     }
@@ -239,10 +239,6 @@ class SellerController extends Controller
         if (Seller::where('email', $data['email'])->exists() || SellerStaff::where('email', $data['email'])->exists()) {
             return response()->json(['message' => 'Email already taken.'], 422);
         }
-        if (!empty($data['phone']) && Seller::where('phone', $data['phone'])->exists()) {
-            return response()->json(['message' => 'Phone already taken.'], 422);
-        }
-
         $storeLogoUrl = null;
         if ($request->hasFile('store_logo')) {
             $storeLogoUrl = $this->uploadToCdn($request->file('store_logo'), 'stores');
@@ -359,7 +355,7 @@ class SellerController extends Controller
         $data = $request->validate([
             'seller_name' => ['sometimes', 'required', 'string', 'max:255'],
             'email' => ['sometimes', 'required', 'email', 'max:255', \Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],
-            'phone' => ['sometimes', 'nullable', 'string', 'max:32', \Illuminate\Validation\Rule::unique('sellers')->ignore($seller->id)],
+            'phone' => ['sometimes', 'nullable', 'string', 'max:32'],
             'image' => ['sometimes', 'file', 'image', 'max:5120'],
             'image_media_id' => ['sometimes', 'nullable', 'integer', 'exists:media_assets,id'],
             'image_url' => ['sometimes', 'nullable', 'url', 'max:2048'],

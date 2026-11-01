@@ -8,9 +8,9 @@
         : null;
 @endphp
 
-@section('title', 'You\'ve been added to '.$storeName)
+@section('title', 'Welcome to the team')
 @section('preheader', 'Create your password to start helping run '.$storeName.' on NEXF.')
-@section('heading', 'You\'ve been added to '.$storeName)
+@section('heading', 'Welcome to the team')
 
 @section('content')
     <p style="margin:0 0 16px;">Hello {{ $name }},</p>

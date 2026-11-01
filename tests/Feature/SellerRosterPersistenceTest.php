@@ -72,10 +72,11 @@ class SellerRosterPersistenceTest extends TestCase {
   $token=$seller->createToken('old',['seller:basic']);$seller->update(['email_verified_at'=>now()]);
   $this->postJson('/api/admin/sellers/'.$id,array_replace($input,['email'=>'changed-store@example.test','commission_rate'=>0]))->assertOk()->assertJsonPath('commission_rate','0.00')->assertJsonPath('email_verified_at',null);
   $this->assertDatabaseMissing('personal_access_tokens',['id'=>$token->accessToken->id]);
+  $this->postJson('/api/admin/sellers',array_replace($input,['store_name'=>'Second roster store','sku_prefix'=>'ISO2','email'=>'second-owner@example.test']))->assertCreated()->assertJsonPath('phone','01712345678');
   $this->postJson('/api/admin/sellers',array_replace($input,['email'=>'second-store@example.test','phone'=>'01812345678']))->assertUnprocessable()->assertJsonValidationErrors('sku_prefix');
   $moderator=Admin::create(['name'=>'Moderator','email'=>'seller-mod@example.test','password'=>'password123','role'=>'moderator']);
   $this->withToken($moderator->createToken('test',['admin:basic'])->plainTextToken)->postJson('/api/admin/sellers',$input)->assertForbidden();
-  Mail::assertSent(\App\Mail\SellerApprovedMail::class, 1);
+  Mail::assertSent(\App\Mail\SellerApprovedMail::class, 2);
  }
 
  public function test_admin_store_update_keeps_owner_and_kyc_when_blank_values_are_sent():void {

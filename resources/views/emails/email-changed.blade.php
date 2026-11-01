@@ -1,9 +1,9 @@
 @extends('emails.layout')
 @php $isOld = $recipient === 'old'; @endphp
 
-@section('title', $isOld ? 'Your account email was changed' : 'Your account email is updated')
+@section('title', $isOld ? 'Email address changed' : "You're all set")
 @section('preheader', $isOld ? "Your sign-in email was changed to {$newEmail}." : 'You will now sign in with this email address.')
-@section('heading', $isOld ? 'Your account email was changed' : 'Your email is updated')
+@section('heading', $isOld ? 'Email address changed' : "You're all set")
 
 @section('content')
     <p style="margin:0 0 16px;">Hello{{ $name ? ' '.$name : '' }},</p>

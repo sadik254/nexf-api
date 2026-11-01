@@ -8,9 +8,9 @@
         : null;
 @endphp
 
-@section('title', 'Your admin account')
+@section('title', 'Welcome to NEXF')
 @section('preheader', 'Your NEXF admin account is ready. Create your password to sign in.')
-@section('heading', 'Your admin account is ready')
+@section('heading', 'Welcome to NEXF')
 
 @section('content')
     <p style="margin:0 0 16px;">Hello {{ $admin->name }},</p>

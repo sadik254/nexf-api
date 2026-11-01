@@ -36,7 +36,6 @@
         .container { width: 100% !important; }
         .px { padding-left: 20px !important; padding-right: 20px !important; }
         .code { font-size: 28px !important; }
-        .code span { letter-spacing: 6px !important; }
     }
 </style>
 </head>
@@ -73,7 +72,7 @@
         <tr>
             <td class="px" align="center" style="padding:24px 16px 0;font-size:12px;line-height:19px;color:#71717a;">
                 @if ($supportEmail || $helpline)
-                    <p style="margin:0 0 2px;">Need help? Our support team is ready to help.</p>
+                    <p style="margin:0 0 2px;">Questions? We're here to help.</p>
                     <p style="margin:0 0 6px;">
                         @if ($supportEmail)<a href="mailto:{{ $supportEmail }}" style="color:#52525b;">{{ $supportEmail }}</a>@endif
                         @if ($supportEmail && $helpline) &middot; @endif

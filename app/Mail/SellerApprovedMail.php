@@ -17,7 +17,7 @@ class SellerApprovedMail extends Mailable
 
     public function envelope(): Envelope
     {
-        return new Envelope(subject: 'Your Seller Account Has Been Approved');
+        return new Envelope(subject: 'Your NEXF seller account is approved');
     }
 
     public function content(): Content
