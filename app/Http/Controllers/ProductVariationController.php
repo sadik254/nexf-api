@@ -6,6 +6,7 @@ use App\Models\Admin;
 use App\Models\Product;
 use App\Models\ProductVariation;
 use App\Services\RestockAlertService;
+use App\Services\ProductBundleService;
 use App\Models\ProductLot;
 use App\Models\ProductLotMovement;
 use App\Models\Seller;
@@ -123,6 +124,7 @@ class ProductVariationController extends Controller
             }
             return $saved;
         });
+        app(ProductBundleService::class)->pruneInvalidFixedItems($product);
 
         return response()->json([
             'message' => 'Variant matrix saved.',

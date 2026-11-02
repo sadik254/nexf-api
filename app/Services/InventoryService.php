@@ -67,6 +67,10 @@ class InventoryService
         if ($quantity < 1 || $quantity > (int) $item->quantity) {
             throw ValidationException::withMessages(['quantity' => ['The restock quantity is outside this order item.']]);
         }
+        if ($item->bundle_items) {
+            $this->restoreBundleOrderItemQuantity($item, $quantity, $actor, $reason, $meta);
+            return;
+        }
         $remaining = $quantity;
         foreach ($item->lot_allocations ?? [] as $allocation) {
             if ($remaining <= 0) break;
@@ -99,6 +103,31 @@ class InventoryService
         }
         if ($remaining > 0) {
             throw ValidationException::withMessages(['order' => ['The order item does not contain enough lot allocation data to restock this quantity.']]);
+        }
+    }
+
+    private function restoreBundleOrderItemQuantity(OrderItem $item, int $quantity, $actor, string $reason, array $meta): void
+    {
+        $needed = [];
+        foreach ($item->bundle_items as $index => $piece) $needed[$index] = (int) ($piece['quantity'] ?? 0) * $quantity;
+        foreach ($item->lot_allocations ?? [] as $allocation) {
+            $component = $allocation['bundle_component'] ?? null;
+            if ($component === null || empty($needed[$component])) continue;
+            $take = min((int) $needed[$component], (int) ($allocation['quantity'] ?? 0));
+            if ($take <= 0) continue;
+            $lot = ProductLot::query()->lockForUpdate()->find((int) ($allocation['lot_id'] ?? 0));
+            if (!$lot) throw ValidationException::withMessages(['order' => ['Cannot restock an order whose inventory lot no longer exists.']]);
+            $lot->increment('quantity_remaining', $take);
+            ProductLotMovement::create([
+                'product_lot_id' => $lot->id, 'quantity_change' => $take, 'reason' => $reason,
+                'actor_type' => $actor ? $actor::class : 'system', 'actor_id' => $actor?->id ?? 0,
+                'meta' => array_merge($meta, ['order_id' => $item->order_id, 'order_item_id' => $item->id, 'restored_from_order_sale' => true, 'actor_name' => $actor?->name ?? $actor?->seller_name ?? 'System']),
+            ]);
+            app(RestockAlertService::class)->notify($lot->product_id ?? $lot->variation?->product_id ?? 0, $lot->variation_id);
+            $needed[$component] -= $take;
+        }
+        if (collect($needed)->contains(fn ($remaining) => $remaining > 0)) {
+            throw ValidationException::withMessages(['order' => ['The order item does not contain enough allocation data to restock this combo.']]);
         }
     }
 

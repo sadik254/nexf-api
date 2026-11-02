@@ -127,6 +127,8 @@ class OrderController extends Controller
                 'product_id' => $item['product']->id, 'variation_id' => $item['variation']?->id,
                 'name' => $item['product']->name, 'quantity' => $item['quantity'],
                 'available_quantity' => $item['quote']['available_quantity'], 'line_subtotal' => $item['quote']['subtotal'],
+                'bundle_id' => $item['bundle']?->id,
+                'bundle_label' => $item['bundle']?->label,
             ])->values(),
             'payment_method' => $preview['paymentMethod'], 'shipping_method' => $preview['shippingMethod'],
             'coupon' => $preview['coupon'], 'subtotal' => $preview['subtotal'],
@@ -1050,7 +1052,19 @@ class OrderController extends Controller
         $variation = $item->variation_id ? ProductVariation::query()->find($item->variation_id) : null;
         $product = $item->product_id ? Product::query()->find($item->product_id) : null;
         if (!$variation && !$product) throw ValidationException::withMessages(['status' => ["{$item->product_name} is no longer in the catalogue, so its stock cannot be taken."]]);
-        try { $result = $variation ? $this->inventory->consumeVariation($variation, $quantity, $actor, 'order_sale', ['order_id' => $item->order_id, 'stock_request' => true]) : $this->inventory->consumeProduct($product, $quantity, $actor, 'order_sale', ['order_id' => $item->order_id, 'stock_request' => true]); }
+        try {
+            if ($item->bundle_items) {
+                $components = [];
+                foreach ($item->bundle_items as $piece) {
+                    $pieceVariation = !empty($piece['variation_id']) ? ProductVariation::find($piece['variation_id']) : null;
+                    if (!empty($piece['variation_id']) && !$pieceVariation) throw ValidationException::withMessages(['status' => ['missing']]);
+                    $components[] = ['variation' => $pieceVariation, 'quantity' => (int) $piece['quantity']];
+                }
+                $result = $this->consumeBundle($product, $components, $quantity, $actor, false, $item->order_id, (float) $item->line_subtotal / max(1, $quantity));
+            } else {
+                $result = $variation ? $this->inventory->consumeVariation($variation, $quantity, $actor, 'order_sale', ['order_id' => $item->order_id, 'stock_request' => true]) : $this->inventory->consumeProduct($product, $quantity, $actor, 'order_sale', ['order_id' => $item->order_id, 'stock_request' => true]);
+            }
+        }
         catch (ValidationException $e) { throw ValidationException::withMessages(['status' => ["{$item->product_name} is still out of stock. Add stock before confirming this request."]]); }
         $cost=(float)$result['totals']['cost']; $revenue=(float)$item->line_subtotal;
         $item->update(['lot_allocations'=>$result['allocations'],'unit_buying_price'=>round($cost/max(1,$quantity),2),'line_cost'=>$cost,'line_profit'=>round($revenue-$cost,2),'awaiting_stock'=>false]);
@@ -1210,7 +1224,7 @@ class OrderController extends Controller
             $subtotal = 0.0;
             $shippingLines = [];
 
-            foreach ($data['items'] as $itemData) {
+            foreach ($data['items'] as $lineIndex => $itemData) {
                 $product = Product::query()
                     ->with('seller')
                     ->availableForSale()
@@ -1230,19 +1244,23 @@ class OrderController extends Controller
 
                 $quantity = (int) $itemData['quantity'];
                 $variation = null;
+                $bundle = $preview['items'][$lineIndex]['bundle'] ?? null;
+                $bundleComponents = $preview['items'][$lineIndex]['bundle_components'] ?? [];
 
-                if ($product->product_type === 'variable' && empty($itemData['variation_id'])) {
+                if (!$bundle && $product->product_type === 'variable' && empty($itemData['variation_id'])) {
                     throw ValidationException::withMessages([
                         'items' => ["A variation must be selected for {$product->name}."],
                     ]);
                 }
-                if ($product->product_type === 'simple' && !empty($itemData['variation_id'])) {
+                if (!$bundle && $product->product_type === 'simple' && !empty($itemData['variation_id'])) {
                     throw ValidationException::withMessages([
                         'items' => ["{$product->name} does not have purchasable variations."],
                     ]);
                 }
 
-                if (!empty($itemData['variation_id'])) {
+                if ($bundle) {
+                    $result = $this->consumeBundle($product, $bundleComponents, $quantity, $actor, $order->stock_request, $order->id, (float) $bundle->price);
+                } elseif (!empty($itemData['variation_id'])) {
                     $variation = ProductVariation::query()
                         ->where('product_id', $product->id)
                         ->where('is_active', true)
@@ -1263,9 +1281,9 @@ class OrderController extends Controller
                         : $this->inventory->consumeProduct($product, $quantity, $actor, 'order_sale', ['order_id' => $order->id]);
                 }
 
-                $lineSubtotal = (float) $result['totals']['revenue'];
+                $lineSubtotal = $bundle ? round((float) $bundle->price * $quantity, 2) : (float) $result['totals']['revenue'];
                 $lineCost = (float) $result['totals']['cost'];
-                $lineProfit = (float) $result['totals']['profit'];
+                $lineProfit = round($lineSubtotal - $lineCost, 2);
                 $unitSellingPrice = round($lineSubtotal / $quantity, 2);
                 $unitBuyingPrice = round($lineCost / $quantity, 2);
 
@@ -1282,6 +1300,8 @@ class OrderController extends Controller
                     'variation_attributes' => $variation?->attributes,
                     'variation_labels' => $this->variationLabels($product, $variation),
                     'variation_image' => $variation?->image_url,
+                    'bundle_label' => $bundle?->label,
+                    'bundle_items' => $bundle ? $this->bundleSnapshot($product, $bundleComponents) : null,
                     'quantity' => $quantity,
                     'unit_selling_price' => $unitSellingPrice,
                     'unit_buying_price' => $unitBuyingPrice,
@@ -1433,6 +1453,10 @@ class OrderController extends Controller
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['required', 'integer', 'exists:products,id'],
             'items.*.variation_id' => ['nullable', 'integer', 'exists:product_variations,id'],
+            'items.*.bundle_id' => ['nullable', 'integer', 'exists:product_bundles,id'],
+            'items.*.bundle_items' => ['nullable', 'array', 'max:100'],
+            'items.*.bundle_items.*.variation_id' => ['nullable', 'integer', 'exists:product_variations,id'],
+            'items.*.bundle_items.*.quantity' => ['required_with:items.*.bundle_items', 'integer', 'min:1'],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
             'payment_method_id' => ['required', 'integer', 'exists:payment_methods,id'],
             'shipping_method_id' => ['required', 'integer', 'exists:shipping_methods,id'],
@@ -1465,6 +1489,38 @@ class OrderController extends Controller
         }
         foreach ($attributes as $key => $value) if (!in_array((string) $key, $handledKeys, true)) $labels[] = ['group' => (string) $key, 'value' => (string) $value, 'swatch' => null];
         return $labels;
+    }
+
+    private function bundleSnapshot(Product $product, array $components): array
+    {
+        return array_map(fn (array $component) => [
+            'variation_id' => $component['variation']?->id,
+            'quantity' => (int) $component['quantity'],
+            'labels' => $this->variationLabels($product, $component['variation']),
+        ], $components);
+    }
+
+    /** Consume the pieces of one combo while the order retains one quoted combo line. */
+    private function consumeBundle(Product $product, array $components, int $comboQuantity, $actor, bool $stockRequest, int $orderId, float $quotedPrice): array
+    {
+        $allocations = [];
+        $cost = 0.0;
+        foreach ($components as $componentIndex => $component) {
+            $pieceQuantity = (int) $component['quantity'] * $comboQuantity;
+            $variation = $component['variation'];
+            if ($stockRequest) continue;
+            $consumed = $variation
+                ? $this->inventory->consumeVariation($variation, $pieceQuantity, $actor, 'order_sale', ['order_id' => $orderId, 'bundle' => true])
+                : $this->inventory->consumeProduct($product, $pieceQuantity, $actor, 'order_sale', ['order_id' => $orderId, 'bundle' => true]);
+            $allocations = array_merge($allocations, array_map(function (array $allocation) use ($componentIndex, $component) {
+                $allocation['bundle_component'] = $componentIndex;
+                $allocation['bundle_component_quantity'] = (int) $component['quantity'];
+                return $allocation;
+            }, $consumed['allocations']));
+            $cost = round($cost + (float) $consumed['totals']['cost'], 2);
+        }
+        $revenue = round($quotedPrice * $comboQuantity, 2);
+        return ['allocations' => $allocations, 'totals' => ['cost' => $stockRequest ? 0.0 : $cost, 'revenue' => $revenue, 'profit' => $stockRequest ? $revenue : round($revenue - $cost, 2)]];
     }
 
     private function assertGuestPhone(string $phone): void

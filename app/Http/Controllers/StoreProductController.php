@@ -308,6 +308,7 @@ class StoreProductController extends Controller
                     'current_selling_price' => $v->default_selling_price !== null ? (string) $v->default_selling_price : ($product->default_selling_price !== null ? (string) $product->default_selling_price : null),
                     'available_quantity' => (int) ($v->available_quantity ?? 0),
                     'in_stock' => ((int) ($v->available_quantity ?? 0)) > 0,
+                    'image_url' => $v->image_url,
                 ];
             })->values()->all();
 
@@ -363,6 +364,15 @@ class StoreProductController extends Controller
             'available_quantity' => $availableQuantity,
             'in_stock' => $availableQuantity > 0,
             'variations' => $variations,
+            'bundles' => $product->bundles->map(fn ($bundle) => [
+                'id' => $bundle->id,
+                'label' => $bundle->label,
+                'mode' => $bundle->mode,
+                'size' => $bundle->size,
+                'price' => $bundle->price,
+                'compare_at_price' => $bundle->compare_at_price,
+                'items' => $bundle->items->map(fn ($item) => ['attributes' => $item->attributes, 'quantity' => $item->quantity])->values(),
+            ])->values(),
         ];
     }
 
@@ -383,9 +393,10 @@ class StoreProductController extends Controller
             'seller:id,store_name,store_slug,store_logo,store_image,city,country,created_at,positive_rating_percentage,on_time_shipping_percentage,chat_response_percentage',
             'sizeChart',
             'variations' => function ($q) {
-                $q->select(['id', 'product_id', 'sku', 'attributes', 'default_selling_price'])
+                $q->select(['id', 'product_id', 'sku', 'attributes', 'image_url', 'default_selling_price'])
                     ->selectSub($this->variationAvailableQtySubquery(), 'available_quantity');
             },
+            'bundles.items',
         ]);
     }
 

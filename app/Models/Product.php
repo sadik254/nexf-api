@@ -116,6 +116,11 @@ class Product extends Model
         return $this->hasMany(ProductVariation::class);
     }
 
+    public function bundles(): HasMany
+    {
+        return $this->hasMany(ProductBundle::class)->orderBy('sort_order')->orderBy('id');
+    }
+
     public function lots(): HasMany
     {
         return $this->hasMany(ProductLot::class);

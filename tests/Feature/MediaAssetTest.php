@@ -74,6 +74,20 @@ class MediaAssetTest extends TestCase
             ->assertJsonPath('product.compare_at_price', '699.00');
     }
 
+    public function test_admin_can_create_a_store_product_with_that_stores_library_image(): void
+    {
+        $category = ProductCategory::create(['name' => 'Staff catalogue', 'slug' => 'staff-catalogue']);
+        $seller = Seller::create(['seller_name' => 'Store owner', 'email' => 'staff-product-store@example.test', 'store_name' => 'Staff product store', 'store_slug' => 'staff-product-store', 'kyc_type' => 'nid', 'kyc_number' => '91', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
+        $admin = Admin::create(['name' => 'Super', 'email' => 'staff-product-admin@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $asset = MediaAsset::create(['owner_type' => 'seller', 'owner_id' => $seller->id, 'source' => 'url', 'url' => 'https://example.test/store-file.jpg', 'file_name' => 'store-file.jpg', 'mime_type' => 'image/jpeg']);
+        $asset->storeLibraries()->create(['seller_id' => $seller->id, 'library_key' => "seller:{$seller->id}"]);
+
+        $this->withToken($admin->createToken('test', ['admin'])->plainTextToken)->postJson('/api/admin/products', [
+            'seller_id' => $seller->id, 'category_id' => $category->id, 'name' => 'Admin created store product', 'product_type' => 'simple', 'status' => 'draft',
+            'thumbnail_media_id' => $asset->id, 'gallery_media_ids' => [$asset->id],
+        ])->assertCreated()->assertJsonPath('product.thumbnail', $asset->url);
+    }
+
     public function test_an_asset_can_be_shared_with_many_store_libraries_and_staff_can_remove_only_their_store_copy(): void
     {
         $first = Seller::create(['seller_name' => 'First', 'email' => 'first-shared-media@example.test', 'store_name' => 'First Store', 'store_slug' => 'first-shared-media', 'kyc_type' => 'nid', 'kyc_number' => '11', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);

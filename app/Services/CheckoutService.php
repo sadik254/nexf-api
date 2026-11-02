@@ -18,6 +18,7 @@ class CheckoutService
         private InventoryService $inventory,
         private StoreShippingService $storeShipping,
         private FraudGuardService $fraudGuard,
+        private ProductBundleService $bundles,
     ) {}
 
     public function preview(?Customer $customer, array $data): array
@@ -35,16 +36,32 @@ class CheckoutService
             if (!$product || ($product->seller_id && (!$product->seller || $product->seller->status !== 'approved' || !$product->seller->is_active))) {
                 throw ValidationException::withMessages(['items' => ['One or more products are unavailable.']]);
             }
-            $variationId = $itemData['variation_id'] ?? null;
-            if ($product->product_type === 'variable' && !$variationId) throw ValidationException::withMessages(['items' => ["A variation must be selected for {$product->name}."]]);
-            if ($product->product_type === 'simple' && $variationId) throw ValidationException::withMessages(['items' => ["{$product->name} does not have purchasable variations."]]);
-            $variation = $variationId ? ProductVariation::query()->where('product_id', $product->id)->where('is_active', true)->find($variationId) : null;
-            if ($variationId && !$variation) throw ValidationException::withMessages(['items' => ["Selected variation for {$product->name} is unavailable."]]);
             $quantity = (int) $itemData['quantity'];
             $stockRequest = !empty($data['stock_request']);
-            $quote = $variation ? $this->inventory->previewVariation($variation, $quantity, $stockRequest) : $this->inventory->previewProduct($product, $quantity, $stockRequest);
+            $resolvedBundle = $this->bundles->resolve($product, $itemData);
+            if ($resolvedBundle) {
+                $variation = null;
+                $available = PHP_INT_MAX;
+                $cost = 0.0;
+                foreach ($resolvedBundle['components'] as $component) {
+                    $pieceQuantity = $component['quantity'] * $quantity;
+                    $pieceQuote = $component['variation']
+                        ? $this->inventory->previewVariation($component['variation'], $pieceQuantity, $stockRequest)
+                        : $this->inventory->previewProduct($product, $pieceQuantity, $stockRequest);
+                    $available = min($available, intdiv((int) $pieceQuote['available_quantity'], max(1, $component['quantity'])));
+                    $cost = round($cost + (float) $pieceQuote['cost'], 2);
+                }
+                $quote = ['available_quantity' => $available === PHP_INT_MAX ? 0 : $available, 'cost' => $cost, 'subtotal' => round((float) $resolvedBundle['bundle']->price * $quantity, 2)];
+            } else {
+                $variationId = $itemData['variation_id'] ?? null;
+                if ($product->product_type === 'variable' && !$variationId) throw ValidationException::withMessages(['items' => ["A variation must be selected for {$product->name}."]]);
+                if ($product->product_type === 'simple' && $variationId) throw ValidationException::withMessages(['items' => ["{$product->name} does not have purchasable variations."]]);
+                $variation = $variationId ? ProductVariation::query()->where('product_id', $product->id)->where('is_active', true)->find($variationId) : null;
+                if ($variationId && !$variation) throw ValidationException::withMessages(['items' => ["Selected variation for {$product->name} is unavailable."]]);
+                $quote = $variation ? $this->inventory->previewVariation($variation, $quantity, $stockRequest) : $this->inventory->previewProduct($product, $quantity, $stockRequest);
+            }
             $subtotal = round($subtotal + $quote['subtotal'], 2);
-            $items[] = ['product' => $product, 'variation' => $variation, 'quantity' => $quantity, 'quote' => $quote];
+            $items[] = ['product' => $product, 'variation' => $variation, 'quantity' => $quantity, 'quote' => $quote, 'bundle' => $resolvedBundle['bundle'] ?? null, 'bundle_components' => $resolvedBundle['components'] ?? []];
         }
 
         $shipping = $this->storeShipping->quote(array_map(fn ($item) => [
@@ -129,15 +146,28 @@ class CheckoutService
             if (!$product || ($product->seller_id && (!$product->seller || !$product->seller->is_active || $product->seller->status !== 'approved'))) {
                 throw ValidationException::withMessages(['items' => ['One or more products are unavailable.']]);
             }
-            $variationId = $item['variation_id'] ?? null;
-            if ($product->product_type === 'variable' && !$variationId) throw ValidationException::withMessages(['items' => ["Select a variation for {$product->name}."]]);
-            if ($product->product_type === 'simple' && $variationId) throw ValidationException::withMessages(['items' => ["{$product->name} does not have variations."]]);
-            $variation = $variationId ? ProductVariation::query()->where('product_id', $product->id)->where('is_active', true)->find($variationId) : null;
-            if ($variationId && !$variation) throw ValidationException::withMessages(['items' => ['A selected variation is unavailable.']]);
             $quantity = (int) $item['quantity'];
-            $quote = $variation ? $this->inventory->previewVariation($variation, $quantity) : $this->inventory->previewProduct($product, $quantity);
+            $resolvedBundle = $this->bundles->resolve($product, $item);
+            if ($resolvedBundle) {
+                $variation = null; $available = PHP_INT_MAX; $cost = 0.0;
+                foreach ($resolvedBundle['components'] as $component) {
+                    $pieceQuote = $component['variation']
+                        ? $this->inventory->previewVariation($component['variation'], $component['quantity'] * $quantity)
+                        : $this->inventory->previewProduct($product, $component['quantity'] * $quantity);
+                    $available = min($available, intdiv((int) $pieceQuote['available_quantity'], max(1, $component['quantity'])));
+                    $cost = round($cost + (float) $pieceQuote['cost'], 2);
+                }
+                $quote = ['available_quantity' => $available === PHP_INT_MAX ? 0 : $available, 'cost' => $cost, 'subtotal' => round((float) $resolvedBundle['bundle']->price * $quantity, 2)];
+            } else {
+                $variationId = $item['variation_id'] ?? null;
+                if ($product->product_type === 'variable' && !$variationId) throw ValidationException::withMessages(['items' => ["Select a variation for {$product->name}."]]);
+                if ($product->product_type === 'simple' && $variationId) throw ValidationException::withMessages(['items' => ["{$product->name} does not have variations."]]);
+                $variation = $variationId ? ProductVariation::query()->where('product_id', $product->id)->where('is_active', true)->find($variationId) : null;
+                if ($variationId && !$variation) throw ValidationException::withMessages(['items' => ['A selected variation is unavailable.']]);
+                $quote = $variation ? $this->inventory->previewVariation($variation, $quantity) : $this->inventory->previewProduct($product, $quantity);
+            }
             $subtotal = round($subtotal + $quote['subtotal'], 2);
-            $items[] = compact('product', 'variation', 'quantity', 'quote');
+            $items[] = compact('product', 'variation', 'quantity', 'quote') + ['bundle' => $resolvedBundle['bundle'] ?? null, 'bundle_components' => $resolvedBundle['components'] ?? []];
         }
         $coupon = $this->resolveCoupon($code, $subtotal, $customer, $items);
         $discount = $this->discountForCart($coupon, $items, $subtotal, $shippingAmount);

@@ -13,6 +13,7 @@ use App\Models\SizeChart;
 use App\Models\MediaAsset;
 use App\Services\ProductHtmlSanitizer;
 use App\Services\MediaUploadService;
+use App\Services\ProductBundleService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -33,7 +34,7 @@ class ProductController extends Controller
         }
 
         $query = Product::query()
-            ->with(['category', 'brand', 'tags', 'seller', 'variations'])
+            ->with(['category', 'brand', 'tags', 'seller', 'variations', 'bundles.items'])
             ->latest();
 
         // The product list can show the whole marketplace. Other callers keep
@@ -60,7 +61,7 @@ class ProductController extends Controller
         }
 
         $query = Product::query()
-            ->with(['category', 'brand', 'tags', 'seller', 'variations'])
+            ->with(['category', 'brand', 'tags', 'seller', 'variations', 'bundles.items'])
             ->where('seller_id', $seller->id)
             ->latest();
         $this->withListMetrics($query);
@@ -79,7 +80,7 @@ class ProductController extends Controller
         }
 
         $query = Product::query()
-            ->with(['category', 'brand', 'tags', 'seller', 'variations'])
+            ->with(['category', 'brand', 'tags', 'seller', 'variations', 'bundles.items'])
             ->where('seller_id', $actor->id)
             ->latest();
         $this->withListMetrics($query);
@@ -110,7 +111,7 @@ class ProductController extends Controller
 
     private function productForEditor(Product $product): array
     {
-        $product->load(['category', 'brand', 'tags', 'seller', 'variations']);
+        $product->load(['category', 'brand', 'tags', 'seller', 'variations', 'bundles.items']);
         $costLot = ProductLot::query()
             ->when($product->product_type === 'variable',
                 fn ($query) => $query->whereIn('variation_id', $product->variations->pluck('id')),
@@ -209,6 +210,17 @@ class ProductController extends Controller
             'homepage_new_arrival' => ['nullable', 'boolean'],
             'homepage_featured' => ['nullable', 'boolean'],
             'homepage_sort_order' => ['nullable', 'integer', 'min:0'],
+            'bundles' => ['sometimes', 'array', 'max:50'],
+            'bundles.*.id' => ['nullable', 'integer'],
+            'bundles.*.label' => ['required_with:bundles', 'string', 'max:60'],
+            'bundles.*.mode' => ['required_with:bundles', 'in:pick,fixed'],
+            'bundles.*.size' => ['required_with:bundles', 'integer', 'min:1'],
+            'bundles.*.price' => ['required_with:bundles', 'numeric', 'gt:0'],
+            'bundles.*.compare_at_price' => ['nullable', 'numeric', 'gt:0'],
+            'bundles.*.items' => ['nullable', 'array', 'max:100'],
+            'bundles.*.items.*.attributes' => ['nullable', 'array'],
+            'bundles.*.items.*.quantity' => ['required_with:bundles.*.items', 'integer', 'min:1'],
+            'clear_bundles' => ['sometimes', 'boolean'],
         ]);
 
         $data = $this->normalizeSpecifications($data);
@@ -235,7 +247,7 @@ class ProductController extends Controller
             $thumbnailUrl = $uploads->upload($request->file('thumbnail'), 'products');
         }
         if (!empty($data['thumbnail_media_id'])) {
-            $thumbnailUrl = $this->imageMediaUrl((int) $data['thumbnail_media_id'], $actor instanceof Seller ? $actor->id : null);
+            $thumbnailUrl = $this->imageMediaUrl((int) $data['thumbnail_media_id'], $actor instanceof Seller ? $actor->id : null, $actor instanceof Admin);
         }
 
         $galleryUrls = null;
@@ -247,11 +259,11 @@ class ProductController extends Controller
         }
         if (!empty($data['gallery_media_ids'])) {
             $galleryUrls = array_merge($galleryUrls ?? [], array_map(
-                fn ($id) => $this->imageMediaUrl((int) $id, $actor instanceof Seller ? $actor->id : null),
+                fn ($id) => $this->imageMediaUrl((int) $id, $actor instanceof Seller ? $actor->id : null, $actor instanceof Admin),
                 $data['gallery_media_ids'],
             ));
         }
-        if (array_key_exists('gallery_order', $data)) $galleryUrls = $this->galleryOrderUrls($data['gallery_order'], null, $actor instanceof Seller ? $actor->id : null);
+        if (array_key_exists('gallery_order', $data)) $galleryUrls = $this->galleryOrderUrls($data['gallery_order'], null, $actor instanceof Seller ? $actor->id : null, $actor instanceof Admin);
 
         $this->authorizeSizeChart($data['size_chart_id'] ?? null, $actor, $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null));
 
@@ -312,6 +324,9 @@ class ProductController extends Controller
                 app(RestockAlertService::class)->notify($product->id);
             }
 
+            if (array_key_exists('bundles', $data) || !empty($data['clear_bundles'])) {
+                app(ProductBundleService::class)->replace($product, !empty($data['clear_bundles']) ? [] : ($data['bundles'] ?? []));
+            }
             return $product;
         });
 
@@ -319,7 +334,7 @@ class ProductController extends Controller
 
         return response()->json([
             'message' => 'Product created successfully.',
-            'product' => $product,
+            'product' => $product->load('bundles.items'),
         ], 201);
     }
 
@@ -394,6 +409,17 @@ class ProductController extends Controller
             'homepage_new_arrival' => ['sometimes', 'boolean'],
             'homepage_featured' => ['sometimes', 'boolean'],
             'homepage_sort_order' => ['sometimes', 'integer', 'min:0'],
+            'bundles' => ['sometimes', 'array', 'max:50'],
+            'bundles.*.id' => ['nullable', 'integer'],
+            'bundles.*.label' => ['required_with:bundles', 'string', 'max:60'],
+            'bundles.*.mode' => ['required_with:bundles', 'in:pick,fixed'],
+            'bundles.*.size' => ['required_with:bundles', 'integer', 'min:1'],
+            'bundles.*.price' => ['required_with:bundles', 'numeric', 'gt:0'],
+            'bundles.*.compare_at_price' => ['nullable', 'numeric', 'gt:0'],
+            'bundles.*.items' => ['nullable', 'array', 'max:100'],
+            'bundles.*.items.*.attributes' => ['nullable', 'array'],
+            'bundles.*.items.*.quantity' => ['required_with:bundles.*.items', 'integer', 'min:1'],
+            'clear_bundles' => ['sometimes', 'boolean'],
         ]);
 
         if (array_key_exists('seller_id', $data) && (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin')) {
@@ -421,6 +447,8 @@ class ProductController extends Controller
         unset($data['clear_videos']);
         if (!empty($data['clear_shipping_options'])) $data['shipping_options'] = [];
         unset($data['clear_shipping_options']);
+        $bundleRows = array_key_exists('bundles', $data) || !empty($data['clear_bundles']) ? (!empty($data['clear_bundles']) ? [] : $data['bundles']) : null;
+        unset($data['bundles'], $data['clear_bundles']);
 
         if (array_key_exists('slug', $data)) {
             $product->slug = $data['slug'];
@@ -495,10 +523,11 @@ class ProductController extends Controller
         ])->save();
 
         if ($tagIds !== null) $product->tags()->sync($tagIds);
+        if ($bundleRows !== null) app(ProductBundleService::class)->replace($product, $bundleRows);
 
         return response()->json([
             'message' => 'Product updated successfully.',
-            'product' => $product->load(['brand', 'tags']),
+            'product' => $product->load(['brand', 'tags', 'bundles.items']),
         ]);
     }
 

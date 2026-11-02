@@ -23,6 +23,8 @@ class OrderItem extends Model
         'variation_attributes',
         'variation_labels',
         'variation_image',
+        'bundle_label',
+        'bundle_items',
         'quantity',
         'unit_selling_price',
         'unit_buying_price',
@@ -53,6 +55,7 @@ class OrderItem extends Model
         return [
             'variation_attributes' => 'array',
             'variation_labels' => 'array',
+            'bundle_items' => 'array',
             'product_gallery' => 'array',
             'product_image_variants' => 'array',
             'quantity' => 'integer',
