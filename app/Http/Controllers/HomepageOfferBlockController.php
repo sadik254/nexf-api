@@ -87,6 +87,26 @@ class HomepageOfferBlockController extends Controller
         return response()->json(['block' => $block], 201);
     }
 
+    public function reorderBlocks(Request $request, HomepageOfferSet $offerSet): JsonResponse
+    {
+        $this->authorizeManager($request);
+        $data = $request->validate(['ids' => ['present', 'array'], 'ids.*' => ['required', 'integer', 'distinct']]);
+
+        $blocks = \Illuminate\Support\Facades\DB::transaction(function () use ($data, $offerSet) {
+            $set = HomepageOfferSet::query()->lockForUpdate()->findOrFail($offerSet->id);
+            $blocks = $set->blocks()->lockForUpdate()->get();
+            $expected = $blocks->pluck('id')->sort()->values()->all();
+            $submitted = collect($data['ids'])->map(fn ($id) => (int) $id)->sort()->values()->all();
+            if ($expected !== $submitted) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['ids' => ['Refresh the offer set before reordering.']]);
+            }
+            foreach ($data['ids'] as $slot => $id) $blocks->firstWhere('id', $id)->update(['slot' => $slot]);
+            return $set->blocks()->orderBy('slot')->orderBy('id')->get();
+        });
+
+        return response()->json($blocks);
+    }
+
     public function destroyBlock(Request $request, HomepageOfferSet $offerSet, HomepageOfferBlock $block): JsonResponse
     {
         $this->authorizeManager($request);

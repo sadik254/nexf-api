@@ -28,7 +28,7 @@ class HomepageCategoryCardController extends Controller
     {
         $this->authorizeManager($request);
         $data = $request->validate([
-            'cards' => ['required', 'array', 'max:30'],
+            'cards' => ['present', 'array', 'max:30'],
             'cards.*.id' => ['sometimes', 'integer', 'exists:homepage_category_cards,id'],
             'cards.*.category_id' => ['nullable', 'integer', 'exists:product_categories,id'],
             'cards.*.name' => ['required', 'string', 'max:120'],

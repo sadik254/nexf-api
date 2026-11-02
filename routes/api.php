@@ -407,6 +407,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {
     Route::post('/homepage/offer-sets/{offerSet}', [HomepageOfferBlockController::class, 'updateSet'])->middleware('perm:storefront.edit');
     Route::post('/homepage/offer-sets/{offerSet}/delete', [HomepageOfferBlockController::class, 'destroySet'])->middleware('perm:storefront.edit');
     Route::post('/homepage/offer-sets/{offerSet}/blocks', [HomepageOfferBlockController::class, 'storeBlock'])->middleware('perm:storefront.edit');
+    Route::post('/homepage/offer-sets/{offerSet}/blocks/reorder', [HomepageOfferBlockController::class, 'reorderBlocks'])->middleware('perm:storefront.edit');
     Route::post('/homepage/offer-sets/{offerSet}/blocks/{block}/delete', [HomepageOfferBlockController::class, 'destroyBlock'])->middleware('perm:storefront.edit');
     Route::post('/homepage/offer-blocks/{block}', [HomepageOfferBlockController::class, 'update'])->middleware('perm:storefront.edit');
     Route::get('/homepage/layout', [HomepageLayoutController::class, 'show'])->middleware('perm:storefront.edit');

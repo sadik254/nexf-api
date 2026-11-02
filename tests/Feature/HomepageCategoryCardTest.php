@@ -25,6 +25,10 @@ class HomepageCategoryCardTest extends TestCase
         $token = $super->createToken('test', ['admin:basic'])->plainTextToken;
         $this->withToken($token)->postJson('/api/admin/homepage/category-cards', ['cards' => $cards])
             ->assertOk()->assertJsonCount(2)->assertJsonPath('0.name', 'Coats');
+        $this->withToken($token)->postJson('/api/admin/homepage/category-cards', ['cards' => []])
+            ->assertOk()->assertJsonCount(0);
+        $this->withToken($token)->postJson('/api/admin/homepage/category-cards', ['cards' => $cards])
+            ->assertOk()->assertJsonCount(2);
         $this->getJson('/api/homepage/category-cards')->assertOk()->assertJsonCount(1)
             ->assertJsonPath('0.category.slug', 'coats');
         $category->update(['is_active' => false]);

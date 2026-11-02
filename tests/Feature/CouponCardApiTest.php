@@ -22,9 +22,18 @@ class CouponCardApiTest extends TestCase
             'row_type' => 'coupons', 'name' => 'Eid savings',
         ])->assertCreated()->assertJsonCount(0, 'blocks')->json();
 
-        $this->withToken($token)->postJson("/api/admin/homepage/offer-sets/{$set['id']}/blocks", [
+        $first = $this->withToken($token)->postJson("/api/admin/homepage/offer-sets/{$set['id']}/blocks", [
             'title' => 'Save ৳100', 'body' => 'On your first order', 'cta' => 'EID100', 'hidden' => false,
-        ])->assertCreated()->assertJsonPath('block.image', '')->assertJsonPath('block.href', '');
+        ])->assertCreated()->assertJsonPath('block.image', '')->assertJsonPath('block.href', '')->json('block');
+        $second = $this->withToken($token)->postJson("/api/admin/homepage/offer-sets/{$set['id']}/blocks", [
+            'title' => 'Save ৳200', 'body' => 'On your second order', 'cta' => 'EID200', 'hidden' => false,
+        ])->assertCreated()->json('block');
+
+        $this->withToken($token)->postJson("/api/admin/homepage/offer-sets/{$set['id']}/blocks/reorder", [
+            'ids' => [$second['id'], $first['id']],
+        ])->assertOk()->assertJsonPath('0.id', $second['id'])->assertJsonPath('1.id', $first['id']);
+        $this->withToken($token)->getJson('/api/admin/homepage/offer-sets')
+            ->assertOk()->assertJsonPath('0.blocks.0.id', $second['id']);
 
         $this->getJson('/api/homepage/offer-blocks')->assertOk()
             ->assertJsonFragment(['row_type' => 'coupons', 'cta' => 'EID100']);

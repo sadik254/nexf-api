@@ -69,13 +69,20 @@ class Product extends Model
 
     protected function imageVariants(): Attribute
     {
-        return Attribute::get(fn () => [
-            'thumbnail' => $this->variantsForUrl($this->thumbnail),
-            'gallery' => array_map(
-                fn (string $url) => $this->variantsForUrl($url),
-                $this->gallery ?? []
-            ),
-        ]);
+        return Attribute::get(function () {
+            $uploads = app(\App\Services\MediaUploadService::class);
+            $urls = array_values(array_filter([$this->thumbnail, ...($this->gallery ?? [])]));
+
+            // The frontend only receives transformation metadata when every
+            // image is a direct R2 original. Legacy and transformed URLs must
+            // remain untouched by its image loader.
+            if (!$urls || collect($urls)->contains(fn ($url) => !$uploads->isR2Original($url))) return null;
+
+            return [
+                'thumbnail' => $this->variantsForUrl($this->thumbnail),
+                'gallery' => array_map(fn (string $url) => $this->variantsForUrl($url), $this->gallery ?? []),
+            ];
+        });
     }
 
     private function variantsForUrl(?string $url): ?array
