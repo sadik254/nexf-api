@@ -22,6 +22,7 @@ class ProductCategory extends Model
     }
     protected $fillable = [
         'parent_id',
+        'sort_order',
         'name',
         'slug',
         'description',
@@ -34,9 +35,15 @@ class ProductCategory extends Model
         'is_active',
     ];
 
-    protected function casts(): array { return ['is_active' => 'boolean']; }
+    protected function casts(): array { return ['is_active' => 'boolean', 'sort_order' => 'integer']; }
 
     public function parent(): BelongsTo { return $this->belongsTo(self::class, 'parent_id'); }
-    public function children(): HasMany { return $this->hasMany(self::class, 'parent_id')->orderBy('name'); }
+    public function children(): HasMany { return $this->hasMany(self::class, 'parent_id')->orderBy('sort_order')->orderBy('name'); }
+
+    public static function nextSortOrder(?int $parentId): int
+    {
+        $max = static::query()->where('parent_id', $parentId)->max('sort_order');
+        return $max === null ? 0 : $max + 1;
+    }
     public function products(): HasMany { return $this->hasMany(Product::class, 'category_id'); }
 }

@@ -440,6 +440,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {
     Route::get('/product-categories', [ProductCategoryController::class, 'index'])->middleware('perm:taxonomy.manage');
     Route::post('/product-categories', [ProductCategoryController::class, 'store'])->middleware('perm:taxonomy.manage');
     Route::post('/product-categories/taxonomy', [ProductCategoryController::class, 'saveTaxonomy'])->middleware('perm:taxonomy.manage');
+    Route::post('/product-categories/reorder', [ProductCategoryController::class, 'reorder'])->middleware('perm:taxonomy.manage');
     Route::post('/product-categories/{category}/taxonomy', [ProductCategoryController::class, 'saveTaxonomy'])->middleware('perm:taxonomy.manage');
     Route::get('/product-categories/{category}', [ProductCategoryController::class, 'show'])->middleware('perm:taxonomy.manage');
     Route::post('/product-categories/{category}', [ProductCategoryController::class, 'update'])->middleware('perm:taxonomy.manage');

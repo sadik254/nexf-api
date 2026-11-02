@@ -16,8 +16,8 @@ class ProductCategoryController extends Controller
         $perPage = max(1, min($perPage, 100));
 
         $query = ProductCategory::query()->whereNull('parent_id')
-            ->with(['children' => fn ($q) => $q->withCount('products')->orderBy('name')])
-            ->withCount('products')->orderBy('name');
+            ->with(['children' => fn ($q) => $q->withCount('products')->orderBy('sort_order')->orderBy('name')])
+            ->withCount('products')->orderBy('sort_order')->orderBy('name');
         if ($request->filled('search')) {
             $search = (string) $request->query('search');
             $query->where(fn ($q) => $q->where('name', 'like', "%{$search}%")
@@ -30,8 +30,8 @@ class ProductCategoryController extends Controller
     {
         $activeProducts = fn ($q) => $q->where('status', 'active');
         $categories = ProductCategory::query()->whereNull('parent_id')->where('is_active', true)
-            ->with(['children' => fn ($q) => $q->where('is_active', true)->withCount(['products' => $activeProducts])->orderBy('name')])
-            ->withCount(['products' => $activeProducts])->orderBy('name')->get();
+            ->with(['children' => fn ($q) => $q->where('is_active', true)->withCount(['products' => $activeProducts])->orderBy('sort_order')->orderBy('name')])
+            ->withCount(['products' => $activeProducts])->orderBy('sort_order')->orderBy('name')->get();
         $categories->each(fn ($category) => $category->setAttribute(
             'total_products_count',
             $category->products_count + $category->children->sum('products_count')
@@ -53,7 +53,7 @@ class ProductCategoryController extends Controller
         if ($existing) return response()->json($existing->load('children')->loadCount('products'));
         $category = ProductCategory::create([
             'name' => $data['name'], 'slug' => $this->uniqueSlug($data['name']),
-            'parent_id' => $parentId, 'is_active' => true,
+            'parent_id' => $parentId, 'is_active' => true, 'sort_order' => ProductCategory::nextSortOrder($parentId),
         ]);
         return response()->json($category->load('children')->loadCount('products'), 201);
     }
@@ -79,6 +79,7 @@ class ProductCategoryController extends Controller
         $category = ProductCategory::create([
             'name' => $data['name'],
             'parent_id' => $data['parent_id'] ?? null,
+            'sort_order' => ProductCategory::nextSortOrder($data['parent_id'] ?? null),
             'slug' => $slug,
             'description' => $data['description'] ?? null,
             'image' => $data['image'] ?? null,
@@ -187,17 +188,17 @@ class ProductCategoryController extends Controller
             if ($category) {
                 $category = ProductCategory::whereKey($category->id)->lockForUpdate()->firstOrFail();
                 abort_unless($category->parent_id === null, 422, 'Edit sub-categories through their parent.');
-            } else $category = new ProductCategory(['is_active' => true]);
+            } else $category = new ProductCategory(['is_active' => true, 'sort_order' => ProductCategory::nextSortOrder(null)]);
             $category->fill(['name' => $data['name'], 'slug' => $this->uniqueSlug($data['name'], $category->id)])->save();
             $children = $category->children()->lockForUpdate()->get();
             $kept = [];
-            foreach ($data['subcategories'] as $sub) {
+            foreach (array_values($data['subcategories']) as $position => $sub) {
                 if (!empty($sub['id'])) {
                     $child = $children->firstWhere('id', $sub['id']);
                     if (!$child) throw \Illuminate\Validation\ValidationException::withMessages(['subcategories' => 'A sub-category does not belong to this category. Reload and try again.']);
                 } else $child = new ProductCategory(['parent_id' => $category->id, 'is_active' => true]);
                 $name = trim($sub['name']);
-                $child->fill(['name' => $name, 'slug' => $this->uniqueSlug($name, $child->id)])->save();
+                $child->fill(['name' => $name, 'slug' => $this->uniqueSlug($name, $child->id), 'sort_order' => $position])->save();
                 $kept[] = $child->id;
             }
             foreach ($children->whereNotIn('id', $kept) as $removed) {
@@ -208,6 +209,27 @@ class ProductCategoryController extends Controller
             return $category->fresh(['children'])->loadCount('products');
         });
         return response()->json(['category' => $saved]);
+    }
+
+    public function reorder(Request $request): JsonResponse
+    {
+        $data = $request->validate(['ids' => ['present', 'array', 'max:200'], 'ids.*' => ['required', 'integer']]);
+        $message = 'Send every top-level category once. Reload and try again.';
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($data, $message) {
+            $ids = array_map('intval', $data['ids']);
+            $topLevel = ProductCategory::query()->whereNull('parent_id')->lockForUpdate()->pluck('id')->all();
+            $valid = count($ids) === count(array_unique($ids))
+                && count($ids) === count($topLevel)
+                && !array_diff($ids, $topLevel)
+                && !array_diff($topLevel, $ids);
+            if (! $valid) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['ids' => [$message]]);
+            }
+            foreach ($ids as $position => $id) ProductCategory::whereKey($id)->update(['sort_order' => $position]);
+        });
+
+        return response()->json(['message' => 'Category order saved.']);
     }
 
     private function validateParent(?int $parentId): void
