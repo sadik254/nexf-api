@@ -26,7 +26,7 @@ class HomepageLayoutController extends Controller
     public function update(Request $request): JsonResponse
     {
         $admin = $request->user();
-        abort_unless($admin instanceof Admin && $admin->role === 'super_admin', 403);
+        abort_unless($admin instanceof Admin, 403);
         $data = $request->validate([
             'sections' => ['required', 'array', 'max:30'],
             'sections.*.id' => ['required', 'string', 'max:60', 'distinct'],

@@ -24,7 +24,7 @@ class SiteInfoController extends Controller
     public function update(Request $request): JsonResponse
     {
         $admin = $request->user();
-        abort_unless($admin instanceof Admin && $admin->role === 'super_admin', 403);
+        abort_unless($admin instanceof Admin, 403);
         $data = $request->validate([
             'name' => ['required', 'string', 'max:150'],
             'blurb' => ['required', 'string', 'max:2000'],

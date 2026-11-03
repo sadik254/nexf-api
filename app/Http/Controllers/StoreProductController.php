@@ -121,7 +121,7 @@ class StoreProductController extends Controller
 
     public function previewHomepageProducts(Request $request): JsonResponse
     {
-        abort_unless($request->user() instanceof \App\Models\Admin && $request->user()->role === 'super_admin', 403);
+        abort_unless($request->user() instanceof \App\Models\Admin, 403);
         $data = $request->validate([
             'type' => ['required', 'in:trending,collection,featured'],
             'tab' => ['sometimes', 'in:top,new'], 'topSource' => ['sometimes', 'in:auto,picked'], 'newSource' => ['sometimes', 'in:auto,picked'],

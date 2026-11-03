@@ -30,7 +30,7 @@ class ManualPaymentController extends Controller
 
     public function saveAccounts(Request $request): JsonResponse
     {
-        abort_unless($request->user() instanceof Admin && $request->user()->role === 'super_admin', 403);
+        abort_unless($request->user() instanceof Admin, 403);
 
         $data = $request->validate([
             'accounts' => ['present', 'array', 'max:5'],

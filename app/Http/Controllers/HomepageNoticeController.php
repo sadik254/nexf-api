@@ -62,6 +62,6 @@ class HomepageNoticeController extends Controller
     private function authorizeManager(Request $request): void
     {
         $admin = $request->user();
-        abort_unless($admin instanceof Admin && $admin->role === 'super_admin', 403);
+        abort_unless($admin instanceof Admin, 403);
     }
 }

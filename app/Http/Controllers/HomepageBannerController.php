@@ -101,7 +101,7 @@ class HomepageBannerController extends Controller
 
     private function authorizeAdmin(Request $request): void
     {
-        abort_unless($request->user() instanceof Admin && $request->user()->role === 'super_admin', 403, 'Forbidden.');
+        abort_unless($request->user() instanceof Admin, 403, 'Forbidden.');
     }
 
     /** The storefront slider must always retain an active slide. */

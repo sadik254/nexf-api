@@ -116,6 +116,6 @@ class PaymentMethodController extends Controller
 
     private function isSuperAdmin($actor): bool
     {
-        return $actor instanceof Admin && $actor->role === 'super_admin';
+        return $actor instanceof Admin;
     }
 }

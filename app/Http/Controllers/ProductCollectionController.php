@@ -136,6 +136,6 @@ class ProductCollectionController extends Controller
 
     private function authorizeWrite(Admin|Seller $actor): void
     {
-        abort_if($actor instanceof Admin && $actor->role !== 'super_admin', 403);
+        abort_unless($actor instanceof Admin || $actor instanceof Seller, 403);
     }
 }

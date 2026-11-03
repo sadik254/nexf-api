@@ -57,5 +57,5 @@ class ContentReportController extends Controller
         });
         return $report;
     }
-    private function admin(Request $request): Admin { $admin=$request->user(); abort_unless($admin instanceof Admin && $admin->role==='super_admin',403); return $admin; }
+    private function admin(Request $request): Admin { $admin=$request->user(); abort_unless($admin instanceof Admin,403); return $admin; }
 }

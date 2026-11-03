@@ -87,7 +87,7 @@ class CatalogTermController extends Controller
     private function authorizeManager(Request $request): void
     {
         $admin = $request->user();
-        abort_unless($admin instanceof Admin && $admin->role === 'super_admin', 403);
+        abort_unless($admin instanceof Admin, 403);
     }
 
     private function uniqueSlug(string $model, string $name, ?int $ignoreId = null): string

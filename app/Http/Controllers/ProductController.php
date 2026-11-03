@@ -56,7 +56,7 @@ class ProductController extends Controller
         $perPage = (int) $request->query('per_page', 25);
         $perPage = max(1, min($perPage, 100));
 
-        if (!$actor instanceof Admin || $actor->role !== 'super_admin') {
+        if (!$actor instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -98,7 +98,7 @@ class ProductController extends Controller
     public function showSellerProductForAdmin(Seller $seller, Product $product, Request $request): JsonResponse
     {
         $actor = $request->user();
-        if (!$actor instanceof Admin || $actor->role !== 'super_admin') {
+        if (!$actor instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -130,7 +130,7 @@ class ProductController extends Controller
     public function updateSellerProductForSuperAdmin(Seller $seller, Product $product, Request $request): JsonResponse
     {
         $actor = $request->user();
-        if (!$actor instanceof Admin || $actor->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
+        if (!$actor instanceof Admin) return response()->json(['message' => 'Forbidden.'], 403);
         if ((int) $product->seller_id !== (int) $seller->id) return response()->json(['message' => 'Product does not belong to seller.'], 422);
         return $this->update($request, $product, true);
     }
@@ -138,7 +138,7 @@ class ProductController extends Controller
     public function destroySellerProductForSuperAdmin(Seller $seller, Product $product, Request $request): JsonResponse
     {
         $actor = $request->user();
-        if (!$actor instanceof Admin || $actor->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
+        if (!$actor instanceof Admin) return response()->json(['message' => 'Forbidden.'], 403);
         if ((int) $product->seller_id !== (int) $seller->id) return response()->json(['message' => 'Product does not belong to seller.'], 422);
         if ($product->orderItems()->exists()) return response()->json(['message' => 'Products referenced by orders cannot be deleted. Mark inactive instead.'], 422);
         $product->delete();

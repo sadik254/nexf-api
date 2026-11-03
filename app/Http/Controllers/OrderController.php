@@ -184,20 +184,20 @@ class OrderController extends Controller
 
     public function indexSellerOrdersForSuperAdmin(Request $request, Seller $seller): JsonResponse
     {
-        if (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
+        if (!$request->user() instanceof Admin) return response()->json(['message' => 'Forbidden.'], 403);
         return response()->json($this->paginateOrderList(Order::whereHas('items', fn ($q) => $q->where('seller_id', $seller->id))->with(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => $this->sellerGroups($seller->id)])->latest(), $request, $seller->id));
     }
 
     public function showSellerOrderForSuperAdmin(Request $request, Seller $seller, Order $order): JsonResponse
     {
-        if (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
+        if (!$request->user() instanceof Admin) return response()->json(['message' => 'Forbidden.'], 403);
         if (!$order->items()->where('seller_id', $seller->id)->exists()) return response()->json(['message' => 'Order does not contain items from this seller.'], 404);
         return response()->json($this->withCustomerHistory($order->load(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => $this->sellerGroups($seller->id), 'paymentMethod', 'shippingMethod', 'coupon'])));
     }
 
     public function cancelSellerOrderForSuperAdmin(Request $request, Seller $seller, Order $order): JsonResponse
     {
-        if (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin') return response()->json(['message' => 'Forbidden.'], 403);
+        if (!$request->user() instanceof Admin) return response()->json(['message' => 'Forbidden.'], 403);
         if (!$order->items()->where('seller_id', $seller->id)->exists()) return response()->json(['message' => 'Order does not contain items from this seller.'], 404);
         $order = $this->cancelOrder($order, $request->user(), 'admin');
         $this->notifications->cancelled($order);
@@ -564,7 +564,7 @@ class OrderController extends Controller
 
     public function fulfillSellerItemForSuperAdmin(Request $request, Seller $seller, Order $order, OrderItem $item): JsonResponse
     {
-        if (!$request->user() instanceof Admin || $request->user()->role !== 'super_admin') {
+        if (!$request->user() instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
         if ((int) $item->order_id !== (int) $order->id || (int) $item->seller_id !== (int) $seller->id) {
