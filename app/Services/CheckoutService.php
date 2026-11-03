@@ -52,7 +52,7 @@ class CheckoutService
                     $available = min($available, intdiv((int) $pieceQuote['available_quantity'], max(1, $component['quantity'])));
                     $cost = round($cost + (float) $pieceQuote['cost'], 2);
                 }
-                $quote = ['available_quantity' => $available === PHP_INT_MAX ? 0 : $available, 'cost' => $cost, 'subtotal' => round((float) $resolvedBundle['bundle']->price * $quantity, 2)];
+                $quote = ['available_quantity' => $available === PHP_INT_MAX ? 0 : $available, 'cost' => $cost, 'subtotal' => round((float) $resolvedBundle['unitPrice'] * $quantity, 2)];
             } else {
                 $variationId = $itemData['variation_id'] ?? null;
                 if ($product->product_type === 'variable' && !$variationId) throw ValidationException::withMessages(['items' => ["A variation must be selected for {$product->name}."]]);
@@ -62,7 +62,7 @@ class CheckoutService
                 $quote = $variation ? $this->inventory->previewVariation($variation, $quantity, $stockRequest) : $this->inventory->previewProduct($product, $quantity, $stockRequest);
             }
             $subtotal = round($subtotal + $quote['subtotal'], 2);
-            $items[] = ['product' => $product, 'variation' => $variation, 'quantity' => $quantity, 'quote' => $quote, 'bundle' => $resolvedBundle['bundle'] ?? null, 'bundle_components' => $resolvedBundle['components'] ?? []];
+            $items[] = ['product' => $product, 'variation' => $variation, 'quantity' => $quantity, 'quote' => $quote, 'bundle' => $resolvedBundle['bundle'] ?? null, 'bundle_components' => $resolvedBundle['components'] ?? [], 'bundle_label' => $resolvedBundle['label'] ?? null, 'bundle_unit_price' => $resolvedBundle['unitPrice'] ?? null];
         }
 
         $shipping = $this->storeShipping->quote(array_map(fn ($item) => [
@@ -158,7 +158,7 @@ class CheckoutService
                     $available = min($available, intdiv((int) $pieceQuote['available_quantity'], max(1, $component['quantity'])));
                     $cost = round($cost + (float) $pieceQuote['cost'], 2);
                 }
-                $quote = ['available_quantity' => $available === PHP_INT_MAX ? 0 : $available, 'cost' => $cost, 'subtotal' => round((float) $resolvedBundle['bundle']->price * $quantity, 2)];
+                $quote = ['available_quantity' => $available === PHP_INT_MAX ? 0 : $available, 'cost' => $cost, 'subtotal' => round((float) $resolvedBundle['unitPrice'] * $quantity, 2)];
             } else {
                 $variationId = $item['variation_id'] ?? null;
                 if ($product->product_type === 'variable' && !$variationId) throw ValidationException::withMessages(['items' => ["Select a variation for {$product->name}."]]);
@@ -168,7 +168,7 @@ class CheckoutService
                 $quote = $variation ? $this->inventory->previewVariation($variation, $quantity) : $this->inventory->previewProduct($product, $quantity);
             }
             $subtotal = round($subtotal + $quote['subtotal'], 2);
-            $items[] = compact('product', 'variation', 'quantity', 'quote') + ['bundle' => $resolvedBundle['bundle'] ?? null, 'bundle_components' => $resolvedBundle['components'] ?? []];
+            $items[] = compact('product', 'variation', 'quantity', 'quote') + ['bundle' => $resolvedBundle['bundle'] ?? null, 'bundle_components' => $resolvedBundle['components'] ?? [], 'bundle_label' => $resolvedBundle['label'] ?? null, 'bundle_unit_price' => $resolvedBundle['unitPrice'] ?? null];
         }
         $coupon = $this->resolveCoupon($code, $subtotal, $customer, $items);
         $discount = $this->discountForCart($coupon, $items, $subtotal, $shippingAmount);

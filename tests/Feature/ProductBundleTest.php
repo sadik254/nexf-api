@@ -88,7 +88,7 @@ class ProductBundleTest extends TestCase
         ])->assertCreated()->json('order');
 
         $this->assertSame('150.00', $order['items'][0]['line_subtotal']);
-        $this->assertSame('Two-piece set', $order['items'][0]['bundle_label']);
+        $this->assertSame('2 pcs', $order['items'][0]['bundle_label']);
         $this->assertDatabaseHas('product_lots', ['id' => ProductLot::where('variation_id', $red->id)->value('id'), 'quantity_remaining' => 4]);
         $this->assertDatabaseHas('product_lots', ['id' => ProductLot::where('variation_id', $blue->id)->value('id'), 'quantity_remaining' => 4]);
     }
@@ -111,6 +111,33 @@ class ProductBundleTest extends TestCase
             'product_id' => $product->id, 'bundle_id' => $bundle->id,
             'bundle_items' => [['variation_id' => $red->id, 'quantity' => 1], ['variation_id' => $blue->id, 'quantity' => 1]], 'quantity' => 1,
         ]]])->assertOk()->assertJsonPath('discount_amount', 20);
+    }
+
+    public function test_pick_combo_can_include_more_variations_than_its_base_size(): void
+    {
+        $category = ProductCategory::create(['name' => 'Oversized combo category', 'slug' => 'oversized-combo-category']);
+        $product = Product::create(['category_id' => $category->id, 'name' => 'Oversized combo', 'slug' => 'oversized-combo', 'product_type' => 'variable', 'status' => 'active', 'option_groups' => [[
+            'key' => 'colour', 'label' => 'Colour', 'display_type' => 'button', 'values' => [['value' => 'red', 'label' => 'Red'], ['value' => 'blue', 'label' => 'Blue'], ['value' => 'green', 'label' => 'Green']],
+        ]]]);
+        $variations = collect(['red', 'blue', 'green'])->map(fn (string $colour) => ProductVariation::create(['product_id' => $product->id, 'attributes' => ['colour' => $colour], 'default_selling_price' => 100, 'is_active' => true]));
+        foreach ($variations as $variation) ProductLot::create(['variation_id' => $variation->id, 'lot_number' => "MORE-{$variation->id}", 'buying_price' => 30, 'selling_price' => 100, 'quantity' => 5, 'quantity_remaining' => 5]);
+        app(ProductBundleService::class)->replace($product, [['label' => '2 pcs deal', 'mode' => 'pick', 'size' => 2, 'price' => 150]]);
+        $bundle = $product->bundles()->firstOrFail();
+        $pieces = $variations->map(fn (ProductVariation $variation) => ['variation_id' => $variation->id, 'quantity' => 1])->all();
+
+        $resolved = app(ProductBundleService::class)->resolve($product, ['bundle_id' => $bundle->id, 'bundle_items' => $pieces]);
+        $this->assertSame('3 pcs', $resolved['label']);
+        $this->assertSame(225.0, $resolved['unitPrice']);
+
+        $customer = Customer::create(['name' => 'More picks buyer', 'email' => 'more-picks@example.test', 'phone' => '01700000001', 'password' => 'password123']);
+        $payment = PaymentMethod::create(['name' => 'Cash on Delivery', 'code' => 'cod', 'is_active' => true]);
+        $shipping = ShippingMethod::create(['name' => 'Outside Dhaka', 'code' => 'outside_dhaka', 'charge' => 20, 'currency' => 'BDT', 'is_active' => true]);
+        $order = $this->withToken($customer->createToken('test', ['customer:basic'])->plainTextToken)->postJson('/api/customers/orders', [
+            'items' => [['product_id' => $product->id, 'bundle_id' => $bundle->id, 'bundle_items' => $pieces, 'quantity' => 1]],
+            'payment_method_id' => $payment->id, 'shipping_method_id' => $shipping->id, 'shipping_name' => 'More picks buyer', 'shipping_phone' => '01700000001', 'shipping_address' => 'Dhaka',
+        ])->assertCreated()->json('order');
+        $this->assertSame('3 pcs', $order['items'][0]['bundle_label']);
+        $this->assertSame('225.00', $order['items'][0]['line_subtotal']);
     }
 
     private function simpleProduct(): Product

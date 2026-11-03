@@ -74,7 +74,9 @@ class ProductBundleService
         $components = [];
         if ($bundle->mode === 'pick') {
             $rows = array_values($line['bundle_items'] ?? []);
-            if (count($rows) !== (int) $bundle->size) throw ValidationException::withMessages(['items' => ["Choose exactly {$bundle->size} different variations for this combo."]]);
+            $activeCount = $product->variations()->where('is_active', true)->count();
+            if (count($rows) < (int) $bundle->size) throw ValidationException::withMessages(['items' => ["Choose at least {$bundle->size} different variations for this combo."]]);
+            if (count($rows) > $activeCount) throw ValidationException::withMessages(['items' => ['Choose no more than the available variations for this combo.']]);
             $seen = [];
             foreach ($rows as $row) {
                 $id = (int) ($row['variation_id'] ?? 0);
@@ -89,7 +91,14 @@ class ProductBundleService
                 $components[] = ['variation' => $this->variationForAttributes($product, $item->attributes), 'quantity' => (int) $item->quantity];
             }
         }
-        return compact('bundle', 'components');
+        $pieceCount = array_sum(array_map(fn (array $component) => (int) $component['quantity'], $components));
+        $unitPrice = $bundle->mode === 'pick'
+            ? round(((float) $bundle->price / max(1, (int) $bundle->size)) * $pieceCount, 2)
+            : (float) $bundle->price;
+
+        return compact('bundle', 'components', 'pieceCount', 'unitPrice') + [
+            'label' => $bundle->mode === 'pick' ? "{$pieceCount} pcs" : $bundle->label,
+        ];
     }
 
     private function variationForAttributes(Product $product, ?array $attributes): ?ProductVariation

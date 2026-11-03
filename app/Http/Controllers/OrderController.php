@@ -128,7 +128,7 @@ class OrderController extends Controller
                 'name' => $item['product']->name, 'quantity' => $item['quantity'],
                 'available_quantity' => $item['quote']['available_quantity'], 'line_subtotal' => $item['quote']['subtotal'],
                 'bundle_id' => $item['bundle']?->id,
-                'bundle_label' => $item['bundle']?->label,
+                'bundle_label' => $item['bundle_label'] ?? $item['bundle']?->label,
             ])->values(),
             'payment_method' => $preview['paymentMethod'], 'shipping_method' => $preview['shippingMethod'],
             'coupon' => $preview['coupon'], 'subtotal' => $preview['subtotal'],
@@ -1246,6 +1246,8 @@ class OrderController extends Controller
                 $variation = null;
                 $bundle = $preview['items'][$lineIndex]['bundle'] ?? null;
                 $bundleComponents = $preview['items'][$lineIndex]['bundle_components'] ?? [];
+                $bundleUnitPrice = (float) ($preview['items'][$lineIndex]['bundle_unit_price'] ?? $bundle?->price ?? 0);
+                $bundleLabel = $preview['items'][$lineIndex]['bundle_label'] ?? $bundle?->label;
 
                 if (!$bundle && $product->product_type === 'variable' && empty($itemData['variation_id'])) {
                     throw ValidationException::withMessages([
@@ -1259,7 +1261,7 @@ class OrderController extends Controller
                 }
 
                 if ($bundle) {
-                    $result = $this->consumeBundle($product, $bundleComponents, $quantity, $actor, $order->stock_request, $order->id, (float) $bundle->price);
+                    $result = $this->consumeBundle($product, $bundleComponents, $quantity, $actor, $order->stock_request, $order->id, $bundleUnitPrice);
                 } elseif (!empty($itemData['variation_id'])) {
                     $variation = ProductVariation::query()
                         ->where('product_id', $product->id)
@@ -1281,7 +1283,7 @@ class OrderController extends Controller
                         : $this->inventory->consumeProduct($product, $quantity, $actor, 'order_sale', ['order_id' => $order->id]);
                 }
 
-                $lineSubtotal = $bundle ? round((float) $bundle->price * $quantity, 2) : (float) $result['totals']['revenue'];
+                $lineSubtotal = $bundle ? round($bundleUnitPrice * $quantity, 2) : (float) $result['totals']['revenue'];
                 $lineCost = (float) $result['totals']['cost'];
                 $lineProfit = round($lineSubtotal - $lineCost, 2);
                 $unitSellingPrice = round($lineSubtotal / $quantity, 2);
@@ -1300,7 +1302,7 @@ class OrderController extends Controller
                     'variation_attributes' => $variation?->attributes,
                     'variation_labels' => $this->variationLabels($product, $variation),
                     'variation_image' => $variation?->image_url,
-                    'bundle_label' => $bundle?->label,
+                    'bundle_label' => $bundleLabel,
                     'bundle_items' => $bundle ? $this->bundleSnapshot($product, $bundleComponents) : null,
                     'quantity' => $quantity,
                     'unit_selling_price' => $unitSellingPrice,
