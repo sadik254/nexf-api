@@ -123,23 +123,50 @@
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;font-size:14px;line-height:20px;color:#52525b;">
     @if ($audience === 'seller')
+        @php
+            // Use the same parcel values available to the seller's order page.
+            // A shared-delivery parcel can carry this seller's lines while naming
+            // another store as the delivery-group owner.
+            $storeGroups = $order->storeGroups()
+                ->where(fn ($query) => $query->where('seller_id', $sellerId)->orWhereHas('items', fn ($items) => $items->where('seller_id', $sellerId)))
+                ->get();
+            $storeGroup = $storeGroups->first(fn ($group) => (int) $group->seller_id === (int) $sellerId) ?? $storeGroups->first();
+            $storeSubtotal = round((float) $items->sum('line_subtotal'), 2);
+            $storeShipping = (float) ($storeGroup?->shipping_charge ?? 0);
+            $storeMethod = $storeGroup?->shipping_method_name ?? $order->shipping_method_name;
+            $storeDiscount = (float) ($storeGroup?->discount_share ?? 0);
+            $storeTotal = round($storeSubtotal + $storeShipping - $storeDiscount, 2);
+            $storePrepaid = min($storeTotal, round((float) $storeGroups->sum('prepaid_amount'), 2));
+        @endphp
+        <tr><td style="padding:10px 0 3px;">Subtotal</td><td align="right" style="padding:10px 0 3px;">{{ $money($storeSubtotal) }}</td></tr>
+        <tr><td style="padding:3px 0;">Delivery{{ $storeMethod ? ' ('.$storeMethod.')' : '' }}</td><td align="right" style="padding:3px 0;">{{ $storeShipping > 0 ? $money($storeShipping) : 'Free' }}</td></tr>
+        @if ($storeDiscount > 0)
+            <tr><td style="padding:3px 0;color:#047857;">{{ $order->coupon_code ? 'Coupon ('.$order->coupon_code.')' : 'Discount' }}</td><td align="right" style="padding:3px 0;color:#047857;">−{{ $money($storeDiscount) }}</td></tr>
+        @endif
+        @if ($storePrepaid > 0)
+            <tr><td style="padding:3px 0;color:#047857;">Paid in advance</td><td align="right" style="padding:3px 0;color:#047857;">−{{ $money($storePrepaid) }}</td></tr>
+        @endif
         <tr>
-            <td style="padding:10px 0 0;font-size:16px;line-height:24px;font-weight:600;color:#09090b;">Your items</td>
-            <td align="right" style="padding:10px 0 0;font-size:16px;line-height:24px;font-weight:600;color:#09090b;">{{ $money($items->sum('line_subtotal')) }}</td>
+            <td style="padding:10px 0 0;border-top:1px solid #e4e4e7;font-size:16px;line-height:24px;font-weight:600;color:#09090b;">Total</td>
+            <td align="right" style="padding:10px 0 0;border-top:1px solid #e4e4e7;font-size:16px;line-height:24px;font-weight:600;color:#09090b;">{{ $money($storeTotal - $storePrepaid) }}</td>
         </tr>
     @else
         @if ($order->subtotal !== null)
             <tr><td style="padding:10px 0 3px;">Subtotal</td><td align="right" style="padding:10px 0 3px;">{{ $money($order->subtotal) }}</td></tr>
         @endif
         @if ($order->shipping_charge !== null)
-            <tr><td style="padding:3px 0;">Shipping{{ $order->shipping_method_name ? ' ('.$order->shipping_method_name.')' : '' }}</td><td align="right" style="padding:3px 0;">{{ (float) $order->shipping_charge > 0 ? $money($order->shipping_charge) : 'Free' }}</td></tr>
+            <tr><td style="padding:3px 0;">Delivery{{ $order->shipping_method_name ? ' ('.$order->shipping_method_name.')' : '' }}</td><td align="right" style="padding:3px 0;">{{ (float) $order->shipping_charge > 0 ? $money($order->shipping_charge) : 'Free' }}</td></tr>
         @endif
         @if ((float) $order->discount_total > 0)
-            <tr><td style="padding:3px 0;">Discount{{ $order->coupon_code ? ' ('.$order->coupon_code.')' : '' }}</td><td align="right" style="padding:3px 0;color:#047857;">−{{ $money($order->discount_total) }}</td></tr>
+            <tr><td style="padding:3px 0;color:#047857;">{{ $order->coupon_code ? 'Coupon ('.$order->coupon_code.')' : 'Discount' }}</td><td align="right" style="padding:3px 0;color:#047857;">−{{ $money($order->discount_total) }}</td></tr>
+        @endif
+        @php($walletPart = (float) $order->wallet_amount > 0 && (float) $order->wallet_amount < (float) $order->total ? (float) $order->wallet_amount : 0)
+        @if ($walletPart > 0)
+            <tr><td style="padding:3px 0;color:#047857;">NEXF Balance</td><td align="right" style="padding:3px 0;color:#047857;">−{{ $money($walletPart) }}</td></tr>
         @endif
         <tr>
             <td style="padding:10px 0 0;border-top:1px solid #e4e4e7;font-size:16px;line-height:24px;font-weight:600;color:#09090b;">Total</td>
-            <td align="right" style="padding:10px 0 0;border-top:1px solid #e4e4e7;font-size:16px;line-height:24px;font-weight:600;color:#09090b;">{{ $money($order->total) }}</td>
+            <td align="right" style="padding:10px 0 0;border-top:1px solid #e4e4e7;font-size:16px;line-height:24px;font-weight:600;color:#09090b;">{{ $money((float) $order->total - $walletPart) }}</td>
         </tr>
     @endif
     </table>

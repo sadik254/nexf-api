@@ -15,6 +15,7 @@ use App\Models\ProductLot;
 use App\Models\Seller;
 use App\Models\ShippingMethod;
 use App\Models\OrderItem;
+use App\Models\OrderStoreGroup;
 use App\Mail\OrderNotificationMail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
@@ -37,6 +38,32 @@ class OrderLifecycleTest extends TestCase
         $this->travel(1)->hours();$order->update(['notes'=>'Changed note']);$item->update(['tracking_number'=>'Local reference']);
         $this->assertTrue($order->fresh()->payment_paid_at->equalTo($paid));$this->assertTrue($item->fresh()->confirmed_at->equalTo($confirmed));
         $this->travelBack();
+    }
+
+    public function test_order_emails_show_the_same_payable_and_store_parcel_totals(): void
+    {
+        $seller = Seller::create([
+            'seller_name' => 'Email seller', 'email' => 'email-seller@example.test', 'store_name' => 'Email Store', 'store_slug' => 'email-store',
+            'kyc_type' => 'nid', 'kyc_number' => 'email-kyc', 'kyc_document_url' => 'https://example.test/kyc', 'product_category' => 'General',
+            'status' => 'approved', 'is_active' => true, 'password' => 'password123',
+        ]);
+        $order = \App\Models\Order::create([
+            'order_number' => 'EMAIL-TOTALS', 'status' => 'pending', 'payment_status' => 'unpaid', 'subtotal' => 3099,
+            'shipping_charge' => 140, 'shipping_method_name' => 'Inside Dhaka', 'coupon_code' => 'NEW50', 'discount_total' => 50,
+            'wallet_amount' => 40, 'total' => 3189, 'shipping_name' => 'Buyer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka',
+        ]);
+        OrderItem::create(['order_id' => $order->id, 'seller_id' => $seller->id, 'product_name' => 'Store item', 'quantity' => 1, 'unit_selling_price' => 999, 'unit_buying_price' => 500, 'line_subtotal' => 999, 'line_cost' => 500, 'line_profit' => 499]);
+        OrderStoreGroup::create(['order_id' => $order->id, 'number' => 1, 'seller_id' => $seller->id, 'ships_by' => 'seller', 'status' => 'pending', 'store_name' => $seller->store_name, 'subtotal' => 999, 'shipping_method_name' => 'Inside Dhaka', 'shipping_charge' => 70, 'discount_share' => 20, 'prepaid_amount' => 30, 'cod_amount' => 1019]);
+
+        $customerHtml = (new OrderNotificationMail($order, 'Order', 'Received'))->render();
+        $this->assertStringContainsString('Delivery (Inside Dhaka)', $customerHtml);
+        $this->assertStringContainsString('Coupon (NEW50)', $customerHtml);
+        $this->assertStringContainsString('NEXF Balance', $customerHtml);
+        $this->assertStringContainsString('৳3,149.00', $customerHtml);
+
+        $sellerHtml = (new OrderNotificationMail($order, 'Order', 'Received', 'seller', $seller->id))->render();
+        $this->assertStringContainsString('Paid in advance', $sellerHtml);
+        $this->assertStringContainsString('৳1,019.00', $sellerHtml);
     }
 
     public function test_coupon_validation_reports_the_exact_unavailable_reason(): void
