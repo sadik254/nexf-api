@@ -282,6 +282,10 @@ class CouponController extends Controller
             'items' => ['sometimes', 'array', 'min:1'],
             'items.*.product_id' => ['required_with:items', 'integer', 'exists:products,id'],
             'items.*.variation_id' => ['nullable', 'integer', 'exists:product_variations,id'],
+            'items.*.bundle_id' => ['nullable', 'integer', 'exists:product_bundles,id'],
+            'items.*.bundle_items' => ['nullable', 'array', 'max:100'],
+            'items.*.bundle_items.*.variation_id' => ['nullable', 'integer', 'exists:product_variations,id'],
+            'items.*.bundle_items.*.quantity' => ['required_with:items.*.bundle_items', 'integer', 'min:1'],
             'items.*.quantity' => ['required_with:items', 'integer', 'min:1'],
             'shipping_amount' => ['sometimes', 'numeric', 'min:0'],
         ]);

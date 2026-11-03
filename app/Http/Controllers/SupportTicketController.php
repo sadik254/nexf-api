@@ -80,7 +80,11 @@ class SupportTicketController extends Controller
 
     public function show(Request $request, SupportTicket $ticket): JsonResponse
     {
-        $this->authorizeTicket($this->actor($request), $ticket);
+        $actor = $this->actor($request);
+        $this->authorizeTicket($actor, $ticket);
+        if (($actor instanceof Admin || $actor instanceof Seller) && !$request->boolean('peek')) {
+            $ticket->update(['store_read_at' => now()]);
+        }
         return response()->json($ticket->load(['customer:id,name,email', 'seller:id,store_name,store_slug', 'reseller:id,name,email', 'order:id,order_number', 'messages']));
     }
 
@@ -194,6 +198,7 @@ class SupportTicketController extends Controller
                 'author_id' => $staff?->id ?? $actor->id, 'author_name' => $staff?->name, 'body' => trim($data['body']), 'attachments' => $data['attachments'] ?? [],
             ]);
             $ticket->update(['status' => 'open', 'resolved_at' => null]
+                + ($actor instanceof Customer ? ['store_read_at' => null] : [])
                 + ($actor instanceof Seller && !$ticket->seller_responded_at ? ['seller_responded_at' => now()] : []));
         });
         app(\App\Services\ConsoleNotificationService::class)->support($ticket->fresh('order:id,order_number'), 'reply');
@@ -205,9 +210,8 @@ class SupportTicketController extends Controller
     {
         $actor = $this->actor($request);
         $this->authorizeTicket($actor, $ticket);
-        abort_if($actor instanceof Customer, 403);
         $ticket->update(['status' => 'resolved', 'resolved_at' => now()]);
-        app(\App\Services\CustomerNotificationService::class)->supportResolved($ticket);
+        if (!($actor instanceof Customer)) app(\App\Services\CustomerNotificationService::class)->supportResolved($ticket);
         return $this->show($request, $ticket);
     }
 

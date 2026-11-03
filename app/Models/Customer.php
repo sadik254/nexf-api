@@ -6,6 +6,7 @@ use Database\Factories\CustomerFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -66,6 +67,7 @@ class Customer extends Authenticatable
     {
         return $this->hasMany(Order::class);
     }
+    public function defaultAddress(): HasOne { return $this->hasOne(CustomerAddress::class)->where('is_default', true); }
     public function reseller(): BelongsTo { return $this->belongsTo(Reseller::class); }
     public function referrer(): BelongsTo { return $this->belongsTo(self::class, 'referred_by_customer_id'); }
 }

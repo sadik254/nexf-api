@@ -24,9 +24,19 @@ class ConsoleController extends Controller
     {
         $actor = $request->user();
         abort_unless($actor instanceof Admin || $actor instanceof Seller, 403);
+        $permissionActor = $request->attributes->get('seller_staff') ?? $actor;
         $sellerId = $actor instanceof Seller ? $actor->id : null;
         $scope = fn ($query) => $query->when($sellerId !== null, fn ($q) => $q->where('seller_id', $sellerId));
         $support = $scope(SupportTicket::query())->where('status', 'open')->count();
+        $supportUnread = $scope(SupportTicket::query())->where('status', 'open')
+            ->whereHas('messages', fn ($messages) => $messages->where('author_type', 'customer')
+                ->where(fn ($unread) => $unread->whereNull('support_tickets.store_read_at')
+                    ->orWhereColumn('support_messages.created_at', '>', 'support_tickets.store_read_at')))->count();
+        $orders = $permissionActor->hasPermission('orders.view') || $permissionActor->hasPermission('orders.manage')
+            ? Order::query()->where('status', 'pending')
+                ->when($sellerId !== null, fn ($query) => $query->visibleToSeller()->whereHas('items', fn ($items) => $items->where('seller_id', $sellerId)))
+                ->count()
+            : 0;
         $returns = $actor instanceof Admin && !in_array($actor->role, ['super_admin', 'admin'], true)
             ? 0 : $scope(ReturnRequest::query())->whereIn('status', ['requested', 'approved', 'in_transit', 'received'])->count();
         // Admins can browse every conversation but only reply to platform chats.
@@ -58,7 +68,7 @@ class ConsoleController extends Controller
         $offers = $actor instanceof Admin ? SellerPromotion::where('status', 'pending')->count() : 0;
 
         return response()->json([
-            'support' => $support, 'returns' => $returns, 'chats' => $chats,
+            'support' => $support, 'support_unread' => $supportUnread, 'orders' => $orders, 'returns' => $returns, 'chats' => $chats,
             'inventory' => $simple + $variations, 'payments' => $payments,
             'reviews' => $reviews, 'questions' => $questions,
             'reports' => $reports, 'stores' => $stores, 'offers' => $offers,

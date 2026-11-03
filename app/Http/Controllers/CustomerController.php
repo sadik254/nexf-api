@@ -40,6 +40,7 @@ class CustomerController extends Controller
                 ->where('name', 'like', "%{$search}%")
                 ->orWhere('email', 'like', "%{$search}%")
                 ->orWhere('phone', 'like', "%{$search}%")))
+            ->with('defaultAddress:customer_id,line,area,district')
             ->withCount('orders')
             ->withCount(['orders as received_orders_count' => fn ($orders) => $orders->whereIn('status', ['delivered', 'completed'])])
             ->withCount(['orders as failed_orders_count' => fn ($orders) => $orders->whereIn('status', ['cancelled', 'refused'])])
@@ -48,6 +49,7 @@ class CustomerController extends Controller
             ->latest()
             ->paginate($perPage);
 
+        $customers->getCollection()->each(fn (Customer $customer) => $this->appendDefaultAddress($customer));
         return response()->json($customers);
     }
 
@@ -85,7 +87,7 @@ class CustomerController extends Controller
             if ($record->crm_status === 'suspended') $record->tokens()->delete();
             return $record;
         });
-        return response()->json($result, $created ? 201 : 200);
+        return response()->json($this->appendDefaultAddress($result->load('defaultAddress:customer_id,line,area,district')), $created ? 201 : 200);
     }
 
     public function adminDeleteContact(Request $request, Customer $customer): JsonResponse
@@ -102,6 +104,14 @@ class CustomerController extends Controller
     public function show(Customer $customer): JsonResponse
     {
         return response()->json($customer);
+    }
+
+    private function appendDefaultAddress(Customer $customer): Customer
+    {
+        $address = $customer->defaultAddress;
+        $customer->setAttribute('default_address', $address ? ['line' => $address->line, 'area' => $address->area, 'district' => $address->district] : null);
+        $customer->unsetRelation('defaultAddress');
+        return $customer;
     }
 
     public function store(Request $request): JsonResponse

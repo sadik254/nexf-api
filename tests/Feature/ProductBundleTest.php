@@ -7,6 +7,7 @@ use App\Models\ProductCategory;
 use App\Models\ProductVariation;
 use App\Models\ProductLot;
 use App\Models\Customer;
+use App\Models\Coupon;
 use App\Models\PaymentMethod;
 use App\Models\ShippingMethod;
 use App\Services\ProductBundleService;
@@ -39,8 +40,8 @@ class ProductBundleTest extends TestCase
         $product = Product::create(['category_id' => $category->id, 'name' => 'Bundle product', 'slug' => 'bundle-product', 'product_type' => 'variable', 'status' => 'active', 'option_groups' => [[
             'key' => 'colour', 'label' => 'Colour', 'display_type' => 'button', 'values' => [['value' => 'red', 'label' => 'Red'], ['value' => 'blue', 'label' => 'Blue']],
         ]]]);
-        $red = ProductVariation::create(['product_id' => $product->id, 'attributes' => ['colour' => 'red'], 'is_active' => true]);
-        $blue = ProductVariation::create(['product_id' => $product->id, 'attributes' => ['colour' => 'blue'], 'is_active' => true]);
+        $red = ProductVariation::create(['product_id' => $product->id, 'attributes' => ['colour' => 'red'], 'default_selling_price' => 100, 'is_active' => true]);
+        $blue = ProductVariation::create(['product_id' => $product->id, 'attributes' => ['colour' => 'blue'], 'default_selling_price' => 100, 'is_active' => true]);
         $service = app(ProductBundleService::class);
         $service->replace($product, [['label' => 'Two designs', 'mode' => 'pick', 'size' => 2, 'price' => 100]]);
 
@@ -90,6 +91,26 @@ class ProductBundleTest extends TestCase
         $this->assertSame('Two-piece set', $order['items'][0]['bundle_label']);
         $this->assertDatabaseHas('product_lots', ['id' => ProductLot::where('variation_id', $red->id)->value('id'), 'quantity_remaining' => 4]);
         $this->assertDatabaseHas('product_lots', ['id' => ProductLot::where('variation_id', $blue->id)->value('id'), 'quantity_remaining' => 4]);
+    }
+
+    public function test_coupon_validation_keeps_combo_data_and_parent_categories_apply_to_children(): void
+    {
+        $parent = ProductCategory::create(['name' => 'Women', 'slug' => 'coupon-women']);
+        $category = ProductCategory::create(['name' => 'T-shirts', 'slug' => 'coupon-t-shirts', 'parent_id' => $parent->id]);
+        $product = Product::create(['category_id' => $category->id, 'name' => 'Coupon combo', 'slug' => 'coupon-combo', 'product_type' => 'variable', 'status' => 'active', 'option_groups' => [[
+            'key' => 'colour', 'label' => 'Colour', 'display_type' => 'button', 'values' => [['value' => 'red', 'label' => 'Red'], ['value' => 'blue', 'label' => 'Blue']],
+        ]]]);
+        $red = ProductVariation::create(['product_id' => $product->id, 'attributes' => ['colour' => 'red'], 'default_selling_price' => 100, 'is_active' => true]);
+        $blue = ProductVariation::create(['product_id' => $product->id, 'attributes' => ['colour' => 'blue'], 'default_selling_price' => 100, 'is_active' => true]);
+        foreach ([$red, $blue] as $variation) ProductLot::create(['variation_id' => $variation->id, 'lot_number' => "COUPON-{$variation->id}", 'buying_price' => 30, 'selling_price' => 100, 'quantity' => 5, 'quantity_remaining' => 5]);
+        app(ProductBundleService::class)->replace($product, [['label' => 'Two-piece set', 'mode' => 'pick', 'size' => 2, 'price' => 150]]);
+        $bundle = $product->bundles()->firstOrFail();
+        Coupon::create(['code' => 'WOMEN20', 'discount_kind' => 'products', 'discount_type' => 'fixed', 'discount_value' => 20, 'eligible_category_ids' => [$parent->id], 'is_active' => true]);
+
+        $this->postJson('/api/coupons/validate', ['code' => 'WOMEN20', 'items' => [[
+            'product_id' => $product->id, 'bundle_id' => $bundle->id,
+            'bundle_items' => [['variation_id' => $red->id, 'quantity' => 1], ['variation_id' => $blue->id, 'quantity' => 1]], 'quantity' => 1,
+        ]]])->assertOk()->assertJsonPath('discount_amount', 20);
     }
 
     private function simpleProduct(): Product

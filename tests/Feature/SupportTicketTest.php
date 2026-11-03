@@ -60,6 +60,28 @@ class SupportTicketTest extends TestCase
             ->assertOk()->assertJsonCount(2, 'messages')->assertJsonPath('messages.1.author_type', 'reseller');
     }
 
+    public function test_customer_can_resolve_their_ticket_and_console_reads_are_persisted(): void
+    {
+        $customer = Customer::create(['name' => 'Buyer', 'email' => 'ticket-read-buyer@example.test', 'password' => 'password123']);
+        $admin = Admin::create(['name' => 'Admin', 'email' => 'ticket-read-admin@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $customerToken = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+        $ticketId = $this->withToken($customerToken)->postJson('/api/customers/support-tickets', [
+            'category' => 'Account', 'subject' => 'Please help', 'body' => 'I need help.',
+        ])->assertCreated()->json('id');
+
+        $adminToken = $admin->createToken('test', ['admin'])->plainTextToken;
+        $this->withToken($adminToken)->getJson("/api/admin/support-tickets/{$ticketId}?peek=1")->assertOk();
+        $this->assertDatabaseHas('support_tickets', ['id' => $ticketId, 'store_read_at' => null]);
+
+        $this->withToken($adminToken)->getJson("/api/admin/support-tickets/{$ticketId}")->assertOk();
+        $this->assertDatabaseMissing('support_tickets', ['id' => $ticketId, 'store_read_at' => null]);
+        $this->withToken($customerToken)->postJson("/api/customers/support-tickets/{$ticketId}/messages", ['body' => 'Any update?'])->assertOk();
+        $this->assertDatabaseHas('support_tickets', ['id' => $ticketId, 'store_read_at' => null]);
+
+        $this->withToken($customerToken)->postJson("/api/customers/support-tickets/{$ticketId}/resolve")
+            ->assertOk()->assertJsonPath('status', 'resolved');
+    }
+
     public function test_console_staff_can_open_customer_and_guest_tickets_with_the_right_store_scope(): void
     {
         $customer = Customer::create(['name' => 'Suspended buyer', 'email' => 'suspended-ticket@example.test', 'phone' => '01766666666', 'password' => 'password123', 'crm_status' => 'suspended']);

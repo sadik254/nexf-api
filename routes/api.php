@@ -144,6 +144,7 @@ Route::prefix('customers')->group(function () {
         Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show']);
         Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);
         Route::post('/support-tickets/{ticket}/escalate', [SupportTicketController::class, 'escalate']);
+        Route::post('/support-tickets/{ticket}/resolve', [SupportTicketController::class, 'resolve']);
         Route::post('/support-attachments', [SupportTicketController::class, 'upload']);
         Route::post('/chat-attachments', [SupportTicketController::class, 'upload']);
         Route::get('/chats', [StoreChatController::class, 'index']);

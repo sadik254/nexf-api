@@ -11,6 +11,7 @@ use App\Models\ProductCategory;
 use App\Models\ProductQuestion;
 use App\Models\ProductLot;
 use App\Models\ProductVariation;
+use App\Models\Order;
 use App\Models\Seller;
 use App\Models\SellerPromotion;
 use App\Models\StoreChat;
@@ -79,6 +80,18 @@ class ConsoleDesignApiTest extends TestCase
         $this->withToken($adminToken)->getJson('/api/admin/console-summary')->assertOk()
             ->assertJsonPath('reviews', 2)->assertJsonPath('questions', 2)
             ->assertJsonPath('reports', 1)->assertJsonPath('stores', 1)->assertJsonPath('offers', 1);
+    }
+
+    public function test_summary_includes_pending_orders_and_unread_customer_support(): void
+    {
+        $admin = Admin::create(['name' => 'Summary admin', 'email' => 'summary-admin@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $customer = Customer::create(['name' => 'Summary buyer', 'email' => 'summary-buyer@example.test', 'password' => 'password123']);
+        Order::create(['order_number' => 'SUMMARY-ORDER', 'status' => 'pending', 'subtotal' => 100, 'total' => 100, 'shipping_name' => 'Summary buyer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka']);
+        $ticket = SupportTicket::create(['customer_id' => $customer->id, 'category' => 'Account', 'subject' => 'Unread ticket', 'status' => 'open']);
+        $ticket->messages()->create(['author_type' => 'customer', 'author_id' => $customer->id, 'body' => 'Please read this.']);
+
+        $this->withToken($admin->createToken('test', ['admin'])->plainTextToken)->getJson('/api/admin/console-summary')->assertOk()
+            ->assertJsonPath('orders', 1)->assertJsonPath('support_unread', 1);
     }
 
     public function test_notice_reorder_is_atomic_and_requires_the_complete_list_and_super_admin(): void

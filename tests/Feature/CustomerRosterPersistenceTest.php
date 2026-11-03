@@ -30,6 +30,12 @@ class CustomerRosterPersistenceTest extends TestCase {
   $this->withToken($this->adminToken())->postJson('/api/admin/customers/'.$c->id,['name'=>'Buyer','phone'=>$c->phone,'email'=>'new-contact@example.test','crm_status'=>'active'])->assertOk()->assertJsonPath('email_verified_at',null);
   $this->assertSame(0,$c->tokens()->count());
  }
+ public function test_admin_customer_rows_include_the_address_book_default_address():void {
+  $c=Customer::create(['name'=>'Address Buyer','email'=>'address-buyer@example.test','password'=>'password123']);
+  \App\Models\CustomerAddress::create(['customer_id'=>$c->id,'label'=>'Home','recipient'=>'Address Buyer','phone'=>'01700000000','line'=>'12 Road','area'=>'Uttara','district'=>'Dhaka','is_default'=>true]);
+  $this->withToken($this->adminToken())->getJson('/api/admin/customers')->assertOk()
+   ->assertJsonPath('data.0.default_address.line','12 Road')->assertJsonPath('data.0.default_address.area','Uttara')->assertJsonPath('data.0.default_address.district','Dhaka');
+ }
  public function test_suspended_customer_is_revoked_and_receives_the_consistent_support_response():void {
   $c=Customer::create(['name'=>'Suspended Buyer','email'=>'suspended@example.test','phone'=>'01733333333','password'=>'password123','crm_status'=>'active']);$c->forceFill(['email_verified_at'=>now()])->save();
   $c->createToken('old',['customer:basic']);

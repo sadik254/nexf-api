@@ -7,6 +7,7 @@ use App\Models\CouponRedemption;
 use App\Models\Customer;
 use App\Models\PaymentMethod;
 use App\Models\Product;
+use App\Models\ProductCategory;
 use App\Models\ProductVariation;
 use App\Models\ShippingMethod;
 use Illuminate\Support\Str;
@@ -239,10 +240,25 @@ class CheckoutService
     private function selectedItems(array $items, ?array $productIds, ?array $categoryIds, ?array $collectionIds): array
     {
         if (!$productIds && !$categoryIds && !$collectionIds) return $items;
+        $categoryIds = $this->categoryAndDescendantIds($categoryIds);
         return array_values(array_filter($items, function ($item) use ($productIds, $categoryIds, $collectionIds) {
             $product = $item['product'];
             return ($productIds && in_array($product->id, $productIds, true)) || ($categoryIds && in_array($product->category_id, $categoryIds, true)) || ($collectionIds && $product->collections->contains(fn ($collection) => in_array($collection->id, $collectionIds, true)));
         }));
+    }
+
+    /** A category discount includes every nested category beneath the chosen parent. */
+    private function categoryAndDescendantIds(?array $categoryIds): ?array
+    {
+        if (!$categoryIds) return $categoryIds;
+        $all = collect($categoryIds)->map(fn ($id) => (int) $id)->filter()->unique()->values()->all();
+        $frontier = $all;
+        while ($frontier !== []) {
+            $children = ProductCategory::query()->whereIn('parent_id', $frontier)->pluck('id')->map(fn ($id) => (int) $id)->all();
+            $frontier = array_values(array_diff($children, $all));
+            $all = array_values(array_unique([...$all, ...$frontier]));
+        }
+        return $all;
     }
 
     /** Match the console's Buy X Get Y rules without using one cart unit twice. */
