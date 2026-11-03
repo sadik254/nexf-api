@@ -24,7 +24,7 @@ class ReturnRequestController extends Controller
     {
         $actor = $this->actor($request);
         $data = $request->validate(['status' => ['sometimes', Rule::in(['requested', 'approved', 'rejected', 'returning', 'in_transit', 'received', 'refunded', 'exchanged', 'cancelled'])], 'per_page' => ['sometimes', 'integer', 'min:1', 'max:100']]);
-        $query = ReturnRequest::query()->with(['item:id,order_id,product_name,product_thumbnail,quantity,unit_selling_price', 'order:id,order_number', 'customer:id,name,email', 'seller:id,store_name'])->latest();
+        $query = ReturnRequest::query()->with(['item:id,order_id,product_name,product_thumbnail,variation_image,quantity,unit_selling_price', 'order:id,order_number', 'customer:id,name,email', 'seller:id,store_name'])->latest();
         if ($actor instanceof Customer) $query->where('customer_id', $actor->id);
         if ($actor instanceof Seller) $query->where('seller_id', $actor->id);
         if (isset($data['status'])) $query->where('status', $data['status']);
