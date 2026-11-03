@@ -339,6 +339,7 @@ class StoreProductController extends Controller
             'specifications' => $product->specifications ?? [],
             'specification_tables' => $product->specification_tables ?? [],
             'product_type' => $product->product_type,
+            'audience' => $product->audience,
             'status' => $product->status,
             'thumbnail' => $product->thumbnail,
             'gallery' => $product->gallery,
@@ -445,7 +446,7 @@ class StoreProductController extends Controller
             'status',
             'thumbnail',
             'gallery',
-            'compare_at_price', 'option_groups', 'size_chart_id', 'videos', 'weight_kg',
+            'compare_at_price', 'option_groups', 'size_chart_id', 'audience', 'videos', 'weight_kg',
             'default_selling_price',
             'homepage_trending', 'homepage_new_arrival', 'homepage_featured', 'homepage_sort_order',
         ])->selectSub($this->productAvailableQtySubquery(), 'available_quantity');

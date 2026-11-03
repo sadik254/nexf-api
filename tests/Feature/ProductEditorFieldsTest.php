@@ -25,13 +25,15 @@ class ProductEditorFieldsTest extends TestCase
             'videos' => ['https://example.com/demo.mp4'],
             'weight_kg' => 0.75,
             'shipping_options' => [['label' => 'Inside Dhaka', 'price' => 60]],
+            'audience' => 'women',
         ]);
 
         $this->assertSame('Cotton', $product->specification_tables[0]['rows'][0]['value']);
         $this->assertSame(['https://example.com/demo.mp4'], $product->videos);
         $this->assertEquals(0.75, $product->weight_kg);
         $this->assertSame('Inside Dhaka', $product->shipping_options[0]['label']);
-        $this->assertTrue(\Schema::hasColumns('products', ['specification_tables', 'videos', 'weight_kg', 'shipping_options']));
+        $this->assertSame('women', $product->audience);
+        $this->assertTrue(\Schema::hasColumns('products', ['specification_tables', 'videos', 'weight_kg', 'shipping_options', 'audience']));
     }
 
     public function test_product_description_removes_unsafe_markup(): void
@@ -53,6 +55,19 @@ class ProductEditorFieldsTest extends TestCase
         $this->assertStringNotContainsString('onerror', $media);
         $this->assertStringNotContainsString('autoplay', $media);
         $this->assertStringNotContainsString('javascript:', $media);
+    }
+
+    public function test_public_products_return_explicit_audience_and_size_kind(): void
+    {
+        $category = ProductCategory::create(['name' => 'Filter women', 'slug' => 'filter-women']);
+        Product::create([
+            'category_id' => $category->id, 'name' => 'Filter dress', 'slug' => 'filter-dress', 'product_type' => 'variable', 'status' => 'active', 'audience' => 'women',
+            'option_groups' => [['key' => 'size', 'label' => 'Size', 'display_type' => 'button', 'size_kind' => 'clothing', 'values' => [['value' => 'M', 'label' => 'M']]]],
+        ]);
+
+        $this->getJson('/api/store/products/filter-dress')->assertOk()
+            ->assertJsonPath('audience', 'women')
+            ->assertJsonPath('option_groups.0.size_kind', 'clothing');
     }
 
     public function test_super_admin_seller_product_editor_saves_media_videos_and_variations(): void
@@ -81,11 +96,13 @@ class ProductEditorFieldsTest extends TestCase
             'discount_kind' => 'flat',
             'discount_value' => 100,
             'shipping_options' => [['label' => 'Inside Dhaka', 'price' => 60], ['label' => 'Outside Dhaka', 'price' => 120]],
-            'option_groups' => [['key' => 'Color', 'label' => 'Color', 'display_type' => 'swatch', 'values' => [['value' => 'Pink', 'label' => 'Pink', 'swatch' => '#f5a5c8']]], ['key' => 'Pattern', 'label' => 'Pattern', 'display_type' => 'image', 'values' => [['value' => 'Floral', 'label' => 'Floral', 'image_url' => 'https://example.test/floral.jpg']]]],
+            'audience' => 'women',
+            'option_groups' => [['key' => 'Color', 'label' => 'Color', 'display_type' => 'swatch', 'values' => [['value' => 'Pink', 'label' => 'Pink', 'swatch' => '#f5a5c8']]], ['key' => 'Size', 'label' => 'Size', 'display_type' => 'button', 'size_kind' => 'clothing', 'values' => [['value' => 'M', 'label' => 'M']]]],
         ])->assertOk()->assertJsonPath('product.thumbnail', $asset->url)
             ->assertJsonPath('product.videos.0', 'https://example.test/coat.mp4')
             ->assertJsonPath('product.option_groups.0.values.0.swatch', '#f5a5c8')
-            ->assertJsonPath('product.option_groups.1.values.0.image_url', 'https://example.test/floral.jpg')
+            ->assertJsonPath('product.option_groups.1.size_kind', 'clothing')
+            ->assertJsonPath('product.audience', 'women')
             ->assertJsonPath('product.compare_at_price', '700.00')
             ->assertJsonPath('product.discount_kind', 'flat')
             ->assertJsonPath('product.discount_value', '100.00')

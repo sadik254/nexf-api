@@ -35,7 +35,7 @@ class Product extends Model
         'videos',
         'default_buying_price',
         'default_selling_price',
-        'compare_at_price', 'discount_kind', 'discount_value', 'option_groups', 'size_chart_id',
+        'compare_at_price', 'discount_kind', 'discount_value', 'option_groups', 'size_chart_id', 'audience',
         'weight_kg',
         'shipping_options',
         'homepage_trending', 'homepage_new_arrival', 'homepage_featured', 'homepage_sort_order',
