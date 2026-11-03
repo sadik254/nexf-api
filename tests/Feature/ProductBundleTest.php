@@ -140,6 +140,49 @@ class ProductBundleTest extends TestCase
         $this->assertSame('225.00', $order['items'][0]['line_subtotal']);
     }
 
+    public function test_server_selects_the_largest_eligible_pick_tier_and_snapshots_it(): void
+    {
+        $category = ProductCategory::create(['name' => 'Tiered combos', 'slug' => 'tiered-combos']);
+        $product = Product::create(['category_id' => $category->id, 'name' => 'Tiered combo', 'slug' => 'tiered-combo', 'product_type' => 'variable', 'status' => 'active', 'option_groups' => [[
+            'key' => 'colour', 'label' => 'Colour', 'display_type' => 'button', 'values' => [['value' => 'red', 'label' => 'Red'], ['value' => 'blue', 'label' => 'Blue'], ['value' => 'green', 'label' => 'Green']],
+        ]]]);
+        $variations = collect(['red', 'blue', 'green'])->map(fn (string $colour) => ProductVariation::create(['product_id' => $product->id, 'attributes' => ['colour' => $colour], 'default_selling_price' => 100, 'is_active' => true]));
+        foreach ($variations as $variation) ProductLot::create(['variation_id' => $variation->id, 'lot_number' => "TIER-{$variation->id}", 'buying_price' => 30, 'selling_price' => 100, 'quantity' => 5, 'quantity_remaining' => 5]);
+
+        $service = app(ProductBundleService::class);
+        $service->replace($product, [
+            ['label' => '2 pcs deal', 'mode' => 'pick', 'size' => 2, 'price' => 150],
+            ['label' => '3 pcs deal', 'mode' => 'pick', 'size' => 3, 'price' => 270],
+        ]);
+        $smallTier = $product->bundles()->where('size', 2)->firstOrFail();
+        $largeTier = $product->bundles()->where('size', 3)->firstOrFail();
+        $pieces = $variations->map(fn (ProductVariation $variation) => ['variation_id' => $variation->id, 'quantity' => 1])->all();
+
+        // A forged request names the cheaper tier. The API selects the three-piece
+        // tier from the selection itself, rather than trusting bundle_id for price.
+        $resolved = $service->resolve($product, ['bundle_id' => $smallTier->id, 'bundle_items' => $pieces]);
+        $this->assertSame($largeTier->id, $resolved['bundle']->id);
+        $this->assertSame(270.0, $resolved['unitPrice']);
+
+        $customer = Customer::create(['name' => 'Tier buyer', 'email' => 'tier-buyer@example.test', 'phone' => '01700000002', 'password' => 'password123']);
+        $payment = PaymentMethod::create(['name' => 'Cash on Delivery', 'code' => 'cod', 'is_active' => true]);
+        $shipping = ShippingMethod::create(['name' => 'Outside Dhaka', 'code' => 'outside_dhaka', 'charge' => 20, 'currency' => 'BDT', 'is_active' => true]);
+        $order = $this->withToken($customer->createToken('test', ['customer:basic'])->plainTextToken)->postJson('/api/customers/orders', [
+            'items' => [['product_id' => $product->id, 'bundle_id' => $smallTier->id, 'bundle_items' => $pieces, 'quantity' => 1]],
+            'payment_method_id' => $payment->id, 'shipping_method_id' => $shipping->id, 'shipping_name' => 'Tier buyer', 'shipping_phone' => '01700000002', 'shipping_address' => 'Dhaka',
+        ])->assertCreated()->json('order');
+
+        $this->assertSame('3 pcs', $order['items'][0]['bundle_label']);
+        $this->assertSame('270.00', $order['items'][0]['line_subtotal']);
+        $this->assertDatabaseHas('order_items', [
+            'order_id' => $order['id'],
+            'bundle_source_id' => $largeTier->id,
+            'bundle_source_label' => '3 pcs deal',
+            'bundle_source_size' => 3,
+            'bundle_source_price' => 270,
+        ]);
+    }
+
     private function simpleProduct(): Product
     {
         $category = ProductCategory::create(['name' => 'Simple category', 'slug' => 'simple-category']);

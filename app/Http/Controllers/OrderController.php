@@ -17,6 +17,7 @@ use App\Models\OrderItem;
 use App\Models\OrderStoreGroup;
 use App\Models\Seller;
 use App\Services\InventoryService;
+use App\Services\ProductBundleService;
 use App\Services\SubOrderService;
 use App\Services\CheckoutService;
 use App\Services\OrderNotificationService;
@@ -34,7 +35,7 @@ use Illuminate\Validation\ValidationException;
 
 class OrderController extends Controller
 {
-    public function __construct(private InventoryService $inventory, private CheckoutService $checkout, private OrderNotificationService $notifications, private SteadfastService $steadfast, private StoreShippingService $storeShipping, private TurnstileService $turnstile, private SubOrderService $subOrders)
+    public function __construct(private InventoryService $inventory, private CheckoutService $checkout, private OrderNotificationService $notifications, private SteadfastService $steadfast, private StoreShippingService $storeShipping, private TurnstileService $turnstile, private SubOrderService $subOrders, private ProductBundleService $bundles)
     {
     }
 
@@ -1228,6 +1229,7 @@ class OrderController extends Controller
                 $product = Product::query()
                     ->with('seller')
                     ->availableForSale()
+                    ->lockForUpdate()
                     ->find($itemData['product_id']);
 
                 if (!$product) {
@@ -1248,6 +1250,17 @@ class OrderController extends Controller
                 $bundleComponents = $preview['items'][$lineIndex]['bundle_components'] ?? [];
                 $bundleUnitPrice = (float) ($preview['items'][$lineIndex]['bundle_unit_price'] ?? $bundle?->price ?? 0);
                 $bundleLabel = $preview['items'][$lineIndex]['bundle_label'] ?? $bundle?->label;
+
+                if ($bundle) {
+                    $finalBundle = $this->bundles->resolve($product, $itemData, true);
+                    if (!$finalBundle || (int) $finalBundle['bundle']->id !== (int) $bundle->id || round((float) $finalBundle['unitPrice'], 2) !== round($bundleUnitPrice, 2)) {
+                        throw ValidationException::withMessages(['items' => ['This combo changed. Review your cart and try again.']]);
+                    }
+                    $bundle = $finalBundle['bundle'];
+                    $bundleComponents = $finalBundle['components'];
+                    $bundleUnitPrice = (float) $finalBundle['unitPrice'];
+                    $bundleLabel = $finalBundle['label'];
+                }
 
                 if (!$bundle && $product->product_type === 'variable' && empty($itemData['variation_id'])) {
                     throw ValidationException::withMessages([
@@ -1303,6 +1316,10 @@ class OrderController extends Controller
                     'variation_labels' => $this->variationLabels($product, $variation),
                     'variation_image' => $variation?->image_url,
                     'bundle_label' => $bundleLabel,
+                    'bundle_source_id' => $bundle?->id,
+                    'bundle_source_label' => $bundle?->label,
+                    'bundle_source_size' => $bundle?->size,
+                    'bundle_source_price' => $bundle?->price,
                     'bundle_items' => $bundle ? $this->bundleSnapshot($product, $bundleComponents) : null,
                     'quantity' => $quantity,
                     'unit_selling_price' => $unitSellingPrice,

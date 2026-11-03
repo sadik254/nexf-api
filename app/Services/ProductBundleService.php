@@ -14,6 +14,7 @@ class ProductBundleService
     {
         $existing = $product->bundles()->with('items')->get()->keyBy('id');
         $kept = [];
+        $pickSizes = [];
         foreach (array_values($bundles) as $position => $row) {
             $id = isset($row['id']) ? (int) $row['id'] : null;
             $bundle = $id ? $existing->get($id) : null;
@@ -31,6 +32,8 @@ class ProductBundleService
             if ($mode === 'pick') {
                 $variationCount = $product->variations()->where('is_active', true)->count();
                 if ($size < 2 || $size > $variationCount) throw ValidationException::withMessages(['bundles' => ['A pick combo must contain at least two, and no more than the available variations.']]);
+                if (isset($pickSizes[$size])) throw ValidationException::withMessages(['bundles' => ['A product can only have one pick combo for each size.']]);
+                $pickSizes[$size] = true;
                 $items = [];
             } else {
                 $total = array_sum(array_map(fn ($item) => (int) ($item['quantity'] ?? 0), $items));
@@ -65,27 +68,42 @@ class ProductBundleService
         }
     }
 
-    /** @return array{bundle: ProductBundle, components: array<int, array{variation: ?ProductVariation,quantity:int}>}|null */
-    public function resolve(Product $product, array $line): ?array
+    /** @return array{bundle: ProductBundle, components: array<int, array{variation: ?ProductVariation,quantity:int}>, pieceCount:int, unitPrice:float, label:string}|null */
+    public function resolve(Product $product, array $line, bool $lockForPurchase = false): ?array
     {
         if (empty($line['bundle_id'])) return null;
-        $bundle = $product->bundles()->with('items')->find($line['bundle_id']);
-        if (!$bundle) throw ValidationException::withMessages(['items' => ['The selected combo is unavailable.']]);
+        $requestedQuery = $product->bundles()->with('items');
+        if ($lockForPurchase) $requestedQuery->lockForUpdate();
+        $requested = $requestedQuery->find($line['bundle_id']);
+        if (!$requested) throw ValidationException::withMessages(['items' => ['The selected combo is unavailable.']]);
         $components = [];
-        if ($bundle->mode === 'pick') {
+        $bundle = $requested;
+        if ($requested->mode === 'pick') {
             $rows = array_values($line['bundle_items'] ?? []);
-            $activeCount = $product->variations()->where('is_active', true)->count();
-            if (count($rows) < (int) $bundle->size) throw ValidationException::withMessages(['items' => ["Choose at least {$bundle->size} different variations for this combo."]]);
+            $variationsQuery = $product->variations()->where('is_active', true);
+            if ($lockForPurchase) $variationsQuery->lockForUpdate();
+            $activeVariations = $variationsQuery->get()->keyBy('id');
+            $activeCount = $activeVariations->count();
+            if (count($rows) < (int) $requested->size) throw ValidationException::withMessages(['items' => ["Choose at least {$requested->size} different variations for this combo."]]);
             if (count($rows) > $activeCount) throw ValidationException::withMessages(['items' => ['Choose no more than the available variations for this combo.']]);
             $seen = [];
             foreach ($rows as $row) {
                 $id = (int) ($row['variation_id'] ?? 0);
                 if ($id < 1 || (int) ($row['quantity'] ?? 0) !== 1 || isset($seen[$id])) throw ValidationException::withMessages(['items' => ['Each variation in a pick combo must be selected once.']]);
-                $variation = $product->variations()->where('is_active', true)->find($id);
+                $variation = $activeVariations->get($id);
                 if (!$variation) throw ValidationException::withMessages(['items' => ['A selected combo variation is unavailable.']]);
                 $seen[$id] = true;
                 $components[] = compact('variation') + ['quantity' => 1];
             }
+
+            // bundle_id is only a shopper-interface hint. The server chooses
+            // the largest tier reached, so a crafted request cannot use a
+            // smaller combo's per-piece price for a larger selection.
+            $tierQuery = $product->bundles()->reorder()->where('mode', 'pick')->where('size', '<=', count($components))
+                ->orderByDesc('size')->orderBy('sort_order')->orderBy('id');
+            if ($lockForPurchase) $tierQuery->lockForUpdate();
+            $bundle = $tierQuery->first();
+            if (!$bundle) throw ValidationException::withMessages(['items' => ['Choose enough variations to qualify for a combo.']]);
         } else {
             foreach ($bundle->items as $item) {
                 $components[] = ['variation' => $this->variationForAttributes($product, $item->attributes), 'quantity' => (int) $item->quantity];
