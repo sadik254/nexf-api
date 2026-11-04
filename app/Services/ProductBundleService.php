@@ -69,13 +69,13 @@ class ProductBundleService
     }
 
     /** @return array{bundle: ProductBundle, components: array<int, array{variation: ?ProductVariation,quantity:int}>, pieceCount:int, unitPrice:float, label:string}|null */
-    public function resolve(Product $product, array $line, bool $lockForPurchase = false): ?array
+    public function resolve(Product $product, array $line, bool $lockForPurchase = false, string $field = 'items'): ?array
     {
         if (empty($line['bundle_id'])) return null;
         $requestedQuery = $product->bundles()->with('items');
         if ($lockForPurchase) $requestedQuery->lockForUpdate();
         $requested = $requestedQuery->find($line['bundle_id']);
-        if (!$requested) throw ValidationException::withMessages(['items' => ['The selected combo is unavailable.']]);
+        if (!$requested) throw ValidationException::withMessages([$field => ['This combo is no longer offered. Remove it and pick again.']]);
         $components = [];
         $bundle = $requested;
         if ($requested->mode === 'pick') {
@@ -83,15 +83,17 @@ class ProductBundleService
             $variationsQuery = $product->variations()->where('is_active', true);
             if ($lockForPurchase) $variationsQuery->lockForUpdate();
             $activeVariations = $variationsQuery->get()->keyBy('id');
-            $activeCount = $activeVariations->count();
-            if (count($rows) < (int) $requested->size) throw ValidationException::withMessages(['items' => ["Choose at least {$requested->size} different variations for this combo."]]);
-            if (count($rows) > $activeCount) throw ValidationException::withMessages(['items' => ['Choose no more than the available variations for this combo.']]);
+            if (count($rows) < (int) $requested->size) throw ValidationException::withMessages(["{$field}.bundle_items" => ["Choose at least {$requested->size} different designs for this combo."]]);
             $seen = [];
             foreach ($rows as $row) {
                 $id = (int) ($row['variation_id'] ?? 0);
-                if ($id < 1 || (int) ($row['quantity'] ?? 0) !== 1 || isset($seen[$id])) throw ValidationException::withMessages(['items' => ['Each variation in a pick combo must be selected once.']]);
+                if ($id < 1 || (int) ($row['quantity'] ?? 0) !== 1 || isset($seen[$id])) throw ValidationException::withMessages(["{$field}.bundle_items" => ['Each design in a combo can be picked once.']]);
                 $variation = $activeVariations->get($id);
-                if (!$variation) throw ValidationException::withMessages(['items' => ['A selected combo variation is unavailable.']]);
+                if (!$variation) {
+                    $unavailable = $product->variations()->find($id);
+                    $name = $unavailable ? $this->designName($product, $unavailable) : 'A design';
+                    throw ValidationException::withMessages(["{$field}.bundle_items" => ["{$name} is no longer available. Remove this combo and pick again."]]);
+                }
                 $seen[$id] = true;
                 $components[] = compact('variation') + ['quantity' => 1];
             }
@@ -103,20 +105,49 @@ class ProductBundleService
                 ->orderByDesc('size')->orderBy('sort_order')->orderBy('id');
             if ($lockForPurchase) $tierQuery->lockForUpdate();
             $bundle = $tierQuery->first();
-            if (!$bundle) throw ValidationException::withMessages(['items' => ['Choose enough variations to qualify for a combo.']]);
+            if (!$bundle) throw ValidationException::withMessages(["{$field}.bundle_items" => ['Choose enough designs to qualify for a combo.']]);
         } else {
             foreach ($bundle->items as $item) {
                 $components[] = ['variation' => $this->variationForAttributes($product, $item->attributes), 'quantity' => (int) $item->quantity];
             }
         }
         $pieceCount = array_sum(array_map(fn (array $component) => (int) $component['quantity'], $components));
-        $unitPrice = $bundle->mode === 'pick'
-            ? round(((float) $bundle->price / max(1, (int) $bundle->size)) * $pieceCount, 2)
-            : (float) $bundle->price;
+        $unitPrice = $bundle->mode === 'pick' ? self::pickPrice($bundle, $pieceCount) : (float) $bundle->price;
 
         return compact('bundle', 'components', 'pieceCount', 'unitPrice') + [
             'label' => $bundle->mode === 'pick' ? "{$pieceCount} pcs" : $bundle->label,
         ];
+    }
+
+    /**
+     * Calculates pick-combo totals in whole paisa and rounds once, half up.
+     * This avoids PHP/JavaScript floating-point differences on half-paisa totals.
+     */
+    public static function pickPrice(ProductBundle $bundle, int $pieces): float
+    {
+        $price = (string) $bundle->price;
+        [$whole, $fraction] = array_pad(explode('.', $price, 2), 2, '');
+        $paisa = ((int) $whole * 100) + (int) str_pad(substr($fraction, 0, 2), 2, '0');
+        $size = max(1, (int) $bundle->size);
+        $numerator = $paisa * max(0, $pieces);
+
+        // floor(n / d + 0.5), using integers only.
+        return intdiv(($numerator * 2) + $size, $size * 2) / 100;
+    }
+
+    /** Builds a shopper-readable name such as "Birds" or "Red / M". */
+    private function designName(Product $product, ProductVariation $variation): string
+    {
+        $labels = [];
+        foreach ($product->option_groups ?? [] as $group) {
+            $key = (string) ($group['key'] ?? '');
+            $value = (string) (($variation->attributes ?? [])[$key] ?? '');
+            $match = collect($group['values'] ?? [])->firstWhere('value', $value);
+            $labels[] = (string) ($match['label'] ?? $value);
+        }
+
+        $name = implode(' / ', array_filter($labels, fn (string $label): bool => $label !== ''));
+        return $name !== '' ? $name : 'A design';
     }
 
     private function variationForAttributes(Product $product, ?array $attributes): ?ProductVariation

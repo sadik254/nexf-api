@@ -32,14 +32,14 @@ class CheckoutService
 
         $items = [];
         $subtotal = 0.0;
-        foreach ($data['items'] as $itemData) {
+        foreach ($data['items'] as $index => $itemData) {
             $product = Product::query()->with(['seller', 'collections:id'])->availableForSale()->find($itemData['product_id']);
             if (!$product || ($product->seller_id && (!$product->seller || $product->seller->status !== 'approved' || !$product->seller->is_active))) {
                 throw ValidationException::withMessages(['items' => ['One or more products are unavailable.']]);
             }
             $quantity = (int) $itemData['quantity'];
             $stockRequest = !empty($data['stock_request']);
-            $resolvedBundle = $this->bundles->resolve($product, $itemData);
+            $resolvedBundle = $this->bundles->resolve($product, $itemData, false, "items.{$index}");
             if ($resolvedBundle) {
                 $variation = null;
                 $available = PHP_INT_MAX;
@@ -142,13 +142,13 @@ class CheckoutService
     {
         $items = [];
         $subtotal = 0.0;
-        foreach ($cartItems as $item) {
+        foreach ($cartItems as $index => $item) {
             $product = Product::query()->with(['seller', 'collections:id'])->availableForSale()->find($item['product_id']);
             if (!$product || ($product->seller_id && (!$product->seller || !$product->seller->is_active || $product->seller->status !== 'approved'))) {
                 throw ValidationException::withMessages(['items' => ['One or more products are unavailable.']]);
             }
             $quantity = (int) $item['quantity'];
-            $resolvedBundle = $this->bundles->resolve($product, $item);
+            $resolvedBundle = $this->bundles->resolve($product, $item, false, "items.{$index}");
             if ($resolvedBundle) {
                 $variation = null; $available = PHP_INT_MAX; $cost = 0.0;
                 foreach ($resolvedBundle['components'] as $component) {

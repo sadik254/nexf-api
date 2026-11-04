@@ -1252,9 +1252,9 @@ class OrderController extends Controller
                 $bundleLabel = $preview['items'][$lineIndex]['bundle_label'] ?? $bundle?->label;
 
                 if ($bundle) {
-                    $finalBundle = $this->bundles->resolve($product, $itemData, true);
+                    $finalBundle = $this->bundles->resolve($product, $itemData, true, "items.{$lineIndex}");
                     if (!$finalBundle || (int) $finalBundle['bundle']->id !== (int) $bundle->id || round((float) $finalBundle['unitPrice'], 2) !== round($bundleUnitPrice, 2)) {
-                        throw ValidationException::withMessages(['items' => ['This combo changed. Review your cart and try again.']]);
+                        throw ValidationException::withMessages(["items.{$lineIndex}" => ['This combo changed. Review your cart and try again.']]);
                     }
                     $bundle = $finalBundle['bundle'];
                     $bundleComponents = $finalBundle['components'];

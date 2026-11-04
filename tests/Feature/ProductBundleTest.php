@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Product;
+use App\Models\ProductBundle;
 use App\Models\ProductCategory;
 use App\Models\ProductVariation;
 use App\Models\ProductLot;
@@ -12,6 +13,7 @@ use App\Models\PaymentMethod;
 use App\Models\ShippingMethod;
 use App\Services\ProductBundleService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class ProductBundleTest extends TestCase
@@ -181,6 +183,46 @@ class ProductBundleTest extends TestCase
             'bundle_source_size' => 3,
             'bundle_source_price' => 270,
         ]);
+    }
+
+    public function test_pick_combo_price_rounds_half_a_paisa_up_with_integer_math(): void
+    {
+        $product = $this->simpleProduct();
+        $bundle = ProductBundle::create([
+            'product_id' => $product->id,
+            'label' => 'Tiny price test',
+            'mode' => 'pick',
+            'size' => 2,
+            'price' => '0.03',
+        ]);
+
+        // ৳0.03 ÷ 2 is 1.5 paisa, which must be rounded once to 2 paisa.
+        $this->assertSame(0.02, ProductBundleService::pickPrice($bundle, 1));
+        $this->assertSame(0.03, ProductBundleService::pickPrice($bundle, 2));
+    }
+
+    public function test_unavailable_pick_design_is_named_on_its_cart_line(): void
+    {
+        $category = ProductCategory::create(['name' => 'Unavailable designs', 'slug' => 'unavailable-designs']);
+        $product = Product::create(['category_id' => $category->id, 'name' => 'Bird product', 'slug' => 'bird-product', 'product_type' => 'variable', 'status' => 'active', 'option_groups' => [[
+            'key' => 'design', 'label' => 'Design', 'display_type' => 'button', 'values' => [['value' => 'birds', 'label' => 'Birds'], ['value' => 'flowers', 'label' => 'Flowers']],
+        ]]]);
+        $birds = ProductVariation::create(['product_id' => $product->id, 'attributes' => ['design' => 'birds'], 'is_active' => false]);
+        $flowers = ProductVariation::create(['product_id' => $product->id, 'attributes' => ['design' => 'flowers'], 'is_active' => true]);
+        $bundle = ProductBundle::create(['product_id' => $product->id, 'label' => 'Two designs', 'mode' => 'pick', 'size' => 2, 'price' => 100]);
+
+        try {
+            app(ProductBundleService::class)->resolve($product, [
+                'bundle_id' => $bundle->id,
+                'bundle_items' => [['variation_id' => $birds->id, 'quantity' => 1], ['variation_id' => $flowers->id, 'quantity' => 1]],
+            ], false, 'items.1');
+            $this->fail('Expected an unavailable design validation error.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(
+                ['Birds is no longer available. Remove this combo and pick again.'],
+                $exception->errors()['items.1.bundle_items'] ?? [],
+            );
+        }
     }
 
     private function simpleProduct(): Product
