@@ -28,23 +28,21 @@ class SitePopupTest extends TestCase
         return $admin->createToken('test', ['admin:basic'])->plainTextToken;
     }
 
-    public function test_admins_and_super_admins_manage_popups(): void
+    public function test_only_super_admin_manages_popups_by_default(): void
     {
         $this->getJson('/api/popups')->assertOk()->assertExactJson([]);
 
-        $tokens = ['admin' => $this->token('admin'), 'super_admin' => $this->token('super_admin')];
-        foreach ($tokens as $role => $token) {
-            $this->withToken($token)
-                ->postJson('/api/admin/popups', ['popups' => [$this->popup(['name' => $role])]])
-                ->assertOk()
-                ->assertJsonPath('0.name', $role);
-        }
-        $this->withToken($tokens['admin'])->getJson('/api/admin/popups')->assertOk()->assertJsonCount(1);
+        $admin = $this->token('admin');
+        $superAdmin = $this->token('super_admin');
+        $this->withToken($admin)->postJson('/api/admin/popups', ['popups' => [$this->popup()]])->assertForbidden();
+        $this->withToken($superAdmin)->postJson('/api/admin/popups', ['popups' => [$this->popup(['name' => 'super_admin'])]])
+            ->assertOk()->assertJsonPath('0.name', 'super_admin');
+        $this->withToken($superAdmin)->getJson('/api/admin/popups')->assertOk()->assertJsonCount(1);
     }
 
     public function test_public_list_hides_off_and_out_of_date_popups_and_names(): void
     {
-        $token = $this->token('admin');
+        $token = $this->token('super_admin');
         $this->withToken($token)->postJson('/api/admin/popups', ['popups' => [
             $this->popup(['id' => 'pop-1', 'enabled' => false]),
             $this->popup(['id' => 'pop-2', 'endsAt' => now()->subDay()->toDateString()]),
@@ -61,7 +59,7 @@ class SitePopupTest extends TestCase
 
     public function test_validation(): void
     {
-        $token = $this->token('admin');
+        $token = $this->token('super_admin');
         $post = fn (array $p) => $this->withToken($token)->postJson('/api/admin/popups', ['popups' => [$this->popup($p)]]);
         $post(['image' => ''])->assertUnprocessable()->assertJsonValidationErrors('popups.0.image');
         $post(['kind' => 'text', 'title' => ''])->assertUnprocessable()->assertJsonValidationErrors('popups.0.title');

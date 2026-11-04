@@ -27,7 +27,7 @@ class ConsoleDesignApiTest extends TestCase
 
     public function test_summary_counts_are_scoped_and_do_not_require_order_abilities(): void
     {
-        $admin = Admin::create(['name' => 'Editor', 'email' => 'editor-console@example.test', 'password' => 'password123', 'role' => 'editor', 'is_active' => true]);
+        $admin = Admin::create(['name' => 'Admin', 'email' => 'admin-console@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);
         $customer = Customer::create(['name' => 'Buyer', 'email' => 'buyer-console@example.test', 'password' => 'password123']);
         $sellers = collect([1, 2])->map(fn ($i) => Seller::create([
             'seller_name' => "Seller {$i}", 'email' => "seller-console-{$i}@example.test", 'store_name' => "Store {$i}", 'store_slug' => "console-store-{$i}",
@@ -129,9 +129,9 @@ class ConsoleDesignApiTest extends TestCase
     public function test_role_and_discount_filters_run_before_pagination(): void
     {
         $admin = Admin::create(['name' => 'Super', 'email' => 'filter-console@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
-        Admin::create(['name' => 'Editor', 'email' => 'filter-editor@example.test', 'password' => 'password123', 'role' => 'editor', 'is_active' => true]);
+        Admin::create(['name' => 'Admin', 'email' => 'filter-admin@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);
         $token = $admin->createToken('test', ['admin:manage-admins', 'admin:coupons'])->plainTextToken;
-        $this->withToken($token)->getJson('/api/admin/admins?role=editor&per_page=1')->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.role', 'editor');
+        $this->withToken($token)->getJson('/api/admin/admins?role=admin&per_page=1')->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.role', 'admin');
         $this->withToken($token)->getJson('/api/admin/admins?role=unknown')->assertUnprocessable();
         foreach (['active', 'scheduled', 'expired', 'inactive'] as $status) {
             \App\Models\Coupon::create(['created_by_admin_id' => $admin->id, 'code' => strtoupper($status), 'discount_type' => 'fixed', 'discount_value' => 10, 'is_active' => $status !== 'inactive', 'starts_at' => $status === 'scheduled' ? now()->addDay() : null, 'expires_at' => $status === 'expired' ? now()->subDay() : null]);

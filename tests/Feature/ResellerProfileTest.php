@@ -19,9 +19,9 @@ class ResellerProfileTest extends TestCase
         $token = $reseller->createToken('test', ['reseller:basic'])->plainTextToken;
 
         $this->withToken($token)->postJson('/api/resellers/me', [
-            'name' => 'Updated Name', 'email' => 'updated-reseller@example.test', 'phone' => '01800000000',
+            'name' => 'Updated Name', 'phone' => '01800000000',
         ])->assertOk()->assertJsonPath('name', 'Updated Name')
-            ->assertJsonPath('email', 'updated-reseller@example.test')
+            ->assertJsonPath('email', 'profile-reseller@example.test')
             ->assertJsonPath('phone', '01800000000')->assertJsonPath('image', null);
 
         $this->assertDatabaseHas('resellers', ['id' => $reseller->id, 'name' => 'Updated Name']);

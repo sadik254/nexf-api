@@ -32,7 +32,7 @@ class SizeChartMeasurementsTest extends TestCase
         $this->withToken($sellerToken)->postJson("/api/seller/size-charts/{$id}/delete")->assertUnprocessable();
         $this->withToken($sellerToken)->postJson('/api/seller/size-charts',[...$input,'rows'=>[['id'=>'m','label'=>'M','values'=>[]],['id'=>'m','label'=>'Duplicate','values'=>[]]]])->assertUnprocessable();
         $global=$this->withToken($adminToken)->postJson('/api/admin/size-charts',['name'=>'Legacy guide','url'=>'https://example.test/guide.png'])->assertCreated()->json('size_chart.id');
-        $this->withToken($sellerToken)->postJson("/api/seller/size-charts/{$global}",['name'=>'Forbidden'])->assertForbidden();
+        $this->withToken($sellerToken)->postJson("/api/seller/size-charts/{$global}",['name'=>'Forbidden'])->assertNotFound();
         $this->withToken($sellerToken)->getJson('/api/seller/size-charts')->assertOk()->assertJsonCount(2);
     }
 }

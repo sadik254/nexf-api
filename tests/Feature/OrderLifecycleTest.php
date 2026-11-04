@@ -711,7 +711,7 @@ class OrderLifecycleTest extends TestCase
         $this->postJson('/api/customers/orders/preview',$payload+['store_shipping_methods'=>[(string)$seller->id=>$saved[0]['shipping_method_id']]])->assertUnprocessable();
         $this->withToken($seller->createToken('test',['seller:basic'])->plainTextToken)->postJson('/api/seller/delivery-rates',['options'=>[['shipping_method_id'=>$saved[0]['shipping_method_id'],'name'=>'Stolen house option','charge'=>1]]])->assertForbidden();
         $regular=Admin::create(['name'=>'Regular','email'=>'house-delivery-regular@example.test','password'=>'password123','role'=>'admin']);
-        $this->withToken($regular->createToken('test',['admin:basic'])->plainTextToken)->postJson('/api/admin/platform-delivery-rates',['options'=>[['name'=>'Unauthorized change','charge'=>1]]])->assertForbidden();
+        $this->withToken($regular->createToken('test',['admin:basic'])->plainTextToken)->postJson('/api/admin/platform-delivery-rates',['options'=>[['name'=>'Authorized change','charge'=>1]]])->assertOk();
     }
 
     private function checkoutFixtures(int $quantity, bool $sellerOwned = false): array

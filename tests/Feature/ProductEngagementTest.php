@@ -129,9 +129,7 @@ class ProductEngagementTest extends TestCase
 
         $adminToken = $admin->createToken('test', ['admin:basic'])->plainTextToken;
         $this->withToken($adminToken)->getJson('/api/admin/product-reviews')
-            ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $houseReview->id);
-        $this->withToken($adminToken)->postJson("/api/admin/product-reviews/{$sellerReview->id}/moderate", ['status' => 'approved'])
-            ->assertForbidden();
+            ->assertOk()->assertJsonCount(2, 'data')->assertJsonFragment(['id' => $houseReview->id])->assertJsonFragment(['id' => $sellerReview->id]);
         $this->withToken($adminToken)->postJson("/api/admin/product-reviews/{$houseReview->id}/moderate", ['status' => 'approved'])
             ->assertOk();
 
@@ -139,7 +137,7 @@ class ProductEngagementTest extends TestCase
         $this->withToken($sellerToken)->getJson('/api/seller/product-reviews')
             ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $sellerReview->id);
         $this->withToken($sellerToken)->postJson("/api/seller/product-reviews/{$houseReview->id}/moderate", ['status' => 'rejected'])
-            ->assertForbidden();
+            ->assertNotFound();
         $this->withToken($sellerToken)->postJson("/api/seller/product-reviews/{$sellerReview->id}/moderate", ['status' => 'approved'])
             ->assertOk();
 
@@ -168,7 +166,7 @@ class ProductEngagementTest extends TestCase
 
         $adminToken = $admin->createToken('test', ['admin:basic'])->plainTextToken;
         $this->withToken($adminToken)->getJson('/api/admin/product-questions')
-            ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $houseQuestion->id);
+            ->assertOk()->assertJsonCount(2, 'data')->assertJsonFragment(['id' => $houseQuestion->id])->assertJsonFragment(['id' => $sellerQuestion->id]);
         $this->withToken($adminToken)->postJson("/api/admin/product-questions/{$houseQuestion->id}/answer", ['answer' => 'House answer'])
             ->assertOk();
 
@@ -176,7 +174,7 @@ class ProductEngagementTest extends TestCase
         $this->withToken($sellerToken)->getJson('/api/seller/product-questions')
             ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $sellerQuestion->id);
         $this->withToken($sellerToken)->postJson("/api/seller/product-questions/{$houseQuestion->id}/answer", ['answer' => 'Forbidden answer'])
-            ->assertForbidden();
+            ->assertNotFound();
         $this->withToken($sellerToken)->postJson("/api/seller/product-questions/{$sellerQuestion->id}/answer", ['answer' => 'Seller answer'])
             ->assertOk();
     }
@@ -208,8 +206,8 @@ class ProductEngagementTest extends TestCase
         $question = ProductQuestion::create(['product_id' => $product->id, 'customer_id' => $customer->id, 'question' => 'Is this washable?']);
         $seller = Seller::create(['seller_name' => 'Owner', 'email' => 'question-owner@example.test', 'store_name' => 'Owner store', 'store_slug' => 'owner-store', 'kyc_type' => 'nid', 'kyc_number' => 'test', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
         $this->withToken($seller->createToken('test', ['seller:basic'])->plainTextToken);
-        $this->postJson("/api/seller/product-questions/{$question->id}", ['question' => 'Tampered question', 'answer' => 'Tampered answer'])->assertForbidden();
-        $this->postJson("/api/seller/product-questions/{$question->id}/delete")->assertForbidden();
+        $this->postJson("/api/seller/product-questions/{$question->id}", ['question' => 'Tampered question', 'answer' => 'Tampered answer'])->assertNotFound();
+        $this->postJson("/api/seller/product-questions/{$question->id}/delete")->assertNotFound();
         $product->update(['seller_id' => $seller->id]);
         $this->postJson("/api/seller/product-questions/{$question->id}", ['question' => 'Is this washable?', 'answer' => 'Yes, cold wash.'])->assertOk();
         $this->postJson("/api/seller/product-questions/{$question->id}/delete")->assertOk();
@@ -281,7 +279,7 @@ class ProductEngagementTest extends TestCase
         $seller=Seller::create(['seller_name'=>'Owner','email'=>'reply-owner@example.test','store_name'=>'Owner Store','store_slug'=>'reply-owner-store','kyc_type'=>'nid','kyc_number'=>'reply-test','kyc_document_url'=>'https://example.test/id','product_category'=>'Clothing','status'=>'approved','is_active'=>true,'password'=>'password123']);
         $this->withToken($seller->createToken('test',['seller:basic'])->plainTextToken);
         $url="/api/seller/product-reviews/{$review->id}/respond";
-        $this->postJson($url,['seller_response'=>'Thanks'])->assertForbidden();
+        $this->postJson($url,['seller_response'=>'Thanks'])->assertNotFound();
         $product->update(['seller_id'=>$seller->id]);
         $this->postJson($url,['seller_response'=>'Thanks'])->assertUnprocessable();
         $review->update(['status'=>'approved']);

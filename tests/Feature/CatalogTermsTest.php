@@ -25,24 +25,16 @@ class CatalogTermsTest extends TestCase
         $sellerToken = $seller->createToken('test', ['seller:basic'])->plainTextToken;
 
         $brandId = $this->withToken($superToken)->postJson('/api/admin/brands', ['name' => 'NEXF Original'])->assertCreated()->json('id');
-        $tagId = $this->withToken($sellerToken)->postJson('/api/seller/product-tags', ['name' => ' Featured '])->assertCreated()->assertJsonPath('name', 'Featured')->json('id');
-        $this->withToken($adminToken)->postJson('/api/admin/product-tags', ['name' => 'featured'])->assertOk()->assertJsonPath('id', $tagId);
-        $this->withToken($sellerToken)->postJson('/api/seller/product-tags', ['name' => '   '])->assertUnprocessable();
+        // Taxonomy is a platform permission. Sellers can assign these records
+        // to their own products, but cannot create global brands/tags/categories.
+        $tagId = $this->withToken($adminToken)->postJson('/api/admin/product-tags', ['name' => ' Featured '])->assertCreated()->assertJsonPath('name', 'Featured')->json('id');
+        $this->withToken($sellerToken)->postJson('/api/seller/product-tags', ['name' => 'No access'])->assertForbidden();
         $this->withToken($sellerToken)->postJson('/api/admin/product-tags', ['name' => 'No access'])->assertForbidden();
-        $this->withToken($adminToken)->postJson("/api/admin/tags/{$tagId}/delete")->assertForbidden();
-        $this->withToken($adminToken)->postJson('/api/admin/brands', ['name' => 'Forbidden'])->assertForbidden();
+        $this->withToken($sellerToken)->postJson('/api/admin/brands', ['name' => 'No access'])->assertForbidden();
         $this->getJson('/api/store/brands')->assertOk()->assertJsonPath('0.slug', 'nexf-original');
 
-        $inlineBrandId = $this->withToken($sellerToken)->postJson('/api/seller/product-brands', ['name' => ' Inline Brand '])->assertCreated()->assertJsonPath('name', 'Inline Brand')->json('id');
-        $this->withToken($adminToken)->postJson('/api/admin/product-brands', ['name' => 'inline brand'])->assertOk()->assertJsonPath('id', $inlineBrandId);
-        $parentId = $this->withToken($sellerToken)->postJson('/api/seller/product-category-options', ['name' => 'New Parent'])->assertCreated()->json('id');
-        $this->withToken($adminToken)->postJson('/api/admin/product-category-options', ['name' => 'new parent'])->assertOk()->assertJsonPath('id', $parentId);
-        $childId = $this->withToken($sellerToken)->postJson('/api/seller/product-category-options', ['name' => 'Child', 'parent_id' => $parentId])->assertCreated()->assertJsonPath('parent_id', $parentId)->json('id');
-        $this->withToken($adminToken)->postJson('/api/admin/product-category-options', ['name' => 'Child', 'parent_id' => $parentId])->assertOk()->assertJsonPath('id', $childId);
-        $this->withToken($sellerToken)->postJson('/api/seller/product-category-options', ['name' => 'Too deep', 'parent_id' => $childId])->assertUnprocessable();
-        $this->withToken($sellerToken)->postJson('/api/seller/product-category-options', ['name' => 'Missing', 'parent_id' => 99999])->assertUnprocessable();
-        $this->withToken($sellerToken)->postJson('/api/admin/product-brands', ['name' => 'Wrong role'])->assertForbidden();
-        $this->withToken($sellerToken)->postJson('/api/seller/product-brands', ['name' => '  '])->assertUnprocessable();
+        $this->withToken($sellerToken)->postJson('/api/seller/product-brands', ['name' => 'No access'])->assertForbidden();
+        $this->withToken($sellerToken)->postJson('/api/seller/product-category-options', ['name' => 'No access'])->assertForbidden();
 
         $productId = $this->withToken($sellerToken)->postJson('/api/seller/products', [
             'category_id' => $category->id, 'brand_id' => $brandId, 'tag_ids' => [$tagId],
