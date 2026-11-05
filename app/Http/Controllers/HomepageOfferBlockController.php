@@ -37,6 +37,9 @@ class HomepageOfferBlockController extends Controller
             'theme' => ['sometimes', Rule::in(['slate', 'gray', 'zinc', 'neutral', 'stone', 'red', 'orange', 'amber', 'yellow', 'lime', 'green', 'emerald', 'teal', 'cyan', 'sky', 'blue', 'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose'])],
             'hidden' => ['sometimes', 'boolean'], 'coupon_id' => ['sometimes', 'nullable', 'integer', 'exists:coupons,id'], 'expires_at' => ['sometimes', 'nullable', 'date'], 'store_name' => ['sometimes', 'nullable', 'string', 'max:120'], 'slot' => ['sometimes', 'integer', 'min:0'],
         ]);
+        foreach (['href', 'image'] as $key) {
+            if (array_key_exists($key, $data) && $data[$key] === null) $data[$key] = '';
+        }
         $block->update($data);
         return response()->json($block->fresh());
     }
@@ -76,13 +79,13 @@ class HomepageOfferBlockController extends Controller
             $locked = HomepageOfferSet::query()->lockForUpdate()->findOrFail($offerSet->id);
             $slot = ((int) $locked->blocks()->max('slot')) + 1;
             if ($slot > 255) abort(422, 'This offer set cannot contain more blocks.');
-            return $locked->blocks()->create($data + [
+            return $locked->blocks()->create(array_merge($data, [
                 'row_type' => $locked->row_type, 'slot' => $slot, 'hidden' => $data['hidden'] ?? true,
                 // Legacy image-tile columns are non-nullable. Coupon cards do
                 // not use them, so persist empty strings rather than inventing
                 // an image or destination.
                 'href' => $data['href'] ?? '', 'image' => $data['image'] ?? '', 'theme' => $data['theme'] ?? 'blue',
-            ]);
+            ]));
         });
         return response()->json(['block' => $block], 201);
     }

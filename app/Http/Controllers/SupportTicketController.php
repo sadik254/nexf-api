@@ -215,6 +215,23 @@ class SupportTicketController extends Controller
         return $this->show($request, $ticket);
     }
 
+    public function reopen(Request $request, SupportTicket $ticket): JsonResponse
+    {
+        $actor = $this->actor($request);
+        $this->authorizeTicket($actor, $ticket);
+        $ticket->update(['status' => 'open', 'resolved_at' => null]
+            + ($actor instanceof Customer ? ['store_read_at' => null] : []));
+
+        if ($actor instanceof Customer) {
+            app(\App\Services\ConsoleNotificationService::class)->support(
+                $ticket->fresh('order:id,order_number'),
+                'reply',
+            );
+        }
+
+        return $this->show($request, $ticket);
+    }
+
     /** POST /customers/support-tickets/{ticket}/escalate - bring NEXF into an open store ticket. */
     public function escalate(Request $request, SupportTicket $ticket): JsonResponse
     {

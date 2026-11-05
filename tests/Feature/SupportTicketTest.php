@@ -36,6 +36,8 @@ class SupportTicketTest extends TestCase
         $this->withToken($sellerToken)->postJson("/api/seller/support-tickets/{$ticketId}/messages", ['body' => 'We are checking.'])
             ->assertOk()->assertJsonCount(2, 'messages')->assertJsonPath('messages.1.author_type', 'seller');
         $this->withToken($sellerToken)->postJson("/api/seller/support-tickets/{$ticketId}/resolve")->assertOk()->assertJsonPath('status', 'resolved');
+        $this->withToken($sellerToken)->postJson("/api/seller/support-tickets/{$ticketId}/reopen")->assertOk()->assertJsonPath('status', 'open')->assertJsonPath('resolved_at', null);
+        $this->withToken($sellerToken)->postJson("/api/seller/support-tickets/{$ticketId}/resolve")->assertOk();
         $this->withToken($customerToken)->postJson("/api/customers/support-tickets/{$ticketId}/messages", ['body' => 'Still waiting.'])
             ->assertOk()->assertJsonPath('status', 'open');
         $this->withToken($admin->createToken('test', ['admin:basic'])->plainTextToken)
@@ -80,6 +82,9 @@ class SupportTicketTest extends TestCase
 
         $this->withToken($customerToken)->postJson("/api/customers/support-tickets/{$ticketId}/resolve")
             ->assertOk()->assertJsonPath('status', 'resolved');
+        $this->withToken($customerToken)->postJson("/api/customers/support-tickets/{$ticketId}/reopen")
+            ->assertOk()->assertJsonPath('status', 'open')->assertJsonPath('resolved_at', null);
+        $this->assertDatabaseHas('support_tickets', ['id' => $ticketId, 'status' => 'open', 'store_read_at' => null]);
     }
 
     public function test_console_staff_can_open_customer_and_guest_tickets_with_the_right_store_scope(): void

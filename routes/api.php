@@ -145,6 +145,7 @@ Route::prefix('customers')->group(function () {
         Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply']);
         Route::post('/support-tickets/{ticket}/escalate', [SupportTicketController::class, 'escalate']);
         Route::post('/support-tickets/{ticket}/resolve', [SupportTicketController::class, 'resolve']);
+        Route::post('/support-tickets/{ticket}/reopen', [SupportTicketController::class, 'reopen']);
         Route::post('/support-attachments', [SupportTicketController::class, 'upload']);
         Route::post('/chat-attachments', [SupportTicketController::class, 'upload']);
         Route::get('/chats', [StoreChatController::class, 'index']);
@@ -352,6 +353,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {
     Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show'])->middleware('perm:support.reply');
     Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply'])->middleware('perm:support.reply');
     Route::post('/support-tickets/{ticket}/resolve', [SupportTicketController::class, 'resolve'])->middleware('perm:support.reply');
+    Route::post('/support-tickets/{ticket}/reopen', [SupportTicketController::class, 'reopen'])->middleware('perm:support.reply');
     Route::post('/support-attachments', [SupportTicketController::class, 'upload'])->middleware('perm:support.reply');
     Route::post('/chat-attachments', [SupportTicketController::class, 'upload'])->middleware('perm:chats.reply');
     Route::get('/chats', [StoreChatController::class, 'index'])->middleware('perm:chats.reply');
@@ -513,6 +515,7 @@ Route::prefix('seller')->middleware(['sanctum.type:seller','store.scope'])->grou
     Route::get('/support-tickets/{ticket}', [SupportTicketController::class, 'show'])->middleware('perm:support.reply');
     Route::post('/support-tickets/{ticket}/messages', [SupportTicketController::class, 'reply'])->middleware('perm:support.reply');
     Route::post('/support-tickets/{ticket}/resolve', [SupportTicketController::class, 'resolve'])->middleware('perm:support.reply');
+    Route::post('/support-tickets/{ticket}/reopen', [SupportTicketController::class, 'reopen'])->middleware('perm:support.reply');
     Route::post('/support-attachments', [SupportTicketController::class, 'upload'])->middleware('perm:support.reply');
     Route::post('/chat-attachments', [SupportTicketController::class, 'upload'])->middleware('perm:chats.reply');
     Route::get('/chats', [StoreChatController::class, 'index'])->middleware('perm:chats.reply');
