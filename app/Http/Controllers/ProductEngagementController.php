@@ -11,6 +11,7 @@ use App\Models\Review;
 use App\Models\ReviewLike;
 use App\Models\MediaAsset;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Validation\ValidationException;
 use App\Models\Seller;
 use Illuminate\Http\JsonResponse;
@@ -25,13 +26,14 @@ class ProductEngagementController extends Controller
         return response()->json(Review::query()
             ->where('customer_id', $customer->id)
             ->when($request->filled('product_id'),fn($q)=>$q->where('product_id',(int)$request->query('product_id')))
-            ->with(['product:id,name,slug,thumbnail,gallery,seller_id,owner_unassigned','product.seller:id,store_name','orderItem:id,variation_attributes,variation_labels,variation_image,product_name,product_thumbnail,seller_id,order_id','orderItem.seller:id,store_name','orderItem.order:id','orderItem.order.storeGroups:id,order_id,seller_id,store_name'])->withCount('likes')
+            ->with(['product:id,name,slug,thumbnail,gallery,seller_id,owner_unassigned','product.seller:id,store_name','orderItem:id,variation_attributes,variation_labels,variation_image,product_name,product_thumbnail,seller_id,order_id','orderItem.seller:id,store_name','orderItem.order:id','orderItem.order.items:id,order_id,product_id,variation_attributes,variation_labels,variation_image,quantity','orderItem.order.storeGroups:id,order_id,seller_id,store_name'])->withCount('likes')
             ->latest()->paginate($perPage)->through(function ($review) {
                 $item = $review->orderItem;
                 $group = $item?->order?->storeGroups?->first(fn($group) => $group->seller_id === $item->seller_id);
                 $name = $group?->store_name ?? ($item ? ($item->seller_id === null ? (\App\Models\Store::primary()?->name ?? config('app.name')) : $item->seller?->store_name) : null);
                 if ($name === null && !$review->product?->owner_unassigned) $name = $review->product?->seller_id === null ? (\App\Models\Store::primary()?->name ?? config('app.name')) : $review->product?->seller?->store_name;
                 $review->product?->setAttribute('store_name', $name);
+                $review->setAttribute('purchased_variants', $this->reviewVariants($review));
                 return $review;
             }));
     }
@@ -40,12 +42,25 @@ class ProductEngagementController extends Controller
     {
         $customer = $request->user();
         $perPage = max(1, min((int) $request->query('per_page', 20), 100));
-        return response()->json(OrderItem::query()
+        $items = OrderItem::query()
             ->where('fulfillment_status', 'delivered')
             ->when($request->filled('product_id'),fn($q)=>$q->where('product_id',(int)$request->query('product_id')))
             ->whereHas('order', fn ($query) => $query->where('customer_id', $customer->id))
-            ->whereDoesntHave('review', fn ($query) => $query->whereIn('status', ['pending', 'approved']))->with('seller:id,store_name')
-            ->latest()->paginate($perPage)->through(function($item){$item->setAttribute('seller_store_name',$item->seller_id === null ? (\App\Models\Store::primary()?->name ?? config('app.name')) : $item->seller?->store_name);return $item;}));
+            ->with('seller:id,store_name')->latest('id')->get();
+        $reviewed = Review::query()->where('customer_id', $customer->id)->whereIn('status', ['pending', 'approved'])->whereIn('order_item_id', $items->pluck('id'))->pluck('order_item_id')->all();
+        $rows = $items->groupBy(fn (OrderItem $item) => $item->order_id.'|'.$item->product_id)
+            ->reject(fn ($lines) => $lines->contains(fn (OrderItem $item) => in_array($item->id, $reviewed, true)))
+            ->map(function ($lines) {
+                /** @var \Illuminate\Support\Collection<int, OrderItem> $lines */
+                $first = $lines->sortBy('id')->first();
+                $first->setAttribute('order_item_ids', $lines->pluck('id')->sort()->values()->all());
+                $first->setAttribute('variants', $lines->sortBy('id')->map(fn (OrderItem $item) => ['order_item_id' => $item->id, 'variation_attributes' => $item->variation_attributes, 'variation_labels' => $item->variation_labels, 'variation_image' => $item->variation_image, 'quantity' => $item->quantity])->values()->all());
+                $first->quantity = (int) $lines->sum('quantity');
+                $first->setAttribute('seller_store_name', $first->seller_id === null ? (\App\Models\Store::primary()?->name ?? config('app.name')) : $first->seller?->store_name);
+                return $first;
+            })->sortByDesc('id')->values();
+        $page = LengthAwarePaginator::resolveCurrentPage();
+        return response()->json(new LengthAwarePaginator($rows->forPage($page, $perPage)->values(), $rows->count(), $perPage, $page, ['path' => $request->url(), 'query' => $request->query()]));
     }
 
     public function questionsForCustomer(Request $request): JsonResponse
@@ -158,32 +173,27 @@ class ProductEngagementController extends Controller
             }
         }
         [$review, $created] = DB::transaction(function () use ($data, $product, $customer) {
-            $items = OrderItem::query()
-                ->when(isset($data['order_item_id']), fn ($query) => $query->whereKey($data['order_item_id']))
-                ->where('product_id', $product->id)
-                ->where('fulfillment_status', 'delivered')
-                ->whereHas('order', fn ($query) => $query->where('customer_id', $customer->id));
-
-            // Legacy callers without a line id use the newest line that has
-            // not been reviewed yet, or whose only review was rejected.
-            if (!isset($data['order_item_id'])) {
-                $items->whereDoesntHave('review', fn ($query) => $query->whereIn('status', ['pending', 'approved']));
+            $base = OrderItem::query()->where('product_id', $product->id)->where('fulfillment_status', 'delivered')->whereHas('order', fn ($query) => $query->where('customer_id', $customer->id));
+            $item = isset($data['order_item_id']) ? (clone $base)->whereKey($data['order_item_id'])->first() : null;
+            $orderIds = $item ? collect([$item->order_id]) : (clone $base)->latest('id')->pluck('order_id')->unique();
+            foreach ($orderIds as $orderId) {
+                $lines = OrderItem::query()->where('order_id', $orderId)->where('product_id', $product->id)->where('fulfillment_status', 'delivered')->orderBy('id')->lockForUpdate()->get();
+                if ($lines->isEmpty()) continue;
+                $existing = Review::query()->where('customer_id', $customer->id)->where('product_id', $product->id)->where(function ($query) use ($orderId, $lines) { $query->where('order_id', $orderId)->orWhere(fn ($legacy) => $legacy->whereNull('order_id')->whereIn('order_item_id', $lines->pluck('id'))); })->latest('id')->lockForUpdate()->first();
+                if (isset($data['order_item_id']) || ! $existing || $existing->status === 'rejected') {
+                    $item = $lines->first();
+                    break;
+                }
             }
-            $item = $items->latest('id')->lockForUpdate()->first();
-            if (!$item) {
-                throw ValidationException::withMessages(['order_item_id' => ["You've already reviewed this item."]]);
-            }
-
-            $existing = Review::query()->where('customer_id', $customer->id)->where('order_item_id', $item->id)->lockForUpdate()->first();
-            if ($existing && in_array($existing->status, ['pending', 'approved'], true)) {
-                throw ValidationException::withMessages(['order_item_id' => ["You've already reviewed this item."]]);
-            }
+            if (!isset($item)) throw ValidationException::withMessages(['order_item_id' => ["You've already reviewed this item."]]);
+            $lines = OrderItem::query()->where('order_id', $item->order_id)->where('product_id', $product->id)->where('fulfillment_status', 'delivered')->orderBy('id')->lockForUpdate()->get();
+            $existing = Review::query()->where('customer_id', $customer->id)->where('product_id', $product->id)->where(function ($query) use ($item, $lines) { $query->where('order_id', $item->order_id)->orWhere(fn ($legacy) => $legacy->whereNull('order_id')->whereIn('order_item_id', $lines->pluck('id'))); })->latest('id')->lockForUpdate()->first();
             $attributes = ['product_id' => $product->id, 'rating' => $data['rating'], 'comment' => $data['comment'] ?? null, 'images' => $data['images'] ?? [], 'videos' => $data['videos'] ?? [], 'status' => 'pending', 'rejection_note' => null, 'moderated_at' => null];
             if ($existing) {
-                $existing->update($attributes);
+                $existing->update($attributes + ['order_id' => $item->order_id, 'order_item_id' => $item->id]);
                 return [$existing->fresh(), false];
             }
-            return [Review::create(['customer_id' => $customer->id, 'order_item_id' => $item->id] + $attributes), true];
+            return [Review::create(['customer_id' => $customer->id, 'order_id' => $item->order_id, 'order_item_id' => $item->id] + $attributes), true];
         });
         app(\App\Services\ConsoleNotificationService::class)->moderation($product->seller_id, 'review_pending', 'Review waiting for approval', '/dashboard/reviews');
         return response()->json(['message' => 'Review submitted for approval.', 'review' => $review], $created ? 201 : 200);
@@ -203,7 +213,7 @@ class ProductEngagementController extends Controller
         $status = $request->validate(['status' => ['sometimes', 'in:pending,approved,rejected,all']])['status'] ?? 'pending';
         $perPage = max(1, min((int) $request->query('per_page', 25), 100));
         $reviews = Review::query()->withCount('likes')
-            ->with(['customer:id,name,profile_picture', 'product:id,name,slug,thumbnail,seller_id', 'product.seller:id,store_name,store_slug', 'orderItem:id,variation_attributes,variation_labels,variation_image,product_name,product_thumbnail'])
+            ->with(['customer:id,name,profile_picture', 'product:id,name,slug,thumbnail,seller_id', 'product.seller:id,store_name,store_slug', 'orderItem:id,variation_attributes,variation_labels,variation_image,product_name,product_thumbnail,order_id', 'orderItem.order:id', 'orderItem.order.items:id,order_id,product_id,variation_attributes,variation_labels,variation_image,quantity'])
             ->when($status !== 'all', fn ($query) => $query->where('status', $status))
             ->whereHas('product', fn ($query) => $sellerId === -1
                 ? $query
@@ -212,6 +222,14 @@ class ProductEngagementController extends Controller
             ->paginate($perPage);
 
         return response()->json($reviews);
+    }
+
+    private function reviewVariants(Review $review): array
+    {
+        $item = $review->orderItem;
+        $order = $item?->order;
+        if (! $item || ! $order) return [];
+        return $order->items->where('product_id', $review->product_id)->sortBy('id')->map(fn (OrderItem $line) => ['order_item_id' => $line->id, 'variation_attributes' => $line->variation_attributes, 'variation_labels' => $line->variation_labels, 'variation_image' => $line->variation_image, 'quantity' => $line->quantity])->values()->all();
     }
 
     private function moderationQuestions(Request $request, ?int $sellerId): JsonResponse

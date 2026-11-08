@@ -79,33 +79,56 @@ class ProductEngagementTest extends TestCase
             ->assertJsonPath('data.0.status', 'pending');
     }
 
-    public function test_each_delivered_line_can_have_only_one_pending_or_approved_review(): void
+    public function test_one_review_covers_every_line_of_a_product_in_one_order(): void
     {
         [$customer, $product] = $this->fixtures();
         $order = Order::create(['order_number' => 'ORD-REVIEW-LINES', 'customer_id' => $customer->id, 'status' => 'delivered', 'payment_status' => 'paid', 'subtotal' => 200, 'total' => 200, 'shipping_name' => 'Customer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka']);
         $makeItem = fn () => OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => $product->name, 'product_slug' => $product->slug, 'quantity' => 1, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 100, 'line_cost' => 50, 'line_profit' => 50, 'fulfillment_status' => 'delivered']);
         $first = $makeItem();
+        $first->update(['quantity' => 2, 'variation_labels' => [['group' => 'Size', 'value' => 'M', 'swatch' => null]]]);
         $second = $makeItem();
+        $second->update(['variation_labels' => [['group' => 'Size', 'value' => 'L', 'swatch' => null]]]);
         $approved = Review::create(['product_id' => $product->id, 'customer_id' => $customer->id, 'order_item_id' => $first->id, 'rating' => 5, 'comment' => 'Original', 'status' => 'approved']);
         $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
         $url = "/api/customers/products/{$product->slug}/reviews";
 
-        $this->withToken($token)->postJson($url, ['order_item_id' => $first->id, 'rating' => 1, 'comment' => 'Overwrite'])
-            ->assertUnprocessable()->assertJsonValidationErrors('order_item_id')
-            ->assertJsonPath('errors.order_item_id.0', "You've already reviewed this item.");
-        $this->assertDatabaseHas('reviews', ['id' => $approved->id, 'status' => 'approved', 'comment' => 'Original']);
+        $this->withToken($token)->getJson('/api/customers/reviewable-items')
+            ->assertOk()->assertJsonCount(0, 'data');
 
-        // The legacy request chooses the remaining eligible delivered line.
-        $this->withToken($token)->postJson($url, ['rating' => 4, 'comment' => 'Second line'])->assertCreated()
-            ->assertJsonPath('review.order_item_id', $second->id);
+        // Choosing another variant from the same order edits the existing
+        // product review instead of manufacturing a second rating.
+        $this->withToken($token)->postJson($url, ['order_item_id' => $second->id, 'rating' => 1, 'comment' => 'Overwrite'])
+            ->assertOk()->assertJsonPath('review.id', $approved->id)->assertJsonPath('review.status', 'pending');
+        $this->assertDatabaseHas('reviews', ['id' => $approved->id, 'status' => 'pending', 'comment' => 'Overwrite', 'order_id' => $order->id]);
+        $this->assertDatabaseCount('reviews', 1);
+
+        // A legacy request cannot create a second review for the remaining
+        // line either.
         $this->withToken($token)->postJson($url, ['rating' => 4, 'comment' => 'Again'])
             ->assertUnprocessable()->assertJsonValidationErrors('order_item_id');
 
         // A rejected review is the one deliberate exception: resubmitting it
         // updates the same row and returns it to moderation.
         $approved->update(['status' => 'rejected', 'rejection_note' => 'Please revise']);
-        $this->withToken($token)->postJson($url, ['order_item_id' => $first->id, 'rating' => 3, 'comment' => 'Revised'])
+        $this->withToken($token)->postJson($url, ['order_item_id' => $second->id, 'rating' => 3, 'comment' => 'Revised'])
             ->assertOk()->assertJsonPath('review.id', $approved->id)->assertJsonPath('review.status', 'pending');
+    }
+
+    public function test_reviewable_items_groups_variants_and_quantity_per_product_and_order(): void
+    {
+        [$customer, $product] = $this->fixtures();
+        $order = Order::create(['order_number' => 'ORD-REVIEW-GROUP', 'customer_id' => $customer->id, 'status' => 'delivered', 'payment_status' => 'paid', 'subtotal' => 300, 'total' => 300, 'shipping_name' => 'Customer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka']);
+        $first = OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => $product->name, 'product_slug' => $product->slug, 'quantity' => 2, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 200, 'line_cost' => 100, 'line_profit' => 100, 'fulfillment_status' => 'delivered', 'variation_labels' => [['group' => 'Size', 'value' => 'M', 'swatch' => null]]]);
+        $second = OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => $product->name, 'product_slug' => $product->slug, 'quantity' => 1, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 100, 'line_cost' => 50, 'line_profit' => 50, 'fulfillment_status' => 'delivered', 'variation_labels' => [['group' => 'Size', 'value' => 'L', 'swatch' => null]]]);
+        $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+
+        $this->withToken($token)->getJson('/api/customers/reviewable-items')->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $first->id)
+            ->assertJsonPath('data.0.quantity', 3)
+            ->assertJsonPath('data.0.order_item_ids', [$first->id, $second->id])
+            ->assertJsonPath('data.0.variants.0.variation_labels.0.value', 'M')
+            ->assertJsonPath('data.0.variants.1.variation_labels.0.value', 'L');
     }
 
     public function test_review_moderation_is_scoped_to_the_product_owner(): void
