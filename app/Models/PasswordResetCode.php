@@ -6,10 +6,10 @@ use Illuminate\Database\Eloquent\Model;
 
 class PasswordResetCode extends Model
 {
-    protected $fillable = ['account_type', 'account_id', 'email', 'code_hash', 'failed_attempts', 'expires_at', 'used_at'];
+    protected $fillable = ['account_type', 'account_id', 'email', 'code_hash', 'failed_attempts', 'is_invite', 'expires_at', 'used_at', 'replaced_at', 'fulfilled_at'];
 
     protected function casts(): array
     {
-        return ['expires_at' => 'datetime', 'used_at' => 'datetime'];
+        return ['is_invite' => 'boolean', 'expires_at' => 'datetime', 'used_at' => 'datetime', 'replaced_at' => 'datetime', 'fulfilled_at' => 'datetime'];
     }
 }

@@ -28,9 +28,19 @@ class PasswordResetCheckController extends Controller
             $account = SellerStaff::where('email', $data['email'])->first();
             $codeAccountType = 'seller_staff';
         }
-        if (!$account || !$this->passwordResets->check($account, $codeAccountType, $data['code'])) {
-            return response()->json(['message' => 'Invalid or expired code.', 'errors' => ['code' => ['Invalid or expired code.']]], 422);
-        }
+        if (!$account) return response()->json($this->passwordResets->failurePayload(PasswordResetCodeService::INVALID), 422);
+        $status = $this->passwordResets->inspect($account, $codeAccountType, $data['code']);
+        if ($status === PasswordResetCodeService::INVALID) return response()->json($this->passwordResets->failurePayload($status), 422);
+        if ($this->suspended($account)) return response()->json(['message' => 'Your account is suspended. Please contact support.', 'code' => 'account_suspended'], 403);
+        if ($status !== PasswordResetCodeService::VALID) return response()->json($this->passwordResets->failurePayload($status), 422);
         return response()->json(['message' => 'Code is valid.']);
+    }
+
+    private function suspended(object $account): bool
+    {
+        if ($account instanceof Customer) return $account->crm_status === 'suspended';
+        if ($account instanceof Seller) return $account->status === 'suspended' || ! $account->is_active;
+        if ($account instanceof SellerStaff) return $account->status === 'suspended' || ! $account->seller?->is_active || $account->seller?->status === 'suspended';
+        return isset($account->is_active) && ! $account->is_active;
     }
 }

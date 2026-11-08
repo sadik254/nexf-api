@@ -403,6 +403,7 @@ class SellerController extends Controller
         $data = $request->validate(['email' => ['required', 'email']]);
         $seller = Seller::where('email', $data['email'])->first();
         $staff = !$seller ? SellerStaff::with('seller')->where('email', $data['email'])->first() : null;
+        if (($seller && $this->suspendedForReset($seller)) || ($staff && $this->suspendedForReset($staff))) return $this->suspendedResetResponse();
         if ($seller) {
             $this->passwordResets->send($seller, 'seller');
         } elseif ($staff) {
@@ -422,10 +423,26 @@ class SellerController extends Controller
     {
         $data = $request->validate(['email' => ['required', 'email'], 'code' => ['required', 'digits:6'], 'password' => ['required', 'string', 'min:8', 'confirmed']]);
         $seller = Seller::where('email', $data['email'])->first(); $staff = !$seller ? SellerStaff::where('email', $data['email'])->first() : null; $account = $staff ?: $seller; $type = $staff ? 'seller_staff' : 'seller';
-        if (!$account || !$this->passwordResets->consume($account, $type, $data['code'])) return response()->json(['message' => 'Invalid or expired code.'], 422);
+        if (!$account) return response()->json($this->passwordResets->failurePayload(PasswordResetCodeService::INVALID), 422);
+        $status = $this->passwordResets->inspect($account, $type, $data['code']);
+        if ($status === PasswordResetCodeService::INVALID) return response()->json($this->passwordResets->failurePayload($status), 422);
+        if ($this->suspendedForReset($account)) return $this->suspendedResetResponse();
+        if ($status !== PasswordResetCodeService::VALID || !$this->passwordResets->consume($account, $type, $data['code'])) return response()->json($this->passwordResets->failurePayload($status), 422);
         $account->forceFill(['password' => $data['password']])->save(); $account->tokens()->delete();
         app(\App\Services\AccountSecurityMailService::class)->passwordChanged($account, 'reset', $request->ip());
         return response()->json(['message' => 'Password reset successfully.']);
+    }
+
+    private function suspendedForReset(Seller|SellerStaff $account): bool
+    {
+        if ($account instanceof Seller) return $account->status === 'suspended' || ! $account->is_active;
+        $account->loadMissing('seller');
+        return $account->status === 'suspended' || ! $account->seller?->is_active || $account->seller?->status === 'suspended';
+    }
+
+    private function suspendedResetResponse(): JsonResponse
+    {
+        return response()->json(['message' => 'Your account is suspended. Please contact support.', 'code' => 'account_suspended'], 403);
     }
 
     public function approve(Seller $seller, Request $request): JsonResponse

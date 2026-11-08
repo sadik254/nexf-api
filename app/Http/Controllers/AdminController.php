@@ -392,6 +392,7 @@ class AdminController extends Controller
     {
         $data = $request->validate(['email' => ['required', 'email']]);
         $admin = Admin::where('email', $data['email'])->first();
+        if ($admin && ! $admin->is_active) return $this->suspendedResetResponse();
         if ($admin) $this->passwordResets->send($admin, 'admin');
         return response()->json(['message' => 'If that email exists, a code has been sent.']);
     }
@@ -400,10 +401,19 @@ class AdminController extends Controller
     {
         $data = $request->validate(['email' => ['required', 'email'], 'code' => ['required', 'digits:6'], 'password' => ['required', 'string', 'min:8', 'confirmed']]);
         $admin = Admin::where('email', $data['email'])->first();
-        if (!$admin || !$this->passwordResets->consume($admin, 'admin', $data['code'])) return response()->json(['message' => 'Invalid or expired code.'], 422);
+        if (!$admin) return response()->json($this->passwordResets->failurePayload(PasswordResetCodeService::INVALID), 422);
+        $status = $this->passwordResets->inspect($admin, 'admin', $data['code']);
+        if ($status === PasswordResetCodeService::INVALID) return response()->json($this->passwordResets->failurePayload($status), 422);
+        if (! $admin->is_active) return $this->suspendedResetResponse();
+        if ($status !== PasswordResetCodeService::VALID || !$this->passwordResets->consume($admin, 'admin', $data['code'])) return response()->json($this->passwordResets->failurePayload($status), 422);
         $admin->forceFill(['password' => $data['password']])->save(); $admin->tokens()->delete();
         app(\App\Services\AccountSecurityMailService::class)->passwordChanged($admin, 'reset', $request->ip());
         return response()->json(['message' => 'Password reset successfully.']);
+    }
+
+    private function suspendedResetResponse(): JsonResponse
+    {
+        return response()->json(['message' => 'Your account is suspended. Please contact support.', 'code' => 'account_suspended'], 403);
     }
 
 

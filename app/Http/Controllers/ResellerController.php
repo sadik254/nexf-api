@@ -34,7 +34,8 @@ class ResellerController extends Controller
     public function forgotPassword(Request $request): JsonResponse
     {
         $data = $request->validate(['email' => ['required', 'email']]);
-        $reseller = Reseller::where('email', $data['email'])->where('is_active', true)->first();
+        $reseller = Reseller::where('email', $data['email'])->first();
+        if ($reseller && ! $reseller->is_active) return $this->suspendedResetResponse();
         if ($reseller) $this->passwordResets->send($reseller, 'reseller');
         return response()->json(['message' => 'If that email exists, a code has been sent.']);
     }
@@ -42,12 +43,21 @@ class ResellerController extends Controller
     public function resetPassword(Request $request): JsonResponse
     {
         $data = $request->validate(['email' => ['required', 'email'], 'code' => ['required', 'digits:6'], 'password' => ['required', 'string', 'min:8', 'confirmed']]);
-        $reseller = Reseller::where('email', $data['email'])->where('is_active', true)->first();
-        if (!$reseller || !$this->passwordResets->consume($reseller, 'reseller', $data['code'])) return response()->json(['message' => 'Invalid or expired code.'], 422);
+        $reseller = Reseller::where('email', $data['email'])->first();
+        if (!$reseller) return response()->json($this->passwordResets->failurePayload(PasswordResetCodeService::INVALID), 422);
+        $status = $this->passwordResets->inspect($reseller, 'reseller', $data['code']);
+        if ($status === PasswordResetCodeService::INVALID) return response()->json($this->passwordResets->failurePayload($status), 422);
+        if (! $reseller->is_active) return $this->suspendedResetResponse();
+        if ($status !== PasswordResetCodeService::VALID || !$this->passwordResets->consume($reseller, 'reseller', $data['code'])) return response()->json($this->passwordResets->failurePayload($status), 422);
         $reseller->forceFill(['password' => $data['password']])->save();
         $reseller->tokens()->delete();
         app(\App\Services\AccountSecurityMailService::class)->passwordChanged($reseller, 'reset', $request->ip());
         return response()->json(['message' => 'Password set successfully.']);
+    }
+
+    private function suspendedResetResponse(): JsonResponse
+    {
+        return response()->json(['message' => 'Your account is suspended. Please contact support.', 'code' => 'account_suspended'], 403);
     }
 
     public function me(Request $request): JsonResponse

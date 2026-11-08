@@ -295,14 +295,11 @@ class CustomerController extends Controller
         ]);
 
         $customer = Customer::where('email', $data['email'])->first();
-        if ($customer?->crm_status === 'suspended') return $this->suspendedResponse();
-        if (!$customer) {
-            return response()->json(['message' => 'Invalid code.'], 422);
-        }
-
-        if (!$this->passwordResets->consume($customer, 'customer', $data['code'])) {
-            return response()->json(['message' => 'Invalid or expired code.'], 422);
-        }
+        if (!$customer) return response()->json($this->passwordResets->failurePayload(\App\Services\PasswordResetCodeService::INVALID), 422);
+        $status = $this->passwordResets->inspect($customer, 'customer', $data['code']);
+        if ($status === \App\Services\PasswordResetCodeService::INVALID) return response()->json($this->passwordResets->failurePayload($status), 422);
+        if ($customer->crm_status === 'suspended') return $this->suspendedResponse();
+        if ($status !== \App\Services\PasswordResetCodeService::VALID || !$this->passwordResets->consume($customer, 'customer', $data['code'])) return response()->json($this->passwordResets->failurePayload($status), 422);
 
         $customer->forceFill([
             'password' => $data['password'],
