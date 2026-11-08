@@ -100,6 +100,14 @@ class CheckoutService
             $walletWithdrawableAmount = $walletAmount - $walletRewardAmount;
         }
         $this->fraudGuard->assertAllowed($customer, $data + ['payment_method_code' => $paymentMethod->code], $total);
+        $storeItems = [];
+        foreach ($items as $index => $item) {
+            $seller = $item['product']->seller;
+            if (! $seller) continue;
+            $storeItems[$seller->id]['seller'] = $seller;
+            $storeItems[$seller->id]['indexes'][] = $index;
+        }
+        $this->fraudGuard->assertStoresAllowed($customer, $data + ['payment_method_code' => $paymentMethod->code], $storeItems);
 
         return compact('paymentMethod', 'shippingMethod', 'items', 'subtotal') + [
             // Kept for compatibility with existing order persistence.

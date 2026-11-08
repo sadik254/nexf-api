@@ -478,6 +478,10 @@ Route::prefix('seller')->middleware(['sanctum.type:seller','store.scope'])->grou
     Route::middleware('throttle:auth-verify')->post('/staff/me/email/verify-new', [\App\Http\Controllers\SellerStaffController::class, 'emailVerifyNew']);
     Route::middleware('throttle:auth-resend')->post('/staff/me/email/resend', [\App\Http\Controllers\SellerStaffController::class, 'emailResend']);
     Route::get('/notifications', fn (\Illuminate\Http\Request $request) => app(\App\Http\Controllers\ConsoleNotificationController::class)->index($request, 'seller'))->middleware('perm:dashboard.view');
+    Route::get('/fraud-guard', [FraudGuardController::class, 'sellerState'])->middleware('perm:fraud_guard.manage');
+    Route::post('/fraud-guard/settings', [FraudGuardController::class, 'sellerSaveSettings'])->middleware('perm:fraud_guard.manage');
+    Route::post('/fraud-guard/blocks', [FraudGuardController::class, 'sellerAddBlock'])->middleware('perm:fraud_guard.manage');
+    Route::post('/fraud-guard/blocks/{fraudGuardBlock}/delete', [FraudGuardController::class, 'sellerRemoveBlock'])->middleware('perm:fraud_guard.manage');
     Route::post('/notifications/read-all', fn (\Illuminate\Http\Request $request) => app(\App\Http\Controllers\ConsoleNotificationController::class)->readAll($request, 'seller'))->middleware('perm:dashboard.view');
     Route::post('/notifications/clear', fn (\Illuminate\Http\Request $request) => app(\App\Http\Controllers\ConsoleNotificationController::class)->clear($request, 'seller'))->middleware('perm:dashboard.view');
     Route::post('/notifications/{notification}/read', fn (\Illuminate\Http\Request $request, \App\Models\ConsoleNotification $notification) => app(\App\Http\Controllers\ConsoleNotificationController::class)->read($request, 'seller', $notification))->middleware('perm:dashboard.view');
