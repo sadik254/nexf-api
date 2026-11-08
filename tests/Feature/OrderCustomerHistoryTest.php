@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Seller;
+use App\Models\Store;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -30,6 +31,22 @@ class OrderCustomerHistoryTest extends TestCase
         $this->withToken($adminToken)->getJson("/api/admin/orders/{$subject->id}")->assertOk()->assertJsonPath('customer_history', $expected);
         $sellerToken = $seller->createToken('seller', ['seller'])->plainTextToken;
         $this->withToken($sellerToken)->getJson("/api/seller/orders/{$subject->id}")->assertOk()->assertJsonPath('customer_history', $expected);
+    }
+
+    public function test_order_items_return_their_own_store_identity_not_the_parcel_label(): void
+    {
+        Store::create(['setup_key' => Store::PRIMARY_KEY, 'name' => 'NEXF Lifestyle']);
+        $customer = Customer::create(['name' => 'Buyer', 'email' => 'line-store@example.test', 'phone' => '01700000001', 'password' => 'password123']);
+        $seller = Seller::create(['seller_name' => 'Store', 'store_name' => 'Aarish', 'store_slug' => 'aarish', 'email' => 'aarish@example.test', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
+        $order = $this->order('LINE-STORES-1', $customer->id, '01700000001', 'pending');
+        OrderItem::create(['order_id' => $order->id, 'product_name' => 'House item', 'quantity' => 1, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 100, 'line_cost' => 50, 'line_profit' => 50, 'fulfillment_status' => 'pending']);
+        OrderItem::create(['order_id' => $order->id, 'seller_id' => $seller->id, 'product_name' => 'Seller item', 'quantity' => 1, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 100, 'line_cost' => 50, 'line_profit' => 50, 'fulfillment_status' => 'pending']);
+
+        $token = $customer->createToken('customer', ['customer:basic'])->plainTextToken;
+        $this->withToken($token)->getJson("/api/customers/orders/{$order->id}")
+            ->assertOk()
+            ->assertJsonFragment(['product_name' => 'House item', 'store_name' => 'NEXF Lifestyle', 'store_slug' => 'admin'])
+            ->assertJsonFragment(['product_name' => 'Seller item', 'store_name' => 'Aarish', 'store_slug' => 'aarish']);
     }
 
     private function order(string $number, ?int $customerId, string $phone, string $status, ?string $exchangeFor = null): Order

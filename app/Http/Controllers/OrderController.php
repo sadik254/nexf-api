@@ -16,6 +16,7 @@ use App\Models\ShippingMethod;
 use App\Models\OrderItem;
 use App\Models\OrderStoreGroup;
 use App\Models\Seller;
+use App\Models\Store;
 use App\Services\InventoryService;
 use App\Services\ProductBundleService;
 use App\Services\SubOrderService;
@@ -64,7 +65,7 @@ class OrderController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        return response()->json($order->load(['items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']));
+        return response()->json($this->withLineStores($order->load(['items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon'])));
     }
 
     public function previewAdmin(Request $request): JsonResponse
@@ -180,7 +181,7 @@ class OrderController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        return response()->json($this->withCustomerHistory($order->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon'])));
+        return response()->json($this->withLineStores($this->withCustomerHistory($order->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']))));
     }
 
     public function indexSellerOrdersForSuperAdmin(Request $request, Seller $seller): JsonResponse
@@ -193,7 +194,7 @@ class OrderController extends Controller
     {
         if (!$request->user() instanceof Admin) return response()->json(['message' => 'Forbidden.'], 403);
         if (!$order->items()->where('seller_id', $seller->id)->exists()) return response()->json(['message' => 'Order does not contain items from this seller.'], 404);
-        return response()->json($this->withCustomerHistory($order->load(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => $this->sellerGroups($seller->id), 'paymentMethod', 'shippingMethod', 'coupon'])));
+        return response()->json($this->withLineStores($this->withCustomerHistory($order->load(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => $this->sellerGroups($seller->id), 'paymentMethod', 'shippingMethod', 'coupon']))));
     }
 
     public function cancelSellerOrderForSuperAdmin(Request $request, Seller $seller, Order $order): JsonResponse
@@ -229,12 +230,12 @@ class OrderController extends Controller
         $seller = $request->user();
         abort_unless(! $order->isHeldFromSeller() && $order->items()->where('seller_id', $seller->id)->exists(), 404);
 
-        $view = $this->sellerView($order->load([
+        $view = $this->sellerView($this->withLineStores($order->load([
             'customer:id,name,email,phone',
             'items' => fn ($query) => $query->where('seller_id', $seller->id),
             'storeGroups' => $this->sellerGroups($seller->id),
             'shippingMethod',
-        ])->toArray(), $seller->id);
+        ]))->toArray(), $seller->id);
         $view['customer_history'] = $this->customerHistory($order);
         return response()->json($view);
     }
@@ -269,6 +270,19 @@ class OrderController extends Controller
     private function withCustomerHistory(Order $order): Order
     {
         $order->setAttribute('customer_history', $this->customerHistory($order));
+        return $order;
+    }
+
+    /** Adds each line's own store identity; parcel names are deliberately not used. */
+    private function withLineStores(Order $order, ?Store $houseStore = null): Order
+    {
+        $order->loadMissing('items.seller:id,store_name,store_slug');
+        $houseStore ??= Store::primary();
+        foreach ($order->items as $item) {
+            $item->setAttribute('store_name', $item->seller_id === null ? ($houseStore?->name ?? config('app.name')) : $item->seller?->store_name);
+            $item->setAttribute('store_slug', $item->seller_id === null ? 'admin' : $item->seller?->store_slug);
+            $item->makeHidden('seller');
+        }
         return $order;
     }
 
@@ -1696,6 +1710,9 @@ class OrderController extends Controller
         $counts = (clone $query)->reorder()->selectRaw('status, count(*) as count')->groupBy('status')->pluck('count', 'status')->map(fn ($count) => (int) $count)->all();
         if (isset($filters['status'])) $query->where('status', $filters['status']);
         $page = $query->paginate($filters['per_page'] ?? 25);
+        $page->getCollection()->loadMissing('items.seller:id,store_name,store_slug');
+        $houseStore = Store::primary();
+        $page->getCollection()->each(fn (Order $order) => $this->withLineStores($order, $houseStore));
         $result = $page->toArray();
         if ($sellerId !== null) {
             $result['data'] = array_map(fn (array $order) => $this->sellerView($order, $sellerId), $result['data'] ?? []);
