@@ -4,9 +4,10 @@ namespace Tests\Feature;
 
 use App\Models\Admin;
 use App\Models\MediaAsset;
+use App\Models\Product;
+use App\Models\ProductCategory;
 use App\Models\Seller;
 use App\Models\SellerStaff;
-use App\Models\ProductCategory;
 use App\Services\MediaUploadService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -44,16 +45,16 @@ class MediaAssetTest extends TestCase
         $category = ProductCategory::create(['name' => 'Clothing', 'slug' => 'media-clothing']);
         $seller = Seller::create(['seller_name' => 'Seller', 'email' => 'product-media@example.test', 'store_name' => 'Product Media', 'store_slug' => 'product-media', 'kyc_type' => 'nid', 'kyc_number' => '3', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
         $other = Seller::create(['seller_name' => 'Other', 'email' => 'other-media@example.test', 'store_name' => 'Other Media', 'store_slug' => 'other-media', 'kyc_type' => 'nid', 'kyc_number' => '4', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
-        $mine = \App\Models\MediaAsset::create(['owner_type' => 'seller', 'owner_id' => $seller->id, 'source' => 'url', 'url' => 'https://example.test/mine.jpg', 'file_name' => 'mine.jpg', 'mime_type' => 'image/jpeg']);
-        $theirs = \App\Models\MediaAsset::create(['owner_type' => 'seller', 'owner_id' => $other->id, 'source' => 'url', 'url' => 'https://example.test/theirs.jpg', 'file_name' => 'theirs.jpg', 'mime_type' => 'image/jpeg']);
+        $mine = MediaAsset::create(['owner_type' => 'seller', 'owner_id' => $seller->id, 'source' => 'url', 'url' => 'https://example.test/mine.jpg', 'file_name' => 'mine.jpg', 'mime_type' => 'image/jpeg']);
+        $theirs = MediaAsset::create(['owner_type' => 'seller', 'owner_id' => $other->id, 'source' => 'url', 'url' => 'https://example.test/theirs.jpg', 'file_name' => 'theirs.jpg', 'mime_type' => 'image/jpeg']);
         $token = $seller->createToken('test', ['seller:basic'])->plainTextToken;
         $base = ['category_id' => $category->id, 'name' => 'Media coat', 'product_type' => 'simple', 'status' => 'draft'];
         $this->withToken($token)->postJson('/api/seller/products', $base + ['thumbnail_media_id' => $theirs->id])->assertForbidden();
         $this->withToken($token)->postJson('/api/seller/products', $base + ['thumbnail_media_id' => $mine->id, 'gallery_media_ids' => [$mine->id]])
             ->assertCreated()->assertJsonPath('product.thumbnail', 'https://example.test/mine.jpg')->assertJsonPath('product.gallery.0', 'https://example.test/mine.jpg');
 
-        $secondImage = \App\Models\MediaAsset::create(['owner_type' => 'seller', 'owner_id' => $seller->id, 'source' => 'url', 'url' => 'https://example.test/second.jpg', 'file_name' => 'second.jpg', 'mime_type' => 'image/jpeg']);
-        $product = \App\Models\Product::where('seller_id', $seller->id)->firstOrFail();
+        $secondImage = MediaAsset::create(['owner_type' => 'seller', 'owner_id' => $seller->id, 'source' => 'url', 'url' => 'https://example.test/second.jpg', 'file_name' => 'second.jpg', 'mime_type' => 'image/jpeg']);
+        $product = Product::where('seller_id', $seller->id)->firstOrFail();
         $this->withToken($token)->postJson("/api/seller/products/{$product->id}", [
             'thumbnail_media_id' => $secondImage->id,
             'gallery_order' => [['url' => 'https://example.test/mine.jpg']],
@@ -138,5 +139,27 @@ class MediaAssetTest extends TestCase
             ->assertOk()->assertJsonPath('admin.image', $asset->url);
         $this->withToken($token)->postJson('/api/admin/house-store', ['store_logo_media_id' => $asset->id])
             ->assertOk()->assertJsonPath('store_logo', $asset->url);
+    }
+
+    public function test_svg_uploads_are_sanitized_before_being_sent_to_the_public_media_host(): void
+    {
+        $admin = Admin::create(['name' => 'Super', 'email' => 'svg-media@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $this->mock(MediaUploadService::class, function ($mock): void {
+            $mock->shouldReceive('upload')->once()->withArgs(function ($file, $directory, $mime): bool {
+                $contents = file_get_contents($file->getRealPath());
+                $this->assertSame('media', $directory);
+                $this->assertSame('image/svg+xml', $mime);
+                $this->assertStringNotContainsString('<script', strtolower((string) $contents));
+                $this->assertStringNotContainsString('javascript:', strtolower((string) $contents));
+                $this->assertStringNotContainsString('https://evil.example', strtolower((string) $contents));
+
+                return true;
+            })->andReturn('https://media.example.test/media/logo.svg');
+        });
+
+        $file = UploadedFile::fake()->createWithContent('logo.svg', '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><a href="javascript:alert(1)"><rect onload="alert(1)"/></a><image href="https://evil.example/logo.png"/></svg>');
+        $token = $admin->createToken('test', ['admin'])->plainTextToken;
+        $this->withToken($token)->post('/api/admin/media', ['file' => $file])
+            ->assertCreated()->assertJsonPath('mime_type', 'image/svg+xml');
     }
 }

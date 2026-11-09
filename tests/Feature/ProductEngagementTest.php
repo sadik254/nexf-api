@@ -2,13 +2,14 @@
 
 namespace Tests\Feature;
 
-use App\Models\Customer;
 use App\Models\Admin;
-use App\Models\Product;
-use App\Models\ProductQuestion;
-use App\Models\ProductCategory;
+use App\Models\Customer;
+use App\Models\MediaAsset;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Product;
+use App\Models\ProductCategory;
+use App\Models\ProductQuestion;
 use App\Models\Review;
 use App\Models\Seller;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -131,6 +132,33 @@ class ProductEngagementTest extends TestCase
             ->assertJsonPath('data.0.variants.1.variation_labels.0.value', 'L');
     }
 
+    public function test_review_responses_include_the_combo_line_that_was_purchased(): void
+    {
+        [$customer, $product] = $this->fixtures();
+        $order = Order::create(['order_number' => 'ORD-REVIEW-COMBO', 'customer_id' => $customer->id, 'status' => 'delivered', 'payment_status' => 'paid', 'subtotal' => 100, 'total' => 100, 'shipping_name' => 'Customer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka']);
+        $item = OrderItem::create([
+            'order_id' => $order->id, 'product_id' => $product->id, 'product_name' => $product->name, 'product_slug' => $product->slug,
+            'quantity' => 1, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 100, 'line_cost' => 50, 'line_profit' => 50,
+            'fulfillment_status' => 'delivered', 'bundle_label' => '10 pcs combo', 'bundle_source_label' => 'Book bundle', 'bundle_source_size' => 10,
+            'bundle_items' => [['labels' => [['group' => 'Books', 'value' => 'Birds']], 'quantity' => 2]],
+        ]);
+        $review = Review::create(['product_id' => $product->id, 'customer_id' => $customer->id, 'order_id' => $order->id, 'order_item_id' => $item->id, 'rating' => 5, 'comment' => 'Great', 'status' => 'approved']);
+        $customerToken = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+
+        $this->withToken($customerToken)->getJson('/api/customers/reviews')->assertOk()
+            ->assertJsonPath('data.0.purchased_variants.0.bundle_label', '10 pcs combo')
+            ->assertJsonPath('data.0.purchased_variants.0.bundle_items.0.labels.0.value', 'Birds');
+        $this->getJson("/api/store/products/{$product->slug}/reviews")->assertOk()
+            ->assertJsonPath('data.0.purchased_variants.0.bundle_source_size', 10);
+
+        $admin = Admin::create(['name' => 'Super', 'email' => 'review-combo-admin@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $adminToken = $admin->createToken('test', ['admin'])->plainTextToken;
+        $this->withToken($adminToken)->getJson('/api/admin/product-reviews?status=approved')->assertOk()
+            ->assertJsonPath('data.0.order_item.bundle_source_label', 'Book bundle');
+        $this->withToken($adminToken)->postJson("/api/admin/product-reviews/{$review->id}/moderate", ['status' => 'approved'])->assertOk()
+            ->assertJsonPath('review.order_item.bundle_items.0.quantity', 2);
+    }
+
     public function test_review_moderation_is_scoped_to_the_product_owner(): void
     {
         [$customer, $houseProduct] = $this->fixtures();
@@ -239,77 +267,77 @@ class ProductEngagementTest extends TestCase
     public function test_review_media_requires_owned_assets_and_delivered_items(): void
     {
         [$customer, $product] = $this->fixtures();
-        $other = Customer::create(['name'=>'Other','email'=>'other-media@example.test','password'=>'password123']);
-        $owned = \App\Models\MediaAsset::create(['owner_type'=>'customer','owner_id'=>$customer->id,'source'=>'upload','url'=>'https://example.test/owned.jpg','file_name'=>'owned.jpg','mime_type'=>'image/jpeg','size_bytes'=>100]);
-        $foreign = \App\Models\MediaAsset::create(['owner_type'=>'customer','owner_id'=>$other->id,'source'=>'upload','url'=>'https://example.test/foreign.jpg','file_name'=>'foreign.jpg','mime_type'=>'image/jpeg','size_bytes'=>100]);
-        $order = Order::create(['order_number'=>'ORD-REVIEW-MEDIA','customer_id'=>$customer->id,'status'=>'delivered','payment_status'=>'paid','subtotal'=>100,'total'=>100,'shipping_name'=>'Customer','shipping_phone'=>'01700000000','shipping_address'=>'Dhaka']);
-        $item = OrderItem::create(['order_id'=>$order->id,'product_id'=>$product->id,'product_name'=>$product->name,'product_slug'=>$product->slug,'quantity'=>1,'unit_selling_price'=>100,'unit_buying_price'=>50,'line_subtotal'=>100,'line_cost'=>50,'line_profit'=>50,'fulfillment_status'=>'delivered','variation_attributes'=>['Size'=>'M']]);
-        $this->withToken($customer->createToken('test',['customer:basic'])->plainTextToken);
+        $other = Customer::create(['name' => 'Other', 'email' => 'other-media@example.test', 'password' => 'password123']);
+        $owned = MediaAsset::create(['owner_type' => 'customer', 'owner_id' => $customer->id, 'source' => 'upload', 'url' => 'https://example.test/owned.jpg', 'file_name' => 'owned.jpg', 'mime_type' => 'image/jpeg', 'size_bytes' => 100]);
+        $foreign = MediaAsset::create(['owner_type' => 'customer', 'owner_id' => $other->id, 'source' => 'upload', 'url' => 'https://example.test/foreign.jpg', 'file_name' => 'foreign.jpg', 'mime_type' => 'image/jpeg', 'size_bytes' => 100]);
+        $order = Order::create(['order_number' => 'ORD-REVIEW-MEDIA', 'customer_id' => $customer->id, 'status' => 'delivered', 'payment_status' => 'paid', 'subtotal' => 100, 'total' => 100, 'shipping_name' => 'Customer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka']);
+        $item = OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => $product->name, 'product_slug' => $product->slug, 'quantity' => 1, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 100, 'line_cost' => 50, 'line_profit' => 50, 'fulfillment_status' => 'delivered', 'variation_attributes' => ['Size' => 'M']]);
+        $this->withToken($customer->createToken('test', ['customer:basic'])->plainTextToken);
         $url = "/api/customers/products/{$product->slug}/reviews";
-        $base = ['order_item_id'=>$item->id,'rating'=>4,'comment'=>'Fits well.','videos'=>[]];
-        $this->postJson($url,$base+['images'=>[$foreign->url]])->assertUnprocessable();
-        $this->postJson($url,$base+['images'=>['https://example.test/unowned.jpg']])->assertUnprocessable();
-        $id=$this->postJson($url,$base+['images'=>[$owned->url]])->assertCreated()->assertJsonPath('review.images.0',$owned->url)->json('review.id');
-        $this->getJson('/api/customers/reviews?product_id='.$product->id)->assertOk()->assertJsonCount(1,'data')->assertJsonPath('data.0.media_details.0.file_name','owned.jpg');
-        $this->getJson('/api/customers/reviewable-items?product_id='.$product->id)->assertOk()->assertJsonCount(0,'data');
-        $this->getJson("/api/store/products/{$product->slug}/reviews")->assertOk()->assertJsonCount(0,'data');
-        $admin=Admin::create(['name'=>'Moderator','email'=>'media-moderator@example.test','password'=>'password123','role'=>'admin']);
-        $this->withToken($admin->createToken('test',['admin:basic'])->plainTextToken);
-        $this->postJson("/api/admin/product-reviews/{$id}/moderate",['status'=>'approved'])->assertOk();
-        $this->getJson("/api/store/products/{$product->slug}/reviews")->assertOk()->assertJsonPath('data.0.images.0',$owned->url)->assertJsonPath('data.0.purchased_variant.Size','M')->assertJsonPath('data.0.verified',true);
-        $this->postJson("/api/admin/product-reviews/{$id}",['comment'=>'Edited','images'=>[$owned->url,$foreign->url],'videos'=>[]])->assertUnprocessable();
-        $this->postJson("/api/admin/product-reviews/{$id}",['rating'=>1,'images'=>[],'videos'=>[]])->assertUnprocessable();
-        $this->postJson("/api/admin/product-reviews/{$id}",['comment'=>'Edited','images'=>[],'videos'=>[],'seller_response'=>'Thank you.'])->assertOk()->assertJsonPath('review.images',[]);
-        $this->assertDatabaseHas('reviews',['id'=>$id,'rating'=>4,'comment'=>'Edited']);
+        $base = ['order_item_id' => $item->id, 'rating' => 4, 'comment' => 'Fits well.', 'videos' => []];
+        $this->postJson($url, $base + ['images' => [$foreign->url]])->assertUnprocessable();
+        $this->postJson($url, $base + ['images' => ['https://example.test/unowned.jpg']])->assertUnprocessable();
+        $id = $this->postJson($url, $base + ['images' => [$owned->url]])->assertCreated()->assertJsonPath('review.images.0', $owned->url)->json('review.id');
+        $this->getJson('/api/customers/reviews?product_id='.$product->id)->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.media_details.0.file_name', 'owned.jpg');
+        $this->getJson('/api/customers/reviewable-items?product_id='.$product->id)->assertOk()->assertJsonCount(0, 'data');
+        $this->getJson("/api/store/products/{$product->slug}/reviews")->assertOk()->assertJsonCount(0, 'data');
+        $admin = Admin::create(['name' => 'Moderator', 'email' => 'media-moderator@example.test', 'password' => 'password123', 'role' => 'admin']);
+        $this->withToken($admin->createToken('test', ['admin:basic'])->plainTextToken);
+        $this->postJson("/api/admin/product-reviews/{$id}/moderate", ['status' => 'approved'])->assertOk();
+        $this->getJson("/api/store/products/{$product->slug}/reviews")->assertOk()->assertJsonPath('data.0.images.0', $owned->url)->assertJsonPath('data.0.purchased_variant.Size', 'M')->assertJsonPath('data.0.verified', true);
+        $this->postJson("/api/admin/product-reviews/{$id}", ['comment' => 'Edited', 'images' => [$owned->url, $foreign->url], 'videos' => []])->assertUnprocessable();
+        $this->postJson("/api/admin/product-reviews/{$id}", ['rating' => 1, 'images' => [], 'videos' => []])->assertUnprocessable();
+        $this->postJson("/api/admin/product-reviews/{$id}", ['comment' => 'Edited', 'images' => [], 'videos' => [], 'seller_response' => 'Thank you.'])->assertOk()->assertJsonPath('review.images', []);
+        $this->assertDatabaseHas('reviews', ['id' => $id, 'rating' => 4, 'comment' => 'Edited']);
     }
 
     public function test_helpful_votes_are_private_idempotent_and_target_specific(): void
     {
-        [$customer,$product]=$this->fixtures();
-        $review=Review::create(['product_id'=>$product->id,'customer_id'=>$customer->id,'rating'=>5,'comment'=>'Good','status'=>'approved','seller_response'=>'Thank you.']);
-        $other=Customer::create(['name'=>'Other','email'=>'other-voter@example.test','password'=>'password123']);
-        $this->withToken($customer->createToken('test',['customer:basic'])->plainTextToken);
-        $url="/api/customers/reviews/{$review->id}/like";
-        $this->postJson($url,['liked'=>true])->assertOk()->assertJsonPath('likes',1);
-        $this->postJson($url,['liked'=>true])->assertOk()->assertJsonPath('likes',1);
-        $this->postJson($url,['liked'=>true,'target_type'=>'seller_response'])->assertOk()->assertJsonPath('likes',1);
+        [$customer,$product] = $this->fixtures();
+        $review = Review::create(['product_id' => $product->id, 'customer_id' => $customer->id, 'rating' => 5, 'comment' => 'Good', 'status' => 'approved', 'seller_response' => 'Thank you.']);
+        $other = Customer::create(['name' => 'Other', 'email' => 'other-voter@example.test', 'password' => 'password123']);
+        $this->withToken($customer->createToken('test', ['customer:basic'])->plainTextToken);
+        $url = "/api/customers/reviews/{$review->id}/like";
+        $this->postJson($url, ['liked' => true])->assertOk()->assertJsonPath('likes', 1);
+        $this->postJson($url, ['liked' => true])->assertOk()->assertJsonPath('likes', 1);
+        $this->postJson($url, ['liked' => true, 'target_type' => 'seller_response'])->assertOk()->assertJsonPath('likes', 1);
         $this->getJson('/api/customers/review-likes')->assertOk()->assertExactJson([$review->id]);
         $this->getJson('/api/customers/review-likes?target_type=seller_response')->assertOk()->assertExactJson([$review->id]);
-        $this->withToken($other->createToken('test',['customer:basic'])->plainTextToken)->getJson('/api/customers/review-likes')->assertOk()->assertExactJson([]);
-        $this->postJson($url,['liked'=>true])->assertOk()->assertJsonPath('likes',2);
-        $this->withToken($customer->createToken('test2',['customer:basic'])->plainTextToken)->postJson($url,['liked'=>false])->assertOk()->assertJsonPath('likes',1);
-        $this->getJson("/api/store/products/{$product->slug}/reviews")->assertOk()->assertJsonPath('data.0.likes',1)->assertJsonPath('data.0.seller_response_likes',1);
-        $review->update(['status'=>'rejected']);
-        $this->postJson($url,['liked'=>true])->assertNotFound();
+        $this->withToken($other->createToken('test', ['customer:basic'])->plainTextToken)->getJson('/api/customers/review-likes')->assertOk()->assertExactJson([]);
+        $this->postJson($url, ['liked' => true])->assertOk()->assertJsonPath('likes', 2);
+        $this->withToken($customer->createToken('test2', ['customer:basic'])->plainTextToken)->postJson($url, ['liked' => false])->assertOk()->assertJsonPath('likes', 1);
+        $this->getJson("/api/store/products/{$product->slug}/reviews")->assertOk()->assertJsonPath('data.0.likes', 1)->assertJsonPath('data.0.seller_response_likes', 1);
+        $review->update(['status' => 'rejected']);
+        $this->postJson($url, ['liked' => true])->assertNotFound();
     }
 
     public function test_customer_review_drafts_are_hidden_from_admin_media_library(): void
     {
-        [$customer]=$this->fixtures();
-        $asset=\App\Models\MediaAsset::create(['owner_type'=>'customer','owner_id'=>$customer->id,'source'=>'upload','url'=>'https://example.test/private.jpg','file_name'=>'private.jpg','mime_type'=>'image/jpeg']);
-        $admin=Admin::create(['name'=>'Admin','email'=>'private-media-admin@example.test','password'=>'password123','role'=>'super_admin']);
-        $this->withToken($admin->createToken('test',['admin:basic'])->plainTextToken);
-        $this->getJson('/api/admin/media')->assertOk()->assertJsonCount(0,'data');
-        $this->postJson("/api/admin/media/{$asset->id}",['alt_text'=>'Tampered'])->assertNotFound();
+        [$customer] = $this->fixtures();
+        $asset = MediaAsset::create(['owner_type' => 'customer', 'owner_id' => $customer->id, 'source' => 'upload', 'url' => 'https://example.test/private.jpg', 'file_name' => 'private.jpg', 'mime_type' => 'image/jpeg']);
+        $admin = Admin::create(['name' => 'Admin', 'email' => 'private-media-admin@example.test', 'password' => 'password123', 'role' => 'super_admin']);
+        $this->withToken($admin->createToken('test', ['admin:basic'])->plainTextToken);
+        $this->getJson('/api/admin/media')->assertOk()->assertJsonCount(0, 'data');
+        $this->postJson("/api/admin/media/{$asset->id}", ['alt_text' => 'Tampered'])->assertNotFound();
         $this->postJson("/api/admin/media/{$asset->id}/delete")->assertNotFound();
-        $this->assertDatabaseHas('media_assets',['id'=>$asset->id,'owner_type'=>'customer']);
+        $this->assertDatabaseHas('media_assets', ['id' => $asset->id, 'owner_type' => 'customer']);
     }
 
     public function test_seller_replies_require_an_owned_published_review(): void
     {
-        [$customer,$product]=$this->fixtures();
-        $review=Review::create(['product_id'=>$product->id,'customer_id'=>$customer->id,'rating'=>4,'comment'=>'Fits well','status'=>'pending']);
-        $seller=Seller::create(['seller_name'=>'Owner','email'=>'reply-owner@example.test','store_name'=>'Owner Store','store_slug'=>'reply-owner-store','kyc_type'=>'nid','kyc_number'=>'reply-test','kyc_document_url'=>'https://example.test/id','product_category'=>'Clothing','status'=>'approved','is_active'=>true,'password'=>'password123']);
-        $this->withToken($seller->createToken('test',['seller:basic'])->plainTextToken);
-        $url="/api/seller/product-reviews/{$review->id}/respond";
-        $this->postJson($url,['seller_response'=>'Thanks'])->assertNotFound();
-        $product->update(['seller_id'=>$seller->id]);
-        $this->postJson($url,['seller_response'=>'Thanks'])->assertUnprocessable();
-        $review->update(['status'=>'approved']);
-        $this->postJson($url,['seller_response'=>' Thanks for the feedback. '])->assertOk()->assertJsonPath('review.seller_response','Thanks for the feedback.');
+        [$customer,$product] = $this->fixtures();
+        $review = Review::create(['product_id' => $product->id, 'customer_id' => $customer->id, 'rating' => 4, 'comment' => 'Fits well', 'status' => 'pending']);
+        $seller = Seller::create(['seller_name' => 'Owner', 'email' => 'reply-owner@example.test', 'store_name' => 'Owner Store', 'store_slug' => 'reply-owner-store', 'kyc_type' => 'nid', 'kyc_number' => 'reply-test', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
+        $this->withToken($seller->createToken('test', ['seller:basic'])->plainTextToken);
+        $url = "/api/seller/product-reviews/{$review->id}/respond";
+        $this->postJson($url, ['seller_response' => 'Thanks'])->assertNotFound();
+        $product->update(['seller_id' => $seller->id]);
+        $this->postJson($url, ['seller_response' => 'Thanks'])->assertUnprocessable();
+        $review->update(['status' => 'approved']);
+        $this->postJson($url, ['seller_response' => ' Thanks for the feedback. '])->assertOk()->assertJsonPath('review.seller_response', 'Thanks for the feedback.');
         $this->assertNotNull($review->fresh()->seller_responded_at);
-        $this->getJson("/api/store/products/{$product->slug}/reviews")->assertOk()->assertJsonPath('data.0.seller_response','Thanks for the feedback.');
-        $this->postJson($url,['seller_response'=>''])->assertOk()->assertJsonPath('review.seller_response',null)->assertJsonPath('review.seller_responded_at',null);
+        $this->getJson("/api/store/products/{$product->slug}/reviews")->assertOk()->assertJsonPath('data.0.seller_response', 'Thanks for the feedback.');
+        $this->postJson($url, ['seller_response' => ''])->assertOk()->assertJsonPath('review.seller_response', null)->assertJsonPath('review.seller_responded_at', null);
     }
 
     private function fixtures(): array
@@ -317,6 +345,7 @@ class ProductEngagementTest extends TestCase
         $customer = Customer::create(['name' => 'Customer', 'email' => 'customer-engagement@example.test', 'password' => 'password123', 'email_verified_at' => now()]);
         $category = ProductCategory::create(['name' => 'Clothing', 'slug' => 'clothing']);
         $product = Product::create(['category_id' => $category->id, 'name' => 'Cotton Shirt', 'slug' => 'cotton-shirt', 'description' => 'A cotton shirt.', 'specifications' => [['label' => 'Material', 'value' => 'Cotton']], 'product_type' => 'simple', 'status' => 'active']);
+
         return [$customer, $product];
     }
 }

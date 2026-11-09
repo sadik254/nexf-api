@@ -8,13 +8,13 @@ use Illuminate\Support\Str;
 
 class MediaUploadService
 {
-    public function upload(UploadedFile $file, string $directory = 'media'): string
+    public function upload(UploadedFile $file, string $directory = 'media', ?string $contentType = null): string
     {
         $extension = strtolower($file->guessExtension() ?: $file->getClientOriginalExtension() ?: 'bin');
         $key = trim($directory, '/').'/'.now()->format('Y/m').'/'.Str::uuid().'.'.$extension;
         Storage::disk('r2')->put($key, fopen($file->getRealPath(), 'r'), [
             'visibility' => 'public',
-            'ContentType' => $file->getMimeType() ?: 'application/octet-stream',
+            'ContentType' => $contentType ?: $file->getMimeType() ?: 'application/octet-stream',
         ]);
 
         return $this->publicUrl($key);
@@ -27,7 +27,9 @@ class MediaUploadService
 
     public function imageVariant(?string $url, string $variant): ?string
     {
-        if (! $this->isR2Original($url)) return null;
+        if (! $this->isR2Original($url)) {
+            return null;
+        }
         $base = rtrim((string) config('filesystems.disks.r2.url'), '/');
         $path = ltrim((string) parse_url($url, PHP_URL_PATH), '/');
         $options = match ($variant) {
@@ -37,6 +39,7 @@ class MediaUploadService
             'thumb' => 'width=256,height=256,fit=cover,format=auto,quality=80',
             default => 'format=auto,quality=85',
         };
+
         return $base.'/cdn-cgi/image/'.$options.'/'.$path;
     }
 
@@ -44,9 +47,12 @@ class MediaUploadService
     public function isR2Original(?string $url): bool
     {
         $base = rtrim((string) config('filesystems.disks.r2.url'), '/');
-        if (!$url || !$base || !str_starts_with($url, $base.'/')) return false;
+        if (! $url || ! $base || ! str_starts_with($url, $base.'/')) {
+            return false;
+        }
 
         $path = ltrim((string) parse_url($url, PHP_URL_PATH), '/');
-        return !str_starts_with($path, 'cdn-cgi/image/');
+
+        return ! str_starts_with($path, 'cdn-cgi/image/');
     }
 }

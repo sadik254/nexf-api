@@ -7,9 +7,12 @@ use App\Models\MediaAsset;
 use App\Models\MediaAssetStoreLibrary;
 use App\Models\Seller;
 use App\Services\MediaUploadService;
+use enshrined\svgSanitize\Sanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class MediaAssetController extends Controller
 {
@@ -26,18 +29,24 @@ class MediaAssetController extends Controller
                     ->orWhere(fn ($legacy) => $legacy->doesntHave('storeLibraries')->where('owner_type', 'seller')->where('owner_id', $actor->id));
             });
         }
-        if ($actor instanceof Admin && $request->query('owner_type') === 'admin') $query->where('owner_type', 'admin');
+        if ($actor instanceof Admin && $request->query('owner_type') === 'admin') {
+            $query->where('owner_type', 'admin');
+        }
         if ($request->filled('search')) {
             $term = substr((string) $request->query('search'), 0, 100);
             $query->where(fn ($q) => $q->where('file_name', 'like', "%{$term}%")->orWhere('alt_text', 'like', "%{$term}%"));
         }
         if ($request->filled('kind')) {
             $kind = $request->query('kind');
-            if ($kind === 'image') $query->where('mime_type', 'like', 'image/%');
-            elseif ($kind === 'video') $query->where('mime_type', 'like', 'video/%');
+            if ($kind === 'image') {
+                $query->where('mime_type', 'like', 'image/%');
+            } elseif ($kind === 'video') {
+                $query->where('mime_type', 'like', 'video/%');
+            }
         }
         $page = $query->paginate(max(1, min((int) $request->query('per_page', 30), 100)));
         $page->getCollection()->transform(fn (MediaAsset $asset) => $this->resource($asset));
+
         return response()->json($page);
     }
 
@@ -45,24 +54,26 @@ class MediaAssetController extends Controller
     {
         $actor = $this->actor($request);
         $data = $request->validate([
-            'file' => ['required', 'file', 'mimetypes:image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm', 'max:20480'],
+            'file' => ['required', 'file', 'mimetypes:image/jpeg,image/png,image/webp,image/gif,image/svg+xml,video/mp4,video/webm', 'max:20480'],
             'alt_text' => ['nullable', 'string', 'max:255'],
             ...$this->libraryRules(),
         ]);
         $file = $data['file'];
+        $mimeType = $this->sanitizeSvgIfNeeded($file);
         $asset = MediaAsset::create([
             'owner_type' => $actor instanceof Seller ? 'seller' : 'admin',
             'owner_id' => $actor->id,
             ...$this->uploader($request, $actor),
             'source' => 'upload',
-            'url' => $this->uploads->upload($file),
+            'url' => $this->uploads->upload($file, 'media', $mimeType),
             'file_name' => $file->getClientOriginalName(),
-            'mime_type' => $file->getMimeType(),
+            'mime_type' => $mimeType,
             'size_bytes' => $file->getSize(),
             'alt_text' => $data['alt_text'] ?? null,
             ...$this->metadata($file),
         ]);
         $this->syncLibraries($asset, $data, $actor);
+
         return response()->json($this->resource($asset->fresh()->load('storeLibraries.seller')), 201);
     }
 
@@ -91,6 +102,7 @@ class MediaAssetController extends Controller
             'source' => 'url',
         ]);
         $this->syncLibraries($asset, $data, $actor);
+
         return response()->json($this->resource($asset->fresh()->load('storeLibraries.seller')), 201);
     }
 
@@ -104,7 +116,10 @@ class MediaAssetController extends Controller
             ...$this->libraryRules(),
         ]);
         $asset->update(collect($data)->only(['alt_text', 'file_name'])->all());
-        if ($actor instanceof Admin && $request->hasAny(['seller_id', 'seller_ids', 'include_house'])) $this->syncLibraries($asset, $data, $actor);
+        if ($actor instanceof Admin && $request->hasAny(['seller_id', 'seller_ids', 'include_house'])) {
+            $this->syncLibraries($asset, $data, $actor);
+        }
+
         return response()->json($this->resource($asset->fresh()->load('storeLibraries.seller')));
     }
 
@@ -114,24 +129,60 @@ class MediaAssetController extends Controller
         $this->authorizeAsset($actor, $asset);
         if ($actor instanceof Seller) {
             $asset->storeLibraries()->where('seller_id', $actor->id)->delete();
+
             return response()->json(['message' => 'Removed from this store media library. The original file remains available for other stores.']);
         }
         $asset->delete();
+
         return response()->json(['message' => 'Removed from every media library. The original file remains available at its URL.']);
     }
 
-    private function metadata(\Illuminate\Http\UploadedFile $file): array
+    private function metadata(UploadedFile $file): array
     {
-        $meta = ['width'=>null, 'height'=>null, 'duration_seconds'=>null];
-        if (str_starts_with((string) $file->getMimeType(), 'image/')) { $size = @getimagesize($file->getPathname()); if ($size) { $meta['width']=$size[0]; $meta['height']=$size[1]; } }
-        if (str_starts_with((string) $file->getMimeType(), 'video/') && function_exists('shell_exec')) { $value = @shell_exec('ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 '.escapeshellarg($file->getPathname()).' 2>/dev/null'); if (is_numeric(trim((string)$value))) $meta['duration_seconds']=(int)round((float)$value); }
+        $meta = ['width' => null, 'height' => null, 'duration_seconds' => null];
+        if (str_starts_with((string) $file->getMimeType(), 'image/')) {
+            $size = @getimagesize($file->getPathname());
+            if ($size) {
+                $meta['width'] = $size[0];
+                $meta['height'] = $size[1];
+            }
+        }
+        if (str_starts_with((string) $file->getMimeType(), 'video/') && function_exists('shell_exec')) {
+            $value = @shell_exec('ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 '.escapeshellarg($file->getPathname()).' 2>/dev/null');
+            if (is_numeric(trim((string) $value))) {
+                $meta['duration_seconds'] = (int) round((float) $value);
+            }
+        }
+
         return $meta;
+    }
+
+    /** SVG is active XML, so clean it before it ever reaches the public media host. */
+    private function sanitizeSvgIfNeeded(UploadedFile $file): string
+    {
+        $extension = strtolower($file->getClientOriginalExtension());
+        $mimeType = $file->getMimeType() ?: 'application/octet-stream';
+        if ($mimeType !== 'image/svg+xml' && $extension !== 'svg') {
+            return $mimeType;
+        }
+
+        $dirty = @file_get_contents($file->getRealPath());
+        $sanitizer = new Sanitizer;
+        $sanitizer->removeRemoteReferences(true);
+        $clean = is_string($dirty) ? $sanitizer->sanitize($dirty) : false;
+        if ($clean === false || trim($clean) === '') {
+            throw ValidationException::withMessages(['file' => ['The SVG file could not be safely processed.']]);
+        }
+        file_put_contents($file->getRealPath(), $clean, LOCK_EX);
+
+        return 'image/svg+xml';
     }
 
     private function actor(Request $request): Admin|Seller
     {
         $actor = $request->user();
         abort_unless($actor instanceof Admin || $actor instanceof Seller, 403);
+
         return $actor;
     }
 
@@ -160,7 +211,9 @@ class MediaAssetController extends Controller
             $includeHouse = false;
         } else {
             $sellerIds = $data['seller_ids'] ?? [];
-            if (array_key_exists('seller_id', $data) && $data['seller_id'] !== null) $sellerIds[] = (int) $data['seller_id'];
+            if (array_key_exists('seller_id', $data) && $data['seller_id'] !== null) {
+                $sellerIds[] = (int) $data['seller_id'];
+            }
             $sellerIds = array_values(array_unique(array_map('intval', $sellerIds)));
             // Existing admin uploads without a target remain in NEXF's library.
             $includeHouse = array_key_exists('include_house', $data) ? (bool) $data['include_house'] : $sellerIds === [];
@@ -168,14 +221,19 @@ class MediaAssetController extends Controller
 
         $asset->storeLibraries()->delete();
         $rows = collect($sellerIds)->map(fn (int $id) => ['seller_id' => $id, 'library_key' => "seller:{$id}"]);
-        if ($includeHouse) $rows->push(['seller_id' => null, 'library_key' => 'house']);
+        if ($includeHouse) {
+            $rows->push(['seller_id' => null, 'library_key' => 'house']);
+        }
         $asset->storeLibraries()->createMany($rows->all());
     }
 
     private function uploader(Request $request, Admin|Seller $actor): array
     {
         $staff = $request->attributes->get('seller_staff');
-        if ($staff) return ['uploaded_by_type' => 'seller_staff', 'uploaded_by_id' => $staff->id, 'uploader_name' => $staff->name];
+        if ($staff) {
+            return ['uploaded_by_type' => 'seller_staff', 'uploaded_by_id' => $staff->id, 'uploader_name' => $staff->name];
+        }
+
         return [
             'uploaded_by_type' => $actor instanceof Seller ? 'seller' : 'admin',
             'uploaded_by_id' => $actor->id,
@@ -191,6 +249,7 @@ class MediaAssetController extends Controller
             'store_name' => $library->seller?->store_name ?? 'NEXF Lifestyle',
             'store_slug' => $library->seller?->store_slug ?? 'admin',
         ])->values()->all();
+
         return array_merge($asset->toArray(), [
             'seller_ids' => collect($libraries)->pluck('seller_id')->filter()->map(fn ($id) => (int) $id)->values()->all(),
             'include_house' => collect($libraries)->contains('type', 'house'),

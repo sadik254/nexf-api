@@ -2,11 +2,17 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Admin;
+use App\Models\Customer;
+use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductCategory;
-use App\Models\Seller;
-use App\Models\Store;
+use App\Models\ProductCollection;
 use App\Models\Review;
+use App\Models\Seller;
+use App\Models\SiteSetting;
+use App\Models\Store;
+use App\Services\ProductHtmlSanitizer;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Http\JsonResponse;
@@ -23,7 +29,7 @@ class StoreProductController extends Controller
         $this->applyHomepageFilter($query, $request);
         if ($request->filled('collection')) {
             $value = (string) $request->query('collection');
-            $id = ctype_digit($value) ? (int) $value : \App\Models\ProductCollection::query()->get(['id', 'name'])
+            $id = ctype_digit($value) ? (int) $value : ProductCollection::query()->get(['id', 'name'])
                 ->first(fn ($collection) => Str::slug($collection->name) === $value)?->id;
             $query->whereIn('products.id', DB::table('collection_product')->select('product_id')
                 ->where('product_collection_id', $id ?? -1));
@@ -36,13 +42,17 @@ class StoreProductController extends Controller
     {
         $sellers = Seller::where('status', 'approved')->where('is_active', true)->orderByDesc('is_featured')->orderBy('store_name')->get()
             ->map(fn ($seller) => $this->transformSellerStore($seller));
+
         return response()->json($sellers->prepend($this->transformHouseStore())->values());
     }
 
     public function storeProfile(string $slug): JsonResponse
     {
-        if ($slug === 'admin') return response()->json($this->transformHouseStore());
+        if ($slug === 'admin') {
+            return response()->json($this->transformHouseStore());
+        }
         $seller = Seller::where('store_slug', $slug)->where('status', 'approved')->where('is_active', true)->firstOrFail();
+
         return response()->json($this->transformSellerStore($seller));
     }
 
@@ -59,7 +69,7 @@ class StoreProductController extends Controller
             'rating_summary' => [
                 'average' => $reviewCount ? round((float) (clone $reviews)->avg('rating'), 2) : null,
                 'review_count' => $reviewCount,
-                'sold_count' => (int) \App\Models\OrderItem::query()->whereNull('seller_id')->where('fulfillment_status', 'delivered')
+                'sold_count' => (int) OrderItem::query()->whereNull('seller_id')->where('fulfillment_status', 'delivered')
                     ->whereHas('order', fn ($orders) => $orders->whereIn('status', ['delivered', 'completed']))->sum('quantity'),
             ],
             'performance' => [
@@ -78,6 +88,7 @@ class StoreProductController extends Controller
         $customerChats = $seller->storeChats()->whereHas('messages', fn ($messages) => $messages->where('author_type', 'customer'));
         $chatCount = (clone $customerChats)->count();
         $repliedChats = (clone $customerChats)->whereHas('messages', fn ($messages) => $messages->whereIn('author_type', ['seller', 'seller_staff']))->count();
+
         return [
             'type' => 'seller', 'id' => $seller->id, 'name' => $seller->store_name,
             'slug' => $seller->store_slug, 'logo' => $seller->store_logo, 'image' => $seller->store_image,
@@ -94,8 +105,11 @@ class StoreProductController extends Controller
 
     private function onTimeShippingPercentage(?int $sellerId): ?float
     {
-        $items = \App\Models\OrderItem::query()->where('seller_id', $sellerId)->where('fulfillment_status', 'delivered')->whereNotNull('shipped_at')->whereNotNull('delivered_at')->get(['shipped_at','delivered_at']);
-        if ($items->isEmpty()) return null;
+        $items = OrderItem::query()->where('seller_id', $sellerId)->where('fulfillment_status', 'delivered')->whereNotNull('shipped_at')->whereNotNull('delivered_at')->get(['shipped_at', 'delivered_at']);
+        if ($items->isEmpty()) {
+            return null;
+        }
+
         return round($items->filter(fn ($item) => $item->delivered_at->lessThanOrEqualTo($item->shipped_at->copy()->addDays(3)))->count() / $items->count() * 100, 1);
     }
 
@@ -104,7 +118,7 @@ class StoreProductController extends Controller
         return response()->json([
             'sellers' => Seller::where('status', 'approved')->where('is_active', true)->count(),
             'products' => $this->baseStoreQuery()->count(),
-            'customers' => \App\Models\Customer::count(),
+            'customers' => Customer::count(),
             // The order schema only retains free-form addresses; coverage cannot be inferred reliably.
             'districts' => null,
         ]);
@@ -112,16 +126,17 @@ class StoreProductController extends Controller
 
     public function homepageProducts(Request $request, string $section): JsonResponse
     {
-        $sections = \App\Models\SiteSetting::find('home_layout')?->payload ?? config('site-content.home_layout');
+        $sections = SiteSetting::find('home_layout')?->payload ?? config('site-content.home_layout');
         $settings = collect($sections)->firstWhere('id', $section);
         abort_unless($settings && $settings['enabled'], 404);
         $tab = $request->validate(['tab' => ['sometimes', 'in:top,new']])['tab'] ?? 'top';
+
         return $this->resolveHomepageProducts($settings, $tab);
     }
 
     public function previewHomepageProducts(Request $request): JsonResponse
     {
-        abort_unless($request->user() instanceof \App\Models\Admin, 403);
+        abort_unless($request->user() instanceof Admin, 403);
         $data = $request->validate([
             'type' => ['required', 'in:trending,collection,featured'],
             'tab' => ['sometimes', 'in:top,new'], 'topSource' => ['sometimes', 'in:auto,picked'], 'newSource' => ['sometimes', 'in:auto,picked'],
@@ -132,6 +147,7 @@ class StoreProductController extends Controller
             'topProductIds' => ['sometimes', 'array', 'max:100'], 'topProductIds.*' => ['integer'],
             'newProductIds' => ['sometimes', 'array', 'max:100'], 'newProductIds.*' => ['integer'],
         ]);
+
         return $this->resolveHomepageProducts($data, $data['tab'] ?? 'top');
     }
 
@@ -140,27 +156,42 @@ class StoreProductController extends Controller
         $query = $this->baseStoreQuery();
         $ids = null;
         if ($settings['type'] === 'trending') {
-            if ($tab === 'new' && ($settings['showNewArrivals'] ?? true) === false) return response()->json([]);
+            if ($tab === 'new' && ($settings['showNewArrivals'] ?? true) === false) {
+                return response()->json([]);
+            }
             $source = $tab === 'new' ? ($settings['newSource'] ?? 'auto') : ($settings['topSource'] ?? 'auto');
-            if ($source === 'picked') $ids = $settings[$tab === 'new' ? 'newProductIds' : 'topProductIds'] ?? [];
-            elseif ($tab === 'top') $query->withSum(['orderItems as homepage_sales' => fn ($items) => $items->where('fulfillment_status', 'delivered')->whereHas('order', fn ($orders) => $orders->whereIn('status', ['delivered', 'completed']))], 'quantity')->orderByDesc('homepage_sales');
+            if ($source === 'picked') {
+                $ids = $settings[$tab === 'new' ? 'newProductIds' : 'topProductIds'] ?? [];
+            } elseif ($tab === 'top') {
+                $query->withSum(['orderItems as homepage_sales' => fn ($items) => $items->where('fulfillment_status', 'delivered')->whereHas('order', fn ($orders) => $orders->whereIn('status', ['delivered', 'completed']))], 'quantity')->orderByDesc('homepage_sales');
+            }
         } elseif ($settings['type'] === 'featured') {
             $ids = $settings['productIds'] ?? [];
         } elseif ($settings['type'] === 'collection') {
             $source = $settings['source'] ?? 'collection';
             $value = $settings['sourceValue'] ?? $settings['collection_id'] ?? null;
-            if ($source === 'products') $ids = $settings['productIds'] ?? [];
-            elseif ($source === 'category') $query->whereHas('category', fn ($category) => $category->where('slug', $value)->orWhereHas('parent', fn ($parent) => $parent->where('slug', $value)));
-            elseif ($source === 'tag') $query->whereHas('tags', fn ($tags) => $tags->where('slug', $value));
-            else $query->whereIn('products.id', DB::table('collection_product')->select('product_id')->where('product_collection_id', $value));
-        } else abort(422, 'This block does not contain products.');
+            if ($source === 'products') {
+                $ids = $settings['productIds'] ?? [];
+            } elseif ($source === 'category') {
+                $query->whereHas('category', fn ($category) => $category->where('slug', $value)->orWhereHas('parent', fn ($parent) => $parent->where('slug', $value)));
+            } elseif ($source === 'tag') {
+                $query->whereHas('tags', fn ($tags) => $tags->where('slug', $value));
+            } else {
+                $query->whereIn('products.id', DB::table('collection_product')->select('product_id')->where('product_collection_id', $value));
+            }
+        } else {
+            abort(422, 'This block does not contain products.');
+        }
         if ($ids !== null) {
             $query->whereIn('products.id', $ids);
             if ($ids) {
                 $cases = collect($ids)->map(fn ($id, $position) => 'WHEN '.(int) $id.' THEN '.(int) $position)->join(' ');
                 $query->orderByRaw('CASE products.id '.$cases.' END');
             }
-        } else $query->latest('products.created_at');
+        } else {
+            $query->latest('products.created_at');
+        }
+
         return response()->json($query->limit($settings['limit'] ?? ($settings['type'] === 'trending' ? 10 : 12))->get()->map(fn ($product) => $this->transformProduct($product)));
     }
 
@@ -174,8 +205,11 @@ class StoreProductController extends Controller
         if ($ids !== null) {
             $cases = collect($ids)->map(fn ($id, $position) => 'WHEN '.$id.' THEN '.$position)->join(' ');
             $query->whereIn('id', $ids)->orderByRaw('CASE reviews.id '.$cases.' END');
-        } else $query->latest()->limit(12);
+        } else {
+            $query->latest()->limit(12);
+        }
         $reviews = $query->get();
+
         return response()->json($reviews->map(fn ($review) => [
             'id' => $review->id, 'rating' => $review->rating, 'body' => $review->comment,
             'author' => $review->customer?->name ?? 'Customer', 'avatar' => $review->customer?->profile_picture,
@@ -196,7 +230,8 @@ class StoreProductController extends Controller
     {
         $product = Product::where('slug', $product)->whereIn('status', ['active', 'unlisted'])->firstOrFail();
         $perPage = max(1, min((int) $request->query('per_page', 10), 50));
-        return response()->json($product->reviews()->where('status', 'approved')->with(['customer:id,name,profile_picture','orderItem:id,order_id,variation_attributes,variation_labels,variation_image,product_name,product_thumbnail','orderItem.order:id','orderItem.order.items:id,order_id,product_id,variation_attributes,variation_labels,variation_image,quantity'])->withCount(['likes','responseLikes'])->latest()->paginate($perPage)->through(fn ($review) => ['id'=>$review->id,'rating'=>$review->rating,'comment'=>$review->comment,'customer_name'=>$review->customer?->name,'avatar'=>$review->customer?->profile_picture,'images'=>$review->images??[],'videos'=>$review->videos??[],'likes'=>$review->likes_count,'verified'=>$review->order_item_id!==null,'purchased_variant'=>$review->orderItem?->variation_attributes,'purchased_variant_labels'=>$review->orderItem?->variation_labels,'purchased_variants'=>$review->orderItem?->order?->items->where('product_id', $review->product_id)->sortBy('id')->map(fn ($item) => ['order_item_id'=>$item->id,'variation_attributes'=>$item->variation_attributes,'variation_labels'=>$item->variation_labels,'variation_image'=>$item->variation_image,'quantity'=>$item->quantity])->values()->all() ?? [],'media_details'=>$review->media_details,'seller_response_likes'=>$review->response_likes_count,'seller_response'=>$review->seller_response,'seller_responded_at'=>$review->seller_responded_at?->toDateString(),'created_at'=>$review->created_at?->toDateString()]));
+
+        return response()->json($product->reviews()->where('status', 'approved')->with(['customer:id,name,profile_picture', 'orderItem:id,order_id,variation_attributes,variation_labels,variation_image,bundle_label,bundle_source_label,bundle_source_size,bundle_items,product_name,product_thumbnail', 'orderItem.order:id', 'orderItem.order.items:id,order_id,product_id,variation_attributes,variation_labels,variation_image,bundle_label,bundle_source_label,bundle_source_size,bundle_items,quantity'])->withCount(['likes', 'responseLikes'])->latest()->paginate($perPage)->through(fn ($review) => ['id' => $review->id, 'rating' => $review->rating, 'comment' => $review->comment, 'customer_name' => $review->customer?->name, 'avatar' => $review->customer?->profile_picture, 'images' => $review->images ?? [], 'videos' => $review->videos ?? [], 'likes' => $review->likes_count, 'verified' => $review->order_item_id !== null, 'purchased_variant' => $review->orderItem?->variation_attributes, 'purchased_variant_labels' => $review->orderItem?->variation_labels, 'purchased_variants' => $review->orderItem?->order?->items->where('product_id', $review->product_id)->sortBy('id')->map(fn ($item) => ['order_item_id' => $item->id, 'variation_attributes' => $item->variation_attributes, 'variation_labels' => $item->variation_labels, 'variation_image' => $item->variation_image, 'bundle_label' => $item->bundle_label, 'bundle_source_label' => $item->bundle_source_label, 'bundle_source_size' => $item->bundle_source_size, 'bundle_items' => $item->bundle_items, 'quantity' => $item->quantity])->values()->all() ?? [], 'media_details' => $review->media_details, 'seller_response_likes' => $review->response_likes_count, 'seller_response' => $review->seller_response, 'seller_responded_at' => $review->seller_responded_at?->toDateString(), 'created_at' => $review->created_at?->toDateString()]));
     }
 
     public function indexByCategory(ProductCategory $category, Request $request): JsonResponse
@@ -216,8 +251,12 @@ class StoreProductController extends Controller
             ->whereHas('seller', function (Builder $q) {
                 $q->where('status', 'approved')->where('is_active', true);
             });
-        if ($request->filled('exclude')) $query->where('slug', '!=', $request->query('exclude'));
-        if ($request->filled('limit')) $request->merge(['per_page' => min((int) $request->query('limit'), 100)]);
+        if ($request->filled('exclude')) {
+            $query->where('slug', '!=', $request->query('exclude'));
+        }
+        if ($request->filled('limit')) {
+            $request->merge(['per_page' => min((int) $request->query('limit'), 100)]);
+        }
 
         $this->applyCommonEagerLoads($query);
         $this->applySearchFilters($query, $request);
@@ -231,8 +270,12 @@ class StoreProductController extends Controller
         $query = Product::query()
             ->where('status', 'active')
             ->whereNull('seller_id');
-        if ($request->filled('exclude')) $query->where('slug', '!=', $request->query('exclude'));
-        if ($request->filled('limit')) $request->merge(['per_page' => min((int) $request->query('limit'), 100)]);
+        if ($request->filled('exclude')) {
+            $query->where('slug', '!=', $request->query('exclude'));
+        }
+        if ($request->filled('limit')) {
+            $request->merge(['per_page' => min((int) $request->query('limit'), 100)]);
+        }
 
         $this->applyCommonEagerLoads($query);
         $this->applySearchFilters($query, $request);
@@ -293,7 +336,7 @@ class StoreProductController extends Controller
         $approvedReviews = $product->reviews()->where('status', 'approved');
         $ratingCount = (int) (clone $approvedReviews)->count();
         $averageRating = $ratingCount ? round((float) (clone $approvedReviews)->avg('rating'), 2) : null;
-        $soldCount = (int) $product->orderItems()->where('fulfillment_status', 'delivered')->whereHas('order', fn ($q) => $q->whereIn('status', ['delivered','completed']))->sum('quantity');
+        $soldCount = (int) $product->orderItems()->where('fulfillment_status', 'delivered')->whereHas('order', fn ($q) => $q->whereIn('status', ['delivered', 'completed']))->sum('quantity');
 
         $variations = [];
         $priceFrom = null;
@@ -335,7 +378,7 @@ class StoreProductController extends Controller
             'slug' => $product->slug,
             'seo_title' => $product->seo_title,
             'seo_description' => $product->seo_description,
-            'description' => app(\App\Services\ProductHtmlSanitizer::class)->clean($product->description),
+            'description' => app(ProductHtmlSanitizer::class)->clean($product->description),
             'specifications' => $product->specifications ?? [],
             'specification_tables' => $product->specification_tables ?? [],
             'product_type' => $product->product_type,
@@ -379,10 +422,17 @@ class StoreProductController extends Controller
 
     private function optionGroups(Product $product): array
     {
-        if ($product->option_groups) return $product->option_groups;
+        if ($product->option_groups) {
+            return $product->option_groups;
+        }
         $values = [];
-        foreach ($product->variations as $variation) foreach (($variation->attributes ?? []) as $key => $value) $values[$key][(string) $value] = ['value'=>(string)$value,'label'=>(string)$value] + (strtolower($key) === 'color' ? ['swatch'=>null] : []);
-        return collect($values)->map(fn ($items, $key) => ['key'=>$key,'label'=>ucwords(str_replace('_',' ', $key)),'display_type'=>strtolower($key)==='color'?'swatch':'button','values'=>array_values($items)])->values()->all();
+        foreach ($product->variations as $variation) {
+            foreach (($variation->attributes ?? []) as $key => $value) {
+                $values[$key][(string) $value] = ['value' => (string) $value, 'label' => (string) $value] + (strtolower($key) === 'color' ? ['swatch' => null] : []);
+            }
+        }
+
+        return collect($values)->map(fn ($items, $key) => ['key' => $key, 'label' => ucwords(str_replace('_', ' ', $key)), 'display_type' => strtolower($key) === 'color' ? 'swatch' : 'button', 'values' => array_values($items)])->values()->all();
     }
 
     private function applyCommonEagerLoads(Builder $query): void
@@ -404,8 +454,12 @@ class StoreProductController extends Controller
     private function applySearchFilters(Builder $query, Request $request): void
     {
         $request->validate(['brand' => ['sometimes', 'string', 'max:255'], 'tag' => ['sometimes', 'string', 'max:255']]);
-        if ($request->filled('brand')) $query->whereHas('brand', fn (Builder $brand) => $brand->where('slug', $request->query('brand')));
-        if ($request->filled('tag')) $query->whereHas('tags', fn (Builder $tag) => $tag->where('slug', $request->query('tag')));
+        if ($request->filled('brand')) {
+            $query->whereHas('brand', fn (Builder $brand) => $brand->where('slug', $request->query('brand')));
+        }
+        if ($request->filled('tag')) {
+            $query->whereHas('tags', fn (Builder $tag) => $tag->where('slug', $request->query('tag')));
+        }
         $search = (string) $request->query('search', '');
         if ($search !== '') {
             $query->where(function (Builder $q) use ($search) {
@@ -425,7 +479,9 @@ class StoreProductController extends Controller
             'featured' => 'homepage_featured',
             default => null,
         };
-        if ($column) $query->where($column, true);
+        if ($column) {
+            $query->where($column, true);
+        }
     }
 
     private function applyPriceStockSubselects(Builder $query): void

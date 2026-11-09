@@ -3,7 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Admin;
+use App\Models\HomepageOfferSet;
+use App\Models\ProductCategory;
+use App\Models\ProductCollection;
 use App\Models\SiteSetting;
+use App\Models\Tag;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -14,12 +18,16 @@ class HomepageLayoutController extends Controller
     public function show(): JsonResponse
     {
         $sections = SiteSetting::find('home_layout')?->payload ?? config('site-content.home_layout');
-        $defaults = \App\Models\HomepageOfferSet::query()->get()->groupBy('row_type')->map(fn ($sets) => $sets->sortBy('id')->first()->id);
+        $defaults = HomepageOfferSet::query()->get()->groupBy('row_type')->map(fn ($sets) => $sets->sortBy('id')->first()->id);
         $sections = collect($sections)->map(function ($section) use ($defaults) {
             $row = ['offerFour' => 'four', 'offerWide' => 'wide', 'offerTwo' => 'two', 'coupons' => 'coupons'][$section['type']] ?? null;
-            if ($row && empty($section['offer_set_id']) && isset($defaults[$row])) $section['offer_set_id'] = $defaults[$row];
+            if ($row && empty($section['offer_set_id']) && isset($defaults[$row])) {
+                $section['offer_set_id'] = $defaults[$row];
+            }
+
             return $section;
         })->values();
+
         return response()->json($sections);
     }
 
@@ -30,9 +38,11 @@ class HomepageLayoutController extends Controller
         $data = $request->validate([
             'sections' => ['required', 'array', 'max:30'],
             'sections.*.id' => ['required', 'string', 'max:60', 'distinct'],
-            'sections.*.type' => ['required', Rule::in(['hero', 'trust', 'categories', 'trending', 'offerFour', 'offerWide', 'offerTwo', 'coupons', 'collection', 'reviews', 'featured', 'support'])],
+            'sections.*.type' => ['required', Rule::in(['hero', 'trust', 'categories', 'trending', 'offerFour', 'offerWide', 'offerTwo', 'coupons', 'collection', 'reviews', 'featured', 'support', 'clients'])],
             'sections.*.enabled' => ['required', 'boolean'],
             'sections.*.title' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'sections.*.subtitle' => ['sometimes', 'nullable', 'string', 'max:300'],
+            'sections.*.clientsLayout' => ['sometimes', Rule::in(['grid', 'marquee'])],
             'sections.*.collection_id' => ['sometimes', 'nullable', 'integer', 'exists:product_collections,id'],
             'sections.*.topSource' => ['sometimes', 'in:auto,picked'],
             'sections.*.newSource' => ['sometimes', 'in:auto,picked'],
@@ -62,30 +72,41 @@ class HomepageLayoutController extends Controller
         foreach ($data['sections'] as $index => $section) {
             foreach (['topProductIds', 'newProductIds', 'productIds', 'reviewIds'] as $key) {
                 $ids = $section[$key] ?? [];
-                if (count($ids) !== count(array_unique($ids))) throw ValidationException::withMessages(["sections.{$index}.{$key}" => 'Each selection must be unique within its block.']);
+                if (count($ids) !== count(array_unique($ids))) {
+                    throw ValidationException::withMessages(["sections.{$index}.{$key}" => 'Each selection must be unique within its block.']);
+                }
             }
             if ($section['type'] === 'collection') {
                 $source = $section['source'] ?? 'collection';
                 $value = $section['sourceValue'] ?? $section['collection_id'] ?? null;
                 $exists = match ($source) {
                     'products' => true,
-                    'category' => \App\Models\ProductCategory::where('slug', $value)->exists(),
-                    'tag' => \App\Models\Tag::where('slug', $value)->exists(),
-                    default => \App\Models\ProductCollection::whereKey($value)->exists(),
+                    'category' => ProductCategory::where('slug', $value)->exists(),
+                    'tag' => Tag::where('slug', $value)->exists(),
+                    default => ProductCollection::whereKey($value)->exists(),
                 };
-                if (!$exists) throw ValidationException::withMessages(["sections.{$index}.sourceValue" => 'Choose an existing source.']);
+                if (! $exists) {
+                    throw ValidationException::withMessages(["sections.{$index}.sourceValue" => 'Choose an existing source.']);
+                }
+            }
+
+            if ($section['type'] === 'clients' && isset($section['limit']) && ! in_array((int) $section['limit'], [6, 12, 18, 24, 36], true)) {
+                throw ValidationException::withMessages(["sections.{$index}.limit" => 'Choose 6, 12, 18, 24, or 36 logos.']);
             }
 
             if ($section['type'] === 'collection' && ($section['source'] ?? 'collection') === 'collection' && empty($section['collection_id']) && empty($section['sourceValue'])) {
                 throw ValidationException::withMessages(["sections.{$index}.collection_id" => 'Choose a collection for this section.']);
             }
-            if (array_key_exists($section['type'], ['offerFour' => 'four', 'offerWide' => 'wide', 'offerTwo' => 'two', 'coupons' => 'coupons']) && !empty($section['offer_set_id'])) {
-                $set = \App\Models\HomepageOfferSet::find($section['offer_set_id']);
+            if (array_key_exists($section['type'], ['offerFour' => 'four', 'offerWide' => 'wide', 'offerTwo' => 'two', 'coupons' => 'coupons']) && ! empty($section['offer_set_id'])) {
+                $set = HomepageOfferSet::find($section['offer_set_id']);
                 $expected = ['offerFour' => 'four', 'offerWide' => 'wide', 'offerTwo' => 'two', 'coupons' => 'coupons'][$section['type']];
-                if (!$set || $set->row_type !== $expected) throw ValidationException::withMessages(["sections.{$index}.offer_set_id" => 'Choose a matching offer set.']);
+                if (! $set || $set->row_type !== $expected) {
+                    throw ValidationException::withMessages(["sections.{$index}.offer_set_id" => 'Choose a matching offer set.']);
+                }
             }
         }
         SiteSetting::updateOrCreate(['key' => 'home_layout'], ['payload' => $data['sections']]);
+
         return $this->show();
     }
 }
