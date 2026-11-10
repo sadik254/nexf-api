@@ -8,6 +8,25 @@ use Illuminate\Support\Str;
 
 class MediaUploadService
 {
+    public function uploadContents(string $contents, string $mimeType, string $directory = 'media'): string
+    {
+        $extensions = [
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+            'image/gif' => 'gif',
+            'video/mp4' => 'mp4',
+            'video/webm' => 'webm',
+        ];
+        $key = trim($directory, '/').'/'.now()->format('Y/m').'/'.Str::uuid().'.'.($extensions[$mimeType] ?? 'bin');
+        Storage::disk('r2')->put($key, $contents, [
+            'visibility' => 'public',
+            'ContentType' => $mimeType,
+        ]);
+
+        return $this->publicUrl($key);
+    }
+
     public function upload(UploadedFile $file, string $directory = 'media', ?string $contentType = null): string
     {
         $extension = strtolower($file->guessExtension() ?: $file->getClientOriginalExtension() ?: 'bin');

@@ -10,6 +10,17 @@ use Illuminate\Support\Str;
 
 class SupportInboxService
 {
+    private const ATTACHMENT_MIMES = [
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'image/gif',
+        'video/mp4',
+        'video/webm',
+    ];
+
+    public function __construct(private MediaUploadService $uploads) {}
+
     public function fetchUnread(): int
     {
         if (! function_exists('imap_open')) {
@@ -41,7 +52,8 @@ class SupportInboxService
                     $subject = $this->decodeHeader((string) ($header->subject ?? ''));
                     $overview = imap_fetch_overview($inbox, (string) $messageNumber, 0)[0] ?? null;
                     $messageId = trim((string) ($overview->message_id ?? ''));
-                    if ($this->ingest($from, $subject, $this->body($inbox, $messageNumber), $messageId ?: null)) {
+                    $message = $this->message($inbox, $messageNumber);
+                    if ($this->ingest($from, $subject, $message['body'], $messageId ?: null, $message['attachments'])) {
                         $processed++;
                     }
                 } catch (\Throwable $exception) {
@@ -65,7 +77,7 @@ class SupportInboxService
      * Saves a verified inbound message. Kept public so a future webhook
      * receiver can reuse the exact same validation and ticket update path.
      */
-    public function ingest(string $from, string $subject, string $body, ?string $messageId = null): bool
+    public function ingest(string $from, string $subject, string $body, ?string $messageId = null, array $attachments = []): bool
     {
         $messageId = $messageId ? Str::limit(trim($messageId), 255, '') : null;
         $token = $this->tokenFromSubject($subject);
@@ -73,7 +85,7 @@ class SupportInboxService
             return false;
         }
 
-        return DB::transaction(function () use ($token, $from, $body, $messageId): bool {
+        return DB::transaction(function () use ($token, $from, $body, $messageId, $attachments): bool {
             $ticket = SupportTicket::query()->where('reply_token', $token)->lockForUpdate()->first();
             if (! $ticket || ! $ticket->guest_email || ! hash_equals(strtolower($ticket->guest_email), strtolower($from))) {
                 return false;
@@ -86,12 +98,13 @@ class SupportInboxService
             if ($text === '') {
                 return false;
             }
+            $uploadedAttachments = $this->storeAttachments($attachments);
 
             $ticket->messages()->create([
                 'author_type' => 'guest',
                 'author_id' => 0,
                 'body' => $text,
-                'attachments' => [],
+                'attachments' => $uploadedAttachments,
                 'inbound_message_id' => $messageId,
             ]);
             $ticket->update(['status' => 'open', 'resolved_at' => null, 'store_read_at' => null]);
@@ -139,7 +152,7 @@ class SupportInboxService
         return function_exists('imap_utf8') ? imap_utf8($value) : $value;
     }
 
-    private function body($inbox, int $messageNumber): string
+    private function message($inbox, int $messageNumber): array
     {
         $structure = imap_fetchstructure($inbox, $messageNumber);
         $part = $structure ? $this->findTextPart($structure) : null;
@@ -151,11 +164,36 @@ class SupportInboxService
             default => $raw,
         };
 
-        return ($part['html'] ?? false) ? trim(strip_tags($text)) : trim($text);
+        $attachments = [];
+        foreach ($structure ? $this->findAttachmentParts($structure) : [] as $attachment) {
+            if (count($attachments) >= 6) {
+                break;
+            }
+            $contents = $this->decodePart(
+                imap_fetchbody($inbox, $messageNumber, $attachment['number']),
+                $attachment['encoding'],
+            );
+            if ($contents === '' || strlen($contents) > 20 * 1024 * 1024) {
+                continue;
+            }
+            $actualMime = (new \finfo(FILEINFO_MIME_TYPE))->buffer($contents) ?: '';
+            if (! in_array($actualMime, self::ATTACHMENT_MIMES, true)) {
+                continue;
+            }
+            $attachments[] = ['name' => $attachment['name'], 'mime' => $actualMime, 'contents' => $contents];
+        }
+
+        return [
+            'body' => ($part['html'] ?? false) ? trim(html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5)) : trim($text),
+            'attachments' => $attachments,
+        ];
     }
 
     private function findTextPart(object $part, string $prefix = ''): ?array
     {
+        if ($this->isAttachment($part)) {
+            return null;
+        }
         if (($part->type ?? null) === 0) {
             return ['number' => $prefix, 'encoding' => $part->encoding ?? 0, 'html' => strtoupper($part->subtype ?? 'PLAIN') === 'HTML'];
         }
@@ -174,5 +212,63 @@ class SupportInboxService
         }
 
         return null;
+    }
+
+    private function findAttachmentParts(object $part, string $prefix = ''): array
+    {
+        if ($this->isAttachment($part) && $prefix !== '') {
+            return [[
+                'number' => $prefix,
+                'name' => $this->partName($part) ?? 'attachment',
+                'encoding' => $part->encoding ?? 0,
+            ]];
+        }
+
+        $parts = [];
+        foreach ($part->parts ?? [] as $index => $child) {
+            $number = $prefix === '' ? (string) ($index + 1) : $prefix.'.'.($index + 1);
+            $parts = [...$parts, ...$this->findAttachmentParts($child, $number)];
+        }
+
+        return $parts;
+    }
+
+    private function isAttachment(object $part): bool
+    {
+        return strtolower((string) ($part->disposition ?? '')) === 'attachment'
+            || $this->partName($part) !== null;
+    }
+
+    private function partName(object $part): ?string
+    {
+        foreach (array_merge($part->dparameters ?? [], $part->parameters ?? []) as $parameter) {
+            if (in_array(strtolower((string) ($parameter->attribute ?? '')), ['filename', 'name'], true) && isset($parameter->value)) {
+                return $this->decodeHeader((string) $parameter->value);
+            }
+        }
+
+        return null;
+    }
+
+    private function decodePart(string $raw, int $encoding): string
+    {
+        return match ($encoding) {
+            3 => base64_decode($raw, true) ?: '',
+            4 => quoted_printable_decode($raw),
+            default => $raw,
+        };
+    }
+
+    private function storeAttachments(array $attachments): array
+    {
+        return collect($attachments)
+            ->take(6)
+            ->filter(fn ($attachment) => is_array($attachment)
+                && is_string($attachment['contents'] ?? null)
+                && strlen($attachment['contents']) <= 20 * 1024 * 1024
+                && in_array($attachment['mime'] ?? null, self::ATTACHMENT_MIMES, true))
+            ->map(fn ($attachment) => $this->uploads->uploadContents($attachment['contents'], $attachment['mime'], 'support'))
+            ->values()
+            ->all();
     }
 }

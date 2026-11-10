@@ -15,6 +15,7 @@ use App\Models\SupportTicket;
 use App\Services\SupportInboxService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class SupportTicketTest extends TestCase
@@ -155,5 +156,25 @@ class SupportTicketTest extends TestCase
         $this->assertTrue($inbox->ingest('guest@example.test', $subject, 'Retry', '<guest-reply-1@example.test>'));
         $this->assertFalse($inbox->ingest('attacker@example.test', $subject, 'Nope', '<guest-reply-2@example.test>'));
         $this->assertDatabaseCount('support_messages', 3);
+    }
+
+    public function test_verified_guest_email_attachments_are_saved_to_r2_with_the_ticket_message(): void
+    {
+        Storage::fake('r2');
+        config()->set('filesystems.disks.r2.url', 'https://media.example.test');
+        $ticket = SupportTicket::create(['guest_name' => 'Guest', 'guest_email' => 'attachments@example.test', 'category' => 'Contact', 'subject' => 'Photo attached']);
+        $ticket->update(['reference' => 'SUP-00002']);
+        $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLpcQAAAABJRU5ErkJggg==', true);
+        $subject = "Re: Photo attached [SUP-00002-{$ticket->reply_token}]";
+
+        $this->assertTrue(app(SupportInboxService::class)->ingest('attachments@example.test', $subject, 'Here is the photo.', '<guest-photo@example.test>', [
+            ['name' => 'photo.png', 'mime' => 'image/png', 'contents' => $png],
+            ['name' => 'unsafe.pdf', 'mime' => 'application/pdf', 'contents' => '%PDF-not-accepted'],
+        ]));
+
+        $message = $ticket->fresh()->messages()->latest('id')->firstOrFail();
+        $this->assertSame(1, count($message->attachments));
+        $path = ltrim((string) parse_url($message->attachments[0], PHP_URL_PATH), '/');
+        Storage::disk('r2')->assertExists($path);
     }
 }
