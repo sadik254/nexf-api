@@ -2,14 +2,19 @@
 
 namespace Tests\Feature;
 
+use App\Mail\NoticeMail;
 use App\Models\Admin;
+use App\Models\ConsoleNotification;
 use App\Models\Customer;
-use App\Models\Seller;
-use App\Models\Reseller;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Reseller;
+use App\Models\Seller;
 use App\Models\SellerStaff;
+use App\Models\SupportTicket;
+use App\Services\SupportInboxService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 class SupportTicketTest extends TestCase
@@ -113,5 +118,42 @@ class SupportTicketTest extends TestCase
         OrderItem::create(['order_id' => $otherOrder->id, 'seller_id' => $otherSeller->id, 'product_name' => 'Other item', 'quantity' => 1, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 100, 'line_cost' => 50, 'line_profit' => 50]);
         $this->withToken($staffToken)->postJson('/api/seller/support-tickets', ['guest_name' => 'Guest', 'guest_phone' => '01788888888', 'order_id' => $otherOrder->id, 'category' => 'Order', 'subject' => 'Not ours', 'body' => 'This must not be created.'])
             ->assertUnprocessable()->assertJsonValidationErrors('order_id');
+    }
+
+    public function test_staff_reply_is_emailed_to_a_guest_and_inbox_reply_is_verified_by_sender_and_token(): void
+    {
+        config()->set('support.inbox.address', 'support@nexflifestyle.com');
+        Mail::fake();
+        $admin = Admin::create(['name' => 'Admin', 'email' => 'guest-reply-admin@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);
+        $ticket = SupportTicket::create(['guest_name' => 'Guest', 'guest_email' => 'guest@example.test', 'category' => 'Contact', 'subject' => 'Need help']);
+        $ticket->update(['reference' => 'SUP-00001']);
+        $ticket->messages()->create(['author_type' => 'guest', 'author_id' => 0, 'body' => 'My first message', 'attachments' => []]);
+        $token = $admin->createToken('test', ['admin:basic'])->plainTextToken;
+
+        $this->withToken($token)->postJson("/api/admin/support-tickets/{$ticket->id}/messages", ['body' => 'We can help.', 'attachments' => ['https://media.example.test/reply.pdf']])
+            ->assertOk();
+
+        Mail::assertSent(NoticeMail::class, function (NoticeMail $mail) use ($ticket): bool {
+            $envelope = $mail->envelope();
+
+            return $mail->subjectLine === "Re: Need help [SUP-00001-{$ticket->reply_token}]"
+                && $mail->data['quote'] === 'We can help.'
+                && $mail->data['quoteAttachments'] === ['https://media.example.test/reply.pdf']
+                && $envelope->replyTo[0]->address === 'support@nexflifestyle.com';
+        });
+
+        $ticket->update(['status' => 'resolved', 'resolved_at' => now()]);
+        $inbox = app(SupportInboxService::class);
+        $subject = "Re: Need help [SUP-00001-{$ticket->reply_token}]";
+        $this->assertTrue($inbox->ingest('guest@example.test', $subject, "Thanks for helping.\n\nOn yesterday wrote:\n> Old email", '<guest-reply-1@example.test>'));
+        $this->assertDatabaseHas('support_messages', ['support_ticket_id' => $ticket->id, 'author_type' => 'guest', 'body' => 'Thanks for helping.', 'inbound_message_id' => '<guest-reply-1@example.test>']);
+        $this->assertDatabaseHas('support_tickets', ['id' => $ticket->id, 'status' => 'open', 'resolved_at' => null, 'store_read_at' => null]);
+        $this->assertSame(1, ConsoleNotification::query()->where('type', 'support_reply')->count());
+
+        // A mail reader retry is harmless, and a mismatched sender cannot add
+        // a message even if they somehow know a ticket's token.
+        $this->assertTrue($inbox->ingest('guest@example.test', $subject, 'Retry', '<guest-reply-1@example.test>'));
+        $this->assertFalse($inbox->ingest('attacker@example.test', $subject, 'Nope', '<guest-reply-2@example.test>'));
+        $this->assertDatabaseCount('support_messages', 3);
     }
 }

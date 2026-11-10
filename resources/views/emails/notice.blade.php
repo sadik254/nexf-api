@@ -33,6 +33,15 @@
         </table>
     @endif
 
+    @if (!empty($quoteAttachments))
+        <p style="margin:0 0 20px;font-size:13px;line-height:20px;color:#71717a;">
+            Attachments:
+            @foreach ($quoteAttachments as $attachment)
+                <a href="{{ $attachment }}" style="color:#056fff;">{{ basename(parse_url($attachment, PHP_URL_PATH) ?: $attachment) }}</a>@if (! $loop->last), @endif
+            @endforeach
+        </p>
+    @endif
+
     @if (!empty($rows))
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;background:#fafafa;border:1px solid #e4e4e7;border-radius:10px;font-size:14px;line-height:20px;">
             @foreach ($rows as $label => $value)

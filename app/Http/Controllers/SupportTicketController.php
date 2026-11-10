@@ -5,18 +5,22 @@ namespace App\Http\Controllers;
 use App\Models\Admin;
 use App\Models\Customer;
 use App\Models\Order;
+use App\Models\Reseller;
+use App\Models\ReturnRequest;
 use App\Models\Seller;
 use App\Models\SellerStaff;
-use App\Models\Reseller;
 use App\Models\SupportTicket;
+use App\Services\ConsoleNotificationService;
+use App\Services\ContactMessageCooldownService;
+use App\Services\CustomerNotificationService;
+use App\Services\GuestSupportReplyMailService;
+use App\Services\MediaUploadService;
+use App\Services\TurnstileService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
-use App\Services\MediaUploadService;
-use App\Services\TurnstileService;
-use App\Services\ContactMessageCooldownService;
 
 class SupportTicketController extends Controller
 {
@@ -46,11 +50,13 @@ class SupportTicketController extends Controller
                 'guest_name' => trim($data['name']), 'guest_email' => $email, 'contact_ip' => $request->ip(),
                 'category' => 'Contact', 'subject' => trim($data['subject']),
             ]);
-            $ticket->update(['reference' => 'SUP-' . str_pad((string) $ticket->id, 5, '0', STR_PAD_LEFT)]);
+            $ticket->update(['reference' => 'SUP-'.str_pad((string) $ticket->id, 5, '0', STR_PAD_LEFT)]);
             $ticket->messages()->create(['author_type' => 'guest', 'author_id' => 0, 'body' => trim($data['message']), 'attachments' => []]);
+
             return $ticket;
         });
-        app(\App\Services\ConsoleNotificationService::class)->support($ticket, 'new');
+        app(ConsoleNotificationService::class)->support($ticket, 'new');
+
         return response()->json(['message' => 'Message received.', 'id' => $ticket->id, 'reference' => $ticket->reference], 201);
     }
 
@@ -58,6 +64,7 @@ class SupportTicketController extends Controller
     {
         $this->actor($request);
         $file = $request->validate(['file' => ['required', 'file', 'mimetypes:image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm', 'max:20480']])['file'];
+
         return response()->json(['url' => $this->uploads->upload($file)]);
     }
 
@@ -66,15 +73,26 @@ class SupportTicketController extends Controller
         $actor = $this->actor($request);
         $query = SupportTicket::query()->with(['customer:id,name,email', 'seller:id,store_name,store_slug', 'reseller:id,name,email', 'order:id,order_number'])
             ->withCount('messages')->latest('updated_at');
-        if ($actor instanceof Customer) $query->where('customer_id', $actor->id);
-        if ($actor instanceof Seller) $query->where('seller_id', $actor->id);
-        if ($actor instanceof Reseller) $query->where('reseller_id', $actor->id);
-        if ($request->filled('status')) $query->where('status', $request->validate(['status' => ['required', Rule::in(['open', 'resolved'])]])['status']);
-        if ($request->boolean('escalated')) $query->whereNotNull('escalated_at');
+        if ($actor instanceof Customer) {
+            $query->where('customer_id', $actor->id);
+        }
+        if ($actor instanceof Seller) {
+            $query->where('seller_id', $actor->id);
+        }
+        if ($actor instanceof Reseller) {
+            $query->where('reseller_id', $actor->id);
+        }
+        if ($request->filled('status')) {
+            $query->where('status', $request->validate(['status' => ['required', Rule::in(['open', 'resolved'])]])['status']);
+        }
+        if ($request->boolean('escalated')) {
+            $query->whereNotNull('escalated_at');
+        }
         if ($request->filled('search')) {
             $search = substr((string) $request->query('search'), 0, 100);
             $query->where(fn ($q) => $q->where('subject', 'like', "%{$search}%")->orWhere('category', 'like', "%{$search}%"));
         }
+
         return response()->json($query->paginate(max(1, min((int) $request->query('per_page', 20), 100))));
     }
 
@@ -82,9 +100,10 @@ class SupportTicketController extends Controller
     {
         $actor = $this->actor($request);
         $this->authorizeTicket($actor, $ticket);
-        if (($actor instanceof Admin || $actor instanceof Seller) && !$request->boolean('peek')) {
+        if (($actor instanceof Admin || $actor instanceof Seller) && ! $request->boolean('peek')) {
             $ticket->update(['store_read_at' => now()]);
         }
+
         return response()->json($ticket->load(['customer:id,name,email', 'seller:id,store_name,store_slug', 'reseller:id,name,email', 'order:id,order_number', 'messages']));
     }
 
@@ -103,10 +122,12 @@ class SupportTicketController extends Controller
         ]);
         $orderId = $data['order_id'] ?? null;
         $sellerId = $data['seller_id'] ?? null;
-        if ($customer instanceof Reseller && ($orderId || $sellerId)) abort(422, 'Reseller support requests cannot be linked to customer orders or stores.');
+        if ($customer instanceof Reseller && ($orderId || $sellerId)) {
+            abort(422, 'Reseller support requests cannot be linked to customer orders or stores.');
+        }
         if ($customer instanceof Customer && $orderId) {
             $order = Order::where('customer_id', $customer->id)->findOrFail($orderId);
-            if ($sellerId && !$order->items()->where('seller_id', $sellerId)->exists()) {
+            if ($sellerId && ! $order->items()->where('seller_id', $sellerId)->exists()) {
                 throw ValidationException::withMessages(['seller_id' => 'This store has no items in the selected order.']);
             }
         }
@@ -119,11 +140,13 @@ class SupportTicketController extends Controller
                 // A store has a day to answer before the customer can bring NEXF in.
                 'respond_by' => $sellerId ? now()->addHours(24) : null,
             ]);
-            $ticket->update(['reference' => 'SUP-' . str_pad((string) $ticket->id, 5, '0', STR_PAD_LEFT)]);
+            $ticket->update(['reference' => 'SUP-'.str_pad((string) $ticket->id, 5, '0', STR_PAD_LEFT)]);
             $ticket->messages()->create(['author_type' => $customer instanceof Customer ? 'customer' : 'reseller', 'author_id' => $customer->id, 'body' => trim($data['body']), 'attachments' => $data['attachments'] ?? []]);
+
             return $ticket;
         });
-        app(\App\Services\ConsoleNotificationService::class)->support($ticket->load('order:id,order_number'), 'new');
+        app(ConsoleNotificationService::class)->support($ticket->load('order:id,order_number'), 'new');
+
         return response()->json($ticket->load(['customer:id,name,email', 'seller:id,store_name,store_slug', 'reseller:id,name,email', 'order:id,order_number', 'messages']), 201);
     }
 
@@ -150,7 +173,7 @@ class SupportTicketController extends Controller
 
         $sellerId = $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null);
         $orderId = $data['order_id'] ?? null;
-        if ($actor instanceof Seller && $orderId && !Order::query()->whereKey($orderId)->whereHas('items', fn ($items) => $items->where('seller_id', $actor->id))->exists()) {
+        if ($actor instanceof Seller && $orderId && ! Order::query()->whereKey($orderId)->whereHas('items', fn ($items) => $items->where('seller_id', $actor->id))->exists()) {
             throw ValidationException::withMessages(['order_id' => ['The selected order does not contain an item from your store.']]);
         }
 
@@ -163,11 +186,11 @@ class SupportTicketController extends Controller
                 'guest_phone' => empty($data['customer_id']) ? ($data['guest_phone'] ?? null) : null,
                 'guest_email' => empty($data['customer_id']) ? ($data['guest_email'] ?? null) : null,
                 // seller_id takes priority; null without this flag represents the house store.
-                'no_store' => $actor instanceof Admin && !$sellerId && (bool) ($data['no_store'] ?? false),
+                'no_store' => $actor instanceof Admin && ! $sellerId && (bool) ($data['no_store'] ?? false),
                 'category' => trim($data['category']),
                 'subject' => trim($data['subject']),
             ]);
-            $ticket->update(['reference' => 'SUP-' . str_pad((string) $ticket->id, 5, '0', STR_PAD_LEFT)]);
+            $ticket->update(['reference' => 'SUP-'.str_pad((string) $ticket->id, 5, '0', STR_PAD_LEFT)]);
             $ticket->messages()->create([
                 'author_type' => $staff instanceof SellerStaff ? 'seller_staff' : ($actor instanceof Seller ? 'seller' : 'admin'),
                 'author_id' => $staff?->id ?? $actor->id,
@@ -175,9 +198,10 @@ class SupportTicketController extends Controller
                 'body' => trim($data['body']),
                 'attachments' => $data['attachments'] ?? [],
             ]);
+
             return $ticket;
         });
-        app(\App\Services\ConsoleNotificationService::class)->support($ticket->load('order:id,order_number'), 'new');
+        app(ConsoleNotificationService::class)->support($ticket->load('order:id,order_number'), 'new');
 
         return response()->json($ticket->load(['customer:id,name,email', 'seller:id,store_name,store_slug', 'reseller:id,name,email', 'order:id,order_number', 'messages']), 201);
     }
@@ -192,17 +216,25 @@ class SupportTicketController extends Controller
             'attachments.*' => ['required', 'url', 'max:1000', 'regex:/^https:\/\//'],
         ]);
         $staff = $request->attributes->get('seller_staff');
-        DB::transaction(function () use ($ticket, $actor, $staff, $data) {
-            $ticket->messages()->create([
+        $reply = DB::transaction(function () use ($ticket, $actor, $staff, $data) {
+            $reply = $ticket->messages()->create([
                 'author_type' => $staff instanceof SellerStaff ? 'seller_staff' : ($actor instanceof Customer ? 'customer' : ($actor instanceof Seller ? 'seller' : ($actor instanceof Reseller ? 'reseller' : 'admin'))),
                 'author_id' => $staff?->id ?? $actor->id, 'author_name' => $staff?->name, 'body' => trim($data['body']), 'attachments' => $data['attachments'] ?? [],
             ]);
             $ticket->update(['status' => 'open', 'resolved_at' => null]
                 + ($actor instanceof Customer ? ['store_read_at' => null] : [])
-                + ($actor instanceof Seller && !$ticket->seller_responded_at ? ['seller_responded_at' => now()] : []));
+                + ($actor instanceof Seller && ! $ticket->seller_responded_at ? ['seller_responded_at' => now()] : []));
+
+            return $reply;
         });
-        app(\App\Services\ConsoleNotificationService::class)->support($ticket->fresh('order:id,order_number'), 'reply');
-        if (!($actor instanceof Customer)) app(\App\Services\CustomerNotificationService::class)->supportReply($ticket);
+        app(ConsoleNotificationService::class)->support($ticket->fresh('order:id,order_number'), 'reply');
+        if (! ($actor instanceof Customer)) {
+            app(CustomerNotificationService::class)->supportReply($ticket);
+        }
+        if ($actor instanceof Admin || $actor instanceof Seller) {
+            app(GuestSupportReplyMailService::class)->send($ticket->fresh(), $reply);
+        }
+
         return $this->show($request, $ticket);
     }
 
@@ -211,7 +243,10 @@ class SupportTicketController extends Controller
         $actor = $this->actor($request);
         $this->authorizeTicket($actor, $ticket);
         $ticket->update(['status' => 'resolved', 'resolved_at' => now()]);
-        if (!($actor instanceof Customer)) app(\App\Services\CustomerNotificationService::class)->supportResolved($ticket);
+        if (! ($actor instanceof Customer)) {
+            app(CustomerNotificationService::class)->supportResolved($ticket);
+        }
+
         return $this->show($request, $ticket);
     }
 
@@ -223,7 +258,7 @@ class SupportTicketController extends Controller
             + ($actor instanceof Customer ? ['store_read_at' => null] : []));
 
         if ($actor instanceof Customer) {
-            app(\App\Services\ConsoleNotificationService::class)->support(
+            app(ConsoleNotificationService::class)->support(
                 $ticket->fresh('order:id,order_number'),
                 'reply',
             );
@@ -238,13 +273,14 @@ class SupportTicketController extends Controller
         $customer = $this->actor($request);
         abort_unless($customer instanceof Customer, 403);
         $this->authorizeTicket($customer, $ticket);
-        if (!$ticket->seller_id || $ticket->status !== 'open' || $ticket->escalated_at) {
+        if (! $ticket->seller_id || $ticket->status !== 'open' || $ticket->escalated_at) {
             throw ValidationException::withMessages(['ticket' => ['Only an open store ticket can be passed to NEXF.']]);
         }
         $ticket->update(['escalated_at' => now()]);
         // Returns filed with the ticket go to NEXF with it, so staff can overrule the store.
-        \App\Models\ReturnRequest::query()->where('support_ticket_id', $ticket->id)->whereNull('escalated_at')->update(['escalated_at' => now()]);
-        app(\App\Services\ConsoleNotificationService::class)->escalated('/dashboard/support', (string) $ticket->reference, $ticket->order?->order_number, $ticket->seller_id);
+        ReturnRequest::query()->where('support_ticket_id', $ticket->id)->whereNull('escalated_at')->update(['escalated_at' => now()]);
+        app(ConsoleNotificationService::class)->escalated('/dashboard/support', (string) $ticket->reference, $ticket->order?->order_number, $ticket->seller_id);
+
         return $this->show($request, $ticket);
     }
 
@@ -252,13 +288,20 @@ class SupportTicketController extends Controller
     {
         $actor = $request->user();
         abort_unless($actor instanceof Customer || $actor instanceof Seller || $actor instanceof Reseller || $actor instanceof Admin, 403);
+
         return $actor;
     }
 
     private function authorizeTicket(Customer|Seller|Reseller|Admin $actor, SupportTicket $ticket): void
     {
-        if ($actor instanceof Customer) abort_unless($ticket->customer_id === $actor->id, 404);
-        if ($actor instanceof Seller) abort_unless($ticket->seller_id === $actor->id, 404);
-        if ($actor instanceof Reseller) abort_unless($ticket->reseller_id === $actor->id, 404);
+        if ($actor instanceof Customer) {
+            abort_unless($ticket->customer_id === $actor->id, 404);
+        }
+        if ($actor instanceof Seller) {
+            abort_unless($ticket->seller_id === $actor->id, 404);
+        }
+        if ($actor instanceof Reseller) {
+            abort_unless($ticket->reseller_id === $actor->id, 404);
+        }
     }
 }
