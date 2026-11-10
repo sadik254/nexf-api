@@ -125,6 +125,7 @@ class CustomerAccountController extends Controller
     public function notifications(Request $request): JsonResponse
     {
         $customer = $this->customer($request);
+        $this->pruneExpiredNotifications($customer->id);
         $perPage = min(100, max(1, (int) $request->query('per_page', 25)));
         return response()->json([
             'unread_count' => CustomerInSiteNotification::where('customer_id', $customer->id)->whereNull('read_at')->count(),
@@ -156,5 +157,20 @@ class CustomerAccountController extends Controller
         $customer = $request->user();
         abort_unless($customer instanceof Customer, 403);
         return $customer;
+    }
+
+    /**
+     * Retention is intentionally lazy: it runs only when this shopper opens
+     * their bell, so no scheduler or background worker is required.
+     */
+    private function pruneExpiredNotifications(int $customerId): void
+    {
+        CustomerInSiteNotification::query()
+            ->where('customer_id', $customerId)
+            ->where(function ($query): void {
+                $query->where('read_at', '<', now()->subDays(30))
+                    ->orWhere('created_at', '<', now()->subDays(90));
+            })
+            ->delete();
     }
 }

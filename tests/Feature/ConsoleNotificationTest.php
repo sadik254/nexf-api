@@ -32,6 +32,25 @@ class ConsoleNotificationTest extends TestCase
         $this->assertSame(1, ConsoleNotification::where('recipient_type', 'admin')->whereNull('read_at')->count());
     }
 
+    public function test_opening_a_console_bell_lazily_prunes_only_expired_notifications(): void
+    {
+        $admin = Admin::create(['name' => 'Admin', 'email' => 'prune-bell-admin@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);
+        $other = Admin::create(['name' => 'Other', 'email' => 'prune-bell-other@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);
+
+        $oldRead = ConsoleNotification::create(['recipient_type' => 'admin', 'recipient_id' => $admin->id, 'type' => 'old_read', 'title' => 'Old read', 'read_at' => now()->subDays(31)]);
+        $oldUnread = ConsoleNotification::create(['recipient_type' => 'admin', 'recipient_id' => $admin->id, 'type' => 'old_unread', 'title' => 'Old unread']);
+        $oldUnread->forceFill(['created_at' => now()->subDays(91), 'updated_at' => now()->subDays(91)])->save();
+        $keepUnread = ConsoleNotification::create(['recipient_type' => 'admin', 'recipient_id' => $admin->id, 'type' => 'keep', 'title' => 'Keep']);
+        $otherOld = ConsoleNotification::create(['recipient_type' => 'admin', 'recipient_id' => $other->id, 'type' => 'other', 'title' => 'Other', 'read_at' => now()->subDays(31)]);
+
+        $this->withToken($admin->createToken('test', ['admin'])->plainTextToken)->getJson('/api/admin/notifications')->assertOk()->assertJsonPath('unread_count', 1);
+
+        $this->assertDatabaseMissing('console_notifications', ['id' => $oldRead->id]);
+        $this->assertDatabaseMissing('console_notifications', ['id' => $oldUnread->id]);
+        $this->assertDatabaseHas('console_notifications', ['id' => $keepUnread->id]);
+        $this->assertDatabaseHas('console_notifications', ['id' => $otherOld->id]);
+    }
+
     public function test_new_order_notifies_admins_and_its_store(): void
     {
         $admin = Admin::create(['name' => 'Admin', 'email' => 'order-bell-admin@example.test', 'password' => 'password123', 'role' => 'admin', 'is_active' => true]);

@@ -14,6 +14,7 @@ class ConsoleNotificationController extends Controller
     public function index(Request $request, string $audience): JsonResponse
     {
         [$type, $id] = $this->recipient($request, $audience);
+        $this->pruneExpired($type, $id);
         $perPage = min(100, max(1, (int) $request->query('per_page', 25)));
         $query = ConsoleNotification::query()->where('recipient_type', $type)->where('recipient_id', $id)->latest();
         return response()->json(['unread_count' => (clone $query)->whereNull('read_at')->count(), 'notifications' => $query->paginate($perPage)]);
@@ -50,5 +51,21 @@ class ConsoleNotificationController extends Controller
             'reseller' => $actor instanceof Reseller ? ['reseller', $actor->id] : abort(403),
             default => abort(404),
         };
+    }
+
+    /**
+     * Retention is intentionally lazy: it runs only when its owner opens the
+     * bell, so no scheduler or background worker is required.
+     */
+    private function pruneExpired(string $type, int $id): void
+    {
+        ConsoleNotification::query()
+            ->where('recipient_type', $type)
+            ->where('recipient_id', $id)
+            ->where(function ($query): void {
+                $query->where('read_at', '<', now()->subDays(30))
+                    ->orWhere('created_at', '<', now()->subDays(90));
+            })
+            ->delete();
     }
 }

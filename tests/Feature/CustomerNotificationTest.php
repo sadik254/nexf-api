@@ -63,4 +63,20 @@ class CustomerNotificationTest extends TestCase
         $this->assertSame('৳10.50 cashback added to your NEXF Balance.', $notification->body);
         $this->assertSame(['order_number' => 'BELL-2', 'url' => '/account/balance'], $notification->data);
     }
+
+    public function test_opening_a_customer_bell_lazily_prunes_expired_notifications(): void
+    {
+        $customer = Customer::create(['name' => 'Buyer', 'email' => 'prune-buyer@example.test', 'password' => 'password123']);
+        $oldRead = CustomerInSiteNotification::create(['customer_id' => $customer->id, 'type' => 'old_read', 'title' => 'Old read', 'read_at' => now()->subDays(31)]);
+        $oldUnread = CustomerInSiteNotification::create(['customer_id' => $customer->id, 'type' => 'old_unread', 'title' => 'Old unread']);
+        $oldUnread->forceFill(['created_at' => now()->subDays(91), 'updated_at' => now()->subDays(91)])->save();
+        $keep = CustomerInSiteNotification::create(['customer_id' => $customer->id, 'type' => 'keep', 'title' => 'Keep']);
+
+        $this->withToken($customer->createToken('test', ['customer:basic'])->plainTextToken)->getJson('/api/customers/notifications')
+            ->assertOk()->assertJsonPath('unread_count', 1);
+
+        $this->assertDatabaseMissing('customer_in_site_notifications', ['id' => $oldRead->id]);
+        $this->assertDatabaseMissing('customer_in_site_notifications', ['id' => $oldUnread->id]);
+        $this->assertDatabaseHas('customer_in_site_notifications', ['id' => $keep->id]);
+    }
 }
