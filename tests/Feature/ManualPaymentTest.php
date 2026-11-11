@@ -42,6 +42,42 @@ class ManualPaymentTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors('accounts.0.number');
     }
 
+    public function test_bangla_qr_uses_a_qr_image_not_an_account_number_and_accepts_free_text_sender(): void
+    {
+        $admin = Admin::create(['name' => 'Payments Admin', 'email' => 'bangla-qr-admin@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $accounts = [
+            ['id' => 'bangla_qr', 'enabled' => true, 'number' => '', 'qrImage' => '/assets/qr-code/bangla-qr-code.svg', 'accountName' => 'NEXF Lifestyle', 'accountType' => 'Merchant'],
+            ['id' => 'bkash', 'enabled' => true, 'number' => '01712345678'],
+            ['id' => 'nagad', 'enabled' => false, 'number' => ''],
+            ['id' => 'rocket', 'enabled' => false, 'number' => ''],
+            ['id' => 'upay', 'enabled' => false, 'number' => ''],
+            ['id' => 'bank', 'enabled' => false, 'number' => ''],
+        ];
+        $token = $admin->createToken('test', ['admin'])->plainTextToken;
+
+        $this->withToken($token)->postJson('/api/admin/payment-accounts', ['accounts' => $accounts])
+            ->assertOk()
+            ->assertJsonPath('0.id', 'bangla_qr')
+            ->assertJsonPath('0.qrImage', '/assets/qr-code/bangla-qr-code.svg')
+            ->assertJsonPath('0.number', '');
+        $this->getJson('/api/payment-accounts')->assertOk()->assertJsonPath('0.qrImage', '/assets/qr-code/bangla-qr-code.svg');
+
+        $this->withToken($token)->postJson('/api/admin/payment-accounts', ['accounts' => [
+            ['id' => 'bangla_qr', 'enabled' => true, 'number' => ''],
+        ]])->assertUnprocessable()->assertJsonValidationErrors('accounts.0.qrImage');
+
+        $method = PaymentMethod::create(['name' => 'Bangla QR', 'code' => 'bangla_qr', 'is_active' => true]);
+        $order = $this->order($method, 'bangla_qr');
+        $this->postJson("/api/orders/{$order->id}/payment", [
+            'phone' => '01712345678', 'sender' => 'Dutch-Bangla Bank',
+        ])->assertOk()->assertJsonPath('payment_sender', 'Dutch-Bangla Bank');
+        $this->assertFalse(app(ManualPaymentExpiryService::class)->isExpired($order->fresh()));
+
+        $unsubmitted = $this->order($method, 'bangla-qr-expiry');
+        $unsubmitted->update(['payment_method_code' => 'bangla_qr', 'placed_at' => now()->subMinutes(31)]);
+        $this->assertTrue(app(ManualPaymentExpiryService::class)->isExpired($unsubmitted->fresh()));
+    }
+
     public function test_shopper_can_submit_and_read_manual_payment_using_delivery_phone_only(): void
     {
         $method = PaymentMethod::where('code', 'bkash')->firstOrFail();

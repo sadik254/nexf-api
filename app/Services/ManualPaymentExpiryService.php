@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\DB;
 
 class ManualPaymentExpiryService
 {
-    public const METHODS = ['bkash', 'nagad', 'rocket', 'upay', 'bank'];
+    public const METHODS = Order::MANUAL_PAYMENT_CODES;
 
     public function isExpired(Order $order, ?Carbon $now = null): bool
     {

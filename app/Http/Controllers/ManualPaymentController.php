@@ -12,16 +12,17 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use App\Services\ManualPaymentExpiryService;
 use App\Services\FraudGuardService;
+use App\Services\MediaUploadService;
 use App\Http\Controllers\OrderController;
 
 /**
- * Persists the details for offline bKash, Nagad, Rocket and bank transfers.
+ * Persists the details for offline manual payments, including Bangla QR.
  * Staff still verify the transfer before marking an order paid.
  */
 class ManualPaymentController extends Controller
 {
-    public function __construct(private ManualPaymentExpiryService $expiry) {}
-    private const METHODS = ['bkash', 'nagad', 'rocket', 'upay', 'bank'];
+    public function __construct(private ManualPaymentExpiryService $expiry, private MediaUploadService $uploads) {}
+    private const METHODS = ['bangla_qr', 'bkash', 'nagad', 'rocket', 'upay', 'bank'];
 
     public function accounts(): JsonResponse
     {
@@ -33,7 +34,7 @@ class ManualPaymentController extends Controller
         abort_unless($request->user() instanceof Admin, 403);
 
         $data = $request->validate([
-            'accounts' => ['present', 'array', 'max:5'],
+            'accounts' => ['present', 'array', 'max:6'],
             'accounts.*.id' => ['required', Rule::in(self::METHODS), 'distinct'],
             'accounts.*.enabled' => ['required', 'boolean'],
             'accounts.*.number' => ['nullable', 'string', 'max:60'],
@@ -43,10 +44,17 @@ class ManualPaymentController extends Controller
             'accounts.*.branch' => ['nullable', 'string', 'max:120'],
             'accounts.*.routing' => ['nullable', 'string', 'max:30'],
             'accounts.*.note' => ['nullable', 'string', 'max:300'],
+            'accounts.*.qrImage' => ['nullable', 'string', 'max:2048'],
         ]);
 
         foreach ($data['accounts'] as $index => $account) {
-            if ($account['enabled'] && blank($account['number'] ?? null)) {
+            if ($account['id'] === 'bangla_qr' && $account['enabled'] && blank($account['qrImage'] ?? null)) {
+                throw ValidationException::withMessages(["accounts.{$index}.qrImage" => 'Bangla QR needs a QR image when it is on.']);
+            }
+            if ($account['id'] === 'bangla_qr' && filled($account['qrImage'] ?? null) && ! $this->isQrImage($account['qrImage'])) {
+                throw ValidationException::withMessages(["accounts.{$index}.qrImage" => 'Use a PNG or SVG from the media library.']);
+            }
+            if ($account['id'] !== 'bangla_qr' && $account['enabled'] && blank($account['number'] ?? null)) {
                 throw ValidationException::withMessages(["accounts.{$index}.number" => 'A method that is on needs a number to pay to.']);
             }
         }
@@ -55,7 +63,12 @@ class ManualPaymentController extends Controller
         // violate the frontend contract, where every account has a string
         // `number` field even while it is disabled.
         $data['accounts'] = array_map(function (array $account): array {
-            $account['number'] = (string) ($account['number'] ?? '');
+            if ($account['id'] === 'bangla_qr') {
+                $account['number'] = '';
+                unset($account['note']);
+            } else {
+                $account['number'] = (string) ($account['number'] ?? '');
+            }
             return $account;
         }, $data['accounts']);
 
@@ -91,7 +104,10 @@ class ManualPaymentController extends Controller
         abort_if($codPrepay && $this->hasPackedFulfilment($order), 422, 'This order is already packed.');
 
         $enabledMethods = collect(SiteSetting::find('payment_accounts')?->payload ?? [])
-            ->filter(fn (array $account): bool => !empty($account['enabled']) && !empty($account['number']))
+            ->filter(fn (array $account): bool => !empty($account['enabled'])
+                && (($account['id'] ?? null) === 'bangla_qr'
+                    ? filled($account['qrImage'] ?? null)
+                    : filled($account['number'] ?? null)))
             ->pluck('id')
             ->all();
         $switch = $request->validate([
@@ -113,7 +129,7 @@ class ManualPaymentController extends Controller
             'reference' => ['nullable', 'string', 'min:6', 'max:60', 'regex:/^[A-Za-z0-9-]+$/'],
             // Wallet transfers identify the sending number; bank transfers use
             // the shopper's bank name instead.
-            'sender' => $order->payment_method_code === 'bank'
+            'sender' => in_array($order->payment_method_code, ['bank', 'bangla_qr'], true)
                 ? ['required', 'string', 'min:2', 'max:40']
                 : ['required', 'string', 'regex:/^(\+?88)?01[3-9]\d{8}$/'],
             'amount' => ['nullable', 'numeric', 'min:1', 'max:'.$this->payable($order)],
@@ -222,5 +238,16 @@ class ManualPaymentController extends Controller
         $statuses = ['packed', 'shipped', 'delivered', 'return_pending', 'returned'];
         return $order->items()->whereIn('fulfillment_status', $statuses)->exists()
             || $order->storeGroups()->whereIn('status', $statuses)->exists();
+    }
+
+    private function isQrImage(string $url): bool
+    {
+        if (preg_match('#^/assets/[A-Za-z0-9._/-]+\.(?:png|svg)$#i', $url)) {
+            return true;
+        }
+
+        $path = (string) parse_url($url, PHP_URL_PATH);
+
+        return preg_match('/\.(?:png|svg)$/i', $path) === 1 && $this->uploads->isR2Original($url);
     }
 }

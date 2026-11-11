@@ -35,34 +35,40 @@ class PaymentMethodSeeder extends Seeder
                 'sort_order' => 4,
             ],
             [
+                'name' => 'Bangla QR',
+                'code' => 'bangla_qr',
+                'description' => 'Scan our merchant QR code with your preferred payment app.',
+                'sort_order' => 5,
+            ],
+            [
                 'name' => 'bKash',
                 'code' => 'bkash',
                 'description' => 'Send money to our bKash number.',
-                'sort_order' => 5,
+                'sort_order' => 6,
             ],
             [
                 'name' => 'Nagad',
                 'code' => 'nagad',
                 'description' => 'Send money to our Nagad number.',
-                'sort_order' => 6,
+                'sort_order' => 7,
             ],
             [
                 'name' => 'Rocket',
                 'code' => 'rocket',
                 'description' => 'Send money to our Rocket number.',
-                'sort_order' => 7,
+                'sort_order' => 8,
             ],
             [
                 'name' => 'Upay',
                 'code' => 'upay',
                 'description' => 'Send money to our Upay number.',
-                'sort_order' => 8,
+                'sort_order' => 9,
             ],
             [
                 'name' => 'Bank Transfer',
                 'code' => 'bank',
                 'description' => 'Transfer to our bank account.',
-                'sort_order' => 9,
+                'sort_order' => 10,
             ],
         ];
 

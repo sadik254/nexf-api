@@ -38,7 +38,7 @@ class WalletLedgerService
     {
         $amount = round((float) $group->prepaid_amount, 2);
         if ($amount <= 0 || !$order->customer_id) return null;
-        $manualPaid = in_array($order->payment_method_code, ['bkash', 'nagad', 'rocket', 'upay', 'bank'], true) && $order->payment_received_at
+        $manualPaid = in_array($order->payment_method_code, Order::MANUAL_PAYMENT_CODES, true) && $order->payment_received_at
             ? min((float) ($order->paid_amount ?? 0), max(0, (float) $order->total - (float) ($order->wallet_amount ?? 0)))
             : 0.0;
         $paidIn = (float) ($order->wallet_withdrawable_amount ?? 0) + $manualPaid;
@@ -98,7 +98,7 @@ class WalletLedgerService
         if ($amount <= 0 || !$return->customer_id) return;
         $order = $return->order;
         $manualPaid = 0.0;
-        if ($order && in_array($order->payment_method_code, ['bkash', 'nagad', 'rocket', 'upay', 'bank'], true) && $order->payment_received_at) {
+        if ($order && in_array($order->payment_method_code, Order::MANUAL_PAYMENT_CODES, true) && $order->payment_received_at) {
             $manualPaid = min((float) ($order->paid_amount ?? 0), max(0, (float) $order->total - (float) ($order->wallet_amount ?? 0)));
         }
         $alreadyRefunded = $order ? (float) CustomerWalletTransaction::where('order_id', $order->id)->where('kind', 'refund')->where('bucket', 'withdrawable')->where('type', 'credit')->sum('amount') : 0.0;

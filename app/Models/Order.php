@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Order extends Model
 {
     use SoftDeletes;
-    public const MANUAL_PAYMENT_CODES = ['bkash', 'nagad', 'rocket', 'upay', 'bank'];
+    public const MANUAL_PAYMENT_CODES = ['bangla_qr', 'bkash', 'nagad', 'rocket', 'upay', 'bank'];
     protected $with = ['couponRedemptions'];
     protected $appends = ['applied_discounts', 'payable'];
     protected $hidden = ['couponRedemptions'];
@@ -103,7 +103,7 @@ class Order extends Model
             if ($order->isDirty('payment_status') && $order->payment_status === 'paid' && !$order->payment_paid_at) {
                 $order->payment_paid_at = now();
             }
-            if ($order->isDirty('paid_amount') && in_array($order->payment_method_code, ['bkash', 'nagad', 'rocket', 'upay', 'bank'], true)) {
+            if ($order->isDirty('paid_amount') && in_array($order->payment_method_code, self::MANUAL_PAYMENT_CODES, true)) {
                 $order->payment_received_at = (float) $order->paid_amount > 0 ? ($order->payment_received_at ?? now()) : null;
             }
         });
