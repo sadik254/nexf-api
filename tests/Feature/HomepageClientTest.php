@@ -16,18 +16,20 @@ class HomepageClientTest extends TestCase
         $super = Admin::create(['name' => 'Super', 'email' => 'clients@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
         $token = $super->createToken('test', ['admin'])->plainTextToken;
         $clients = [
-            ['name' => 'Visible client', 'logo' => 'https://media.example.test/media/client-one.svg', 'url' => 'https://client-one.test', 'industry' => 'Retail', 'hidden' => false],
+            ['name' => 'Visible client', 'logo' => 'https://media.example.test/media/client-one.svg', 'logo_dark' => 'https://media.example.test/media/client-one-dark.svg', 'url' => 'https://client-one.test', 'industry' => 'Retail', 'hidden' => false],
             ['name' => 'Hidden client', 'logo' => 'https://media.example.test/media/client-two.png', 'url' => null, 'industry' => null, 'hidden' => true],
         ];
 
         $saved = $this->withToken($token)->postJson('/api/admin/homepage/clients', ['clients' => $clients])
             ->assertOk()->assertJsonCount(2)->assertJsonPath('0.name', 'Visible client')->json();
         $this->getJson('/api/homepage/clients')->assertOk()->assertJsonCount(1)
-            ->assertJsonPath('0.original_logo', 'https://media.example.test/media/client-one.svg');
+            ->assertJsonPath('0.original_logo', 'https://media.example.test/media/client-one.svg')
+            ->assertJsonPath('0.logo_dark', 'https://media.example.test/media/client-one-dark.svg')
+            ->assertJsonPath('0.original_logo_dark', 'https://media.example.test/media/client-one-dark.svg');
 
         $this->withToken($token)->postJson('/api/admin/homepage/clients', ['clients' => [[
-            ...$clients[1], 'id' => $saved[1]['id'], 'hidden' => false,
-        ]]])->assertOk()->assertJsonCount(1)->assertJsonPath('0.name', 'Hidden client');
+            ...$clients[1], 'id' => $saved[1]['id'], 'hidden' => false, 'logo_dark' => null,
+        ]]])->assertOk()->assertJsonCount(1)->assertJsonPath('0.name', 'Hidden client')->assertJsonPath('0.logo_dark', null);
 
         $layout = [[
             'id' => 'clients', 'type' => 'clients', 'enabled' => true, 'title' => 'Trusted by clients',

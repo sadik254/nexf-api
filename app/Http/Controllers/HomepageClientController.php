@@ -34,6 +34,7 @@ class HomepageClientController extends Controller
             'clients.*.id' => ['sometimes', 'integer', 'exists:homepage_clients,id'],
             'clients.*.name' => ['required', 'string', 'max:120'],
             'clients.*.logo' => ['required', 'url:http,https', 'max:2048'],
+            'clients.*.logo_dark' => ['nullable', 'url:http,https', 'max:2048'],
             'clients.*.url' => ['nullable', 'url:http,https', 'max:500'],
             'clients.*.industry' => ['nullable', 'string', 'max:80'],
             'clients.*.hidden' => ['required', 'boolean'],
@@ -46,6 +47,9 @@ class HomepageClientController extends Controller
             if (! $this->media->isR2Original($client['logo'])) {
                 throw ValidationException::withMessages(["clients.{$index}.logo" => 'Choose an original image from the media library.']);
             }
+            if (! empty($client['logo_dark']) && ! $this->media->isR2Original($client['logo_dark'])) {
+                throw ValidationException::withMessages(["clients.{$index}.logo_dark" => 'Choose an original image from the media library.']);
+            }
         }
 
         DB::transaction(function () use ($data, $ids): void {
@@ -53,6 +57,9 @@ class HomepageClientController extends Controller
             foreach ($data['clients'] as $position => $client) {
                 $id = $client['id'] ?? null;
                 unset($client['id']);
+                // A missing dark logo means no dark-mode override, rather than
+                // retaining a logo the editor has explicitly removed.
+                $client['logo_dark'] = $client['logo_dark'] ?? null;
                 HomepageClient::query()->updateOrCreate(['id' => $id], [...$client, 'sort_order' => $position]);
             }
         });

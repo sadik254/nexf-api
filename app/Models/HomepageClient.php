@@ -6,9 +6,9 @@ use Illuminate\Database\Eloquent\Model;
 
 class HomepageClient extends Model
 {
-    protected $fillable = ['name', 'logo', 'url', 'industry', 'hidden', 'sort_order'];
+    protected $fillable = ['name', 'logo', 'logo_dark', 'url', 'industry', 'hidden', 'sort_order'];
 
-    protected $appends = ['original_logo'];
+    protected $appends = ['original_logo', 'original_logo_dark'];
 
     protected function casts(): array
     {
@@ -18,5 +18,10 @@ class HomepageClient extends Model
     public function getOriginalLogoAttribute(): ?string
     {
         return $this->attributes['logo'] ?? null;
+    }
+
+    public function getOriginalLogoDarkAttribute(): ?string
+    {
+        return $this->attributes['logo_dark'] ?? null;
     }
 }
