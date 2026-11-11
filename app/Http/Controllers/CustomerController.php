@@ -139,10 +139,10 @@ class CustomerController extends Controller
             return $this->suspendedResponse();
         }
         if ($existingEmail) {
-            return response()->json(['message' => 'Email already taken.'], 422);
+            throw ValidationException::withMessages(['email' => ['Email already taken.']]);
         }
         if ($existingPhone) {
-            return response()->json(['message' => 'Phone already taken.'], 422);
+            throw ValidationException::withMessages(['phone' => ['Phone already taken.']]);
         }
         $referralCode = isset($data['referral_code']) ? strtoupper(trim($data['referral_code'])) : null;
         if ($referralCode !== null && !Customer::where('referral_code', $referralCode)->exists()) {
@@ -391,7 +391,7 @@ class CustomerController extends Controller
                 ->where('id', '!=', $customer->id)
                 ->exists();
             if ($emailExists) {
-                return response()->json(['message' => 'Email already taken.'], 422);
+                throw ValidationException::withMessages(['email' => ['Email already taken.']]);
             }
         }
 
@@ -400,7 +400,7 @@ class CustomerController extends Controller
                 ->where('id', '!=', $customer->id)
                 ->exists();
             if ($phoneExists) {
-                return response()->json(['message' => 'Phone already taken.'], 422);
+                throw ValidationException::withMessages(['phone' => ['Phone already taken.']]);
             }
         }
 

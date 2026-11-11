@@ -140,10 +140,10 @@ class AdminController extends Controller
         ]);
 
         if (Admin::where('email', $data['email'])->exists()) {
-            return response()->json(['message' => 'Email already taken.'], 422);
+            throw ValidationException::withMessages(['email' => ['Email already taken.']]);
         }
         if (!empty($data['phone']) && Admin::where('phone', $data['phone'])->exists()) {
-            return response()->json(['message' => 'Phone already taken.'], 422);
+            throw ValidationException::withMessages(['phone' => ['Phone already taken.']]);
         }
 
         $imageUrl = null;
@@ -220,7 +220,7 @@ class AdminController extends Controller
                 ->where('id', '!=', $admin->id)
                 ->exists();
             if ($emailExists) {
-                return response()->json(['message' => 'Email already taken.'], 422);
+                throw ValidationException::withMessages(['email' => ['Email already taken.']]);
             }
         }
 
@@ -229,7 +229,7 @@ class AdminController extends Controller
                 ->where('id', '!=', $admin->id)
                 ->exists();
             if ($phoneExists) {
-                return response()->json(['message' => 'Phone already taken.'], 422);
+                throw ValidationException::withMessages(['phone' => ['Phone already taken.']]);
             }
         }
 
@@ -328,7 +328,7 @@ class AdminController extends Controller
                 ->where('id', '!=', $admin->id)
                 ->exists();
             if ($emailExists) {
-                return response()->json(['message' => 'Email already taken.'], 422);
+                throw ValidationException::withMessages(['email' => ['Email already taken.']]);
             }
         }
 
@@ -337,7 +337,7 @@ class AdminController extends Controller
                 ->where('id', '!=', $admin->id)
                 ->exists();
             if ($phoneExists) {
-                return response()->json(['message' => 'Phone already taken.'], 422);
+                throw ValidationException::withMessages(['phone' => ['Phone already taken.']]);
             }
         }
 

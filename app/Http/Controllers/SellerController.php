@@ -237,7 +237,7 @@ class SellerController extends Controller
         ]);
 
         if (Seller::where('email', $data['email'])->exists() || SellerStaff::where('email', $data['email'])->exists()) {
-            return response()->json(['message' => 'Email already taken.'], 422);
+            throw ValidationException::withMessages(['email' => ['Email already taken.']]);
         }
         $storeLogoUrl = null;
         if ($request->hasFile('store_logo')) {
