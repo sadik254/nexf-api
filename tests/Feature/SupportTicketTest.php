@@ -137,25 +137,30 @@ class SupportTicketTest extends TestCase
         Mail::assertSent(NoticeMail::class, function (NoticeMail $mail) use ($ticket): bool {
             $envelope = $mail->envelope();
 
-            return $mail->subjectLine === "Re: Need help [SUP-00001-{$ticket->reply_token}]"
+            return $mail->subjectLine === 'Re: Need help (SUP-00001)'
                 && $mail->data['quote'] === 'We can help.'
                 && $mail->data['quoteAttachments'] === ['https://media.example.test/reply.pdf']
-                && $envelope->replyTo[0]->address === 'support@nexflifestyle.com';
+                && $envelope->replyTo[0]->address === 'support@nexflifestyle.com'
+                && $mail->headers()->messageId === "sup-{$ticket->reply_token}-2@nexflifestyle.com";
         });
 
         $ticket->update(['status' => 'resolved', 'resolved_at' => now()]);
         $inbox = app(SupportInboxService::class);
-        $subject = "Re: Need help [SUP-00001-{$ticket->reply_token}]";
-        $this->assertTrue($inbox->ingest('guest@example.test', $subject, "Thanks for helping.\n\nOn yesterday wrote:\n> Old email", '<guest-reply-1@example.test>'));
+        $subject = 'Re: Need help (SUP-00001)';
+        $headers = "In-Reply-To: <sup-{$ticket->reply_token}-2@nexflifestyle.com>\r\nReferences: <sup-{$ticket->reply_token}-2@nexflifestyle.com>";
+        $this->assertTrue($inbox->ingest('guest@example.test', $subject, "Thanks for helping.\n\nOn yesterday wrote:\n> Old email", '<guest-reply-1@example.test>', [], $headers));
         $this->assertDatabaseHas('support_messages', ['support_ticket_id' => $ticket->id, 'author_type' => 'guest', 'body' => 'Thanks for helping.', 'inbound_message_id' => '<guest-reply-1@example.test>']);
         $this->assertDatabaseHas('support_tickets', ['id' => $ticket->id, 'status' => 'open', 'resolved_at' => null, 'store_read_at' => null]);
         $this->assertSame(1, ConsoleNotification::query()->where('type', 'support_reply')->count());
 
         // A mail reader retry is harmless, and a mismatched sender cannot add
         // a message even if they somehow know a ticket's token.
-        $this->assertTrue($inbox->ingest('guest@example.test', $subject, 'Retry', '<guest-reply-1@example.test>'));
-        $this->assertFalse($inbox->ingest('attacker@example.test', $subject, 'Nope', '<guest-reply-2@example.test>'));
+        $this->assertTrue($inbox->ingest('guest@example.test', $subject, 'Retry', '<guest-reply-1@example.test>', [], $headers));
+        $this->assertFalse($inbox->ingest('attacker@example.test', $subject, 'Nope', '<guest-reply-2@example.test>', [], $headers));
         $this->assertDatabaseCount('support_messages', 3);
+
+        // Emails sent before the Message-ID flow retain their subject token.
+        $this->assertTrue($inbox->ingest('guest@example.test', "Re: Need help [SUP-00001-{$ticket->reply_token}]", 'Legacy reply', '<guest-reply-legacy@example.test>'));
     }
 
     public function test_verified_guest_email_attachments_are_saved_to_r2_with_the_ticket_message(): void

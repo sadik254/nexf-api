@@ -53,7 +53,8 @@ class SupportInboxService
                     $overview = imap_fetch_overview($inbox, (string) $messageNumber, 0)[0] ?? null;
                     $messageId = trim((string) ($overview->message_id ?? ''));
                     $message = $this->message($inbox, $messageNumber);
-                    if ($this->ingest($from, $subject, $message['body'], $messageId ?: null, $message['attachments'])) {
+                    $headers = imap_fetchheader($inbox, $messageNumber) ?: '';
+                    if ($this->ingest($from, $subject, $message['body'], $messageId ?: null, $message['attachments'], $headers)) {
                         $processed++;
                     }
                 } catch (\Throwable $exception) {
@@ -77,10 +78,10 @@ class SupportInboxService
      * Saves a verified inbound message. Kept public so a future webhook
      * receiver can reuse the exact same validation and ticket update path.
      */
-    public function ingest(string $from, string $subject, string $body, ?string $messageId = null, array $attachments = []): bool
+    public function ingest(string $from, string $subject, string $body, ?string $messageId = null, array $attachments = [], ?string $headers = null): bool
     {
         $messageId = $messageId ? Str::limit(trim($messageId), 255, '') : null;
-        $token = $this->tokenFromSubject($subject);
+        $token = $this->tokenFromReplyHeaders($headers) ?? $this->tokenFromSubject($subject);
         if (! $token || ! filter_var($from, FILTER_VALIDATE_EMAIL)) {
             return false;
         }
@@ -119,6 +120,26 @@ class SupportInboxService
         return preg_match('/\\[SUP-[0-9]+-([a-z0-9]{24,64})\\]/i', $subject, $matches)
             ? strtolower($matches[1])
             : null;
+    }
+
+    private function tokenFromReplyHeaders(?string $headers): ?string
+    {
+        if (blank($headers)) {
+            return null;
+        }
+
+        // Unfold continuation lines, then inspect only threading headers. A
+        // reply client normally copies our Message-ID into one or both.
+        $headers = preg_replace("/\r?\n[ \t]+/", ' ', $headers) ?? $headers;
+        preg_match_all('/^(?:in-reply-to|references):\s*(.+)$/mi', $headers, $matches);
+
+        foreach ($matches[1] ?? [] as $value) {
+            if (preg_match('/<sup-([a-z0-9]{24,64})-[a-z0-9-]+@[^>\s]+>/i', $value, $token)) {
+                return strtolower($token[1]);
+            }
+        }
+
+        return null;
     }
 
     private function stripQuotedText(string $body): string

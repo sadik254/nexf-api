@@ -7,6 +7,7 @@ use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
+use Illuminate\Mail\Mailables\Headers;
 use Illuminate\Queue\SerializesModels;
 
 class NoticeMail extends Mailable
@@ -17,6 +18,7 @@ class NoticeMail extends Mailable
         public string $subjectLine,
         public array $data,
         public ?string $replyToAddress = null,
+        public ?string $messageId = null,
     ) {}
 
     public function envelope(): Envelope
@@ -30,5 +32,10 @@ class NoticeMail extends Mailable
     public function content(): Content
     {
         return new Content(view: 'emails.notice', with: $this->data);
+    }
+
+    public function headers(): Headers
+    {
+        return new Headers(messageId: $this->messageId);
     }
 }

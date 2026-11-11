@@ -25,10 +25,16 @@ class GuestSupportReplyMailService
             ->filter(fn ($url) => is_string($url) && filter_var($url, FILTER_VALIDATE_URL))
             ->values()
             ->all();
+        $replyAddress = (string) config('support.inbox.address');
+        $domain = strrchr($replyAddress, '@');
+        $domain = $domain ? substr($domain, 1) : 'nexflifestyle.com';
+        // Unique per outgoing email, while retaining the ticket token that a
+        // replying mail client returns through In-Reply-To / References.
+        $messageId = "sup-{$token}-{$reply->id}@{$domain}";
 
         try {
             Mail::to($ticket->guest_email)->send(new NoticeMail(
-                "Re: {$ticket->subject} [{$ticket->reference}-{$token}]",
+                "Re: {$ticket->subject} ({$ticket->reference})",
                 [
                     'heading' => 'We replied to your message',
                     'greeting' => 'Hi '.($ticket->guest_name ?: 'there').',',
@@ -42,7 +48,8 @@ class GuestSupportReplyMailService
                     ],
                     'footnote' => 'To answer, just reply to this email. Your reply goes into the same conversation.',
                 ],
-                config('support.inbox.address'),
+                $replyAddress,
+                $messageId,
             ));
         } catch (\Throwable $exception) {
             Log::warning('Guest support reply email failed', [

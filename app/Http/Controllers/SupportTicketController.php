@@ -231,7 +231,7 @@ class SupportTicketController extends Controller
         if (! ($actor instanceof Customer)) {
             app(CustomerNotificationService::class)->supportReply($ticket);
         }
-        if ($actor instanceof Admin || $actor instanceof Seller) {
+        if ($actor instanceof Admin || $actor instanceof Seller || $staff instanceof SellerStaff) {
             app(GuestSupportReplyMailService::class)->send($ticket->fresh(), $reply);
         }
 
