@@ -6,7 +6,7 @@
     }
     $brand = trim($site['name'] ?? '') ?: 'NEXF Lifestyle';
     // Emails always point customers at the support inbox, whatever Site info lists.
-    $supportEmail = 'hello@nexflifestyle.com';
+    $supportEmail = 'support@nexflifestyle.com';
     $helpline = trim($site['helpline'] ?? '');
     // Same as the storefront footer: a fixed "© <year>" then the Site info text, minus any legacy "© 2025" lead-in.
     $copyrightText = trim(preg_replace('/^\s*(©|\(c\))?\s*(\{year\}|\d{4})?\s*/iu', '', (string) ($site['copyright'] ?? '')));
