@@ -10,6 +10,7 @@ use App\Models\ProductLotMovement;
 use App\Services\RestockAlertService;
 use App\Models\Seller;
 use App\Models\SizeChart;
+use App\Services\SizeChartAccessService;
 use App\Models\MediaAsset;
 use App\Services\ProductHtmlSanitizer;
 use App\Services\MediaUploadService;
@@ -552,14 +553,14 @@ class ProductController extends Controller
         return response()->json(['message' => 'Product deleted successfully.']);
     }
 
-    /** Admin-store products may use global charts; sellers may use global or their own. */
+    /** Admin access is unchanged; sellers may use their own delivery group's charts. */
     private function authorizeSizeChart(?int $sizeChartId, $actor, ?int $sellerId = null): void
     {
         if ($sizeChartId === null) return;
 
         $chart = SizeChart::findOrFail($sizeChartId);
         if ($actor instanceof Admin && ($chart->seller_id === null || ($actor->role === 'super_admin' && $sellerId !== null && (int) $chart->seller_id === $sellerId))) return;
-        if ($actor instanceof Seller && ($chart->seller_id === null || (int) $chart->seller_id === (int) $actor->id)) return;
+        if ($actor instanceof Seller && app(SizeChartAccessService::class)->sellerMayUseChart($sellerId ?? $actor->id, $chart->seller_id)) return;
 
         abort(403, 'You cannot use this size chart.');
     }

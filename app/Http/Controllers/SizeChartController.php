@@ -6,6 +6,7 @@ use App\Models\Seller;
 use App\Models\Admin;
 use Illuminate\Validation\ValidationException;
 use App\Models\SizeChart;
+use App\Services\SizeChartAccessService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -46,7 +47,17 @@ class SizeChartController extends Controller
     public function indexSeller(Request $request): JsonResponse
     {
         $seller = $this->seller($request);
-        return response()->json(SizeChart::query()->whereNull('seller_id')->orWhere('seller_id', $seller->id)->with('seller:id,store_name')->withCount('products')->latest()->get());
+        $access = app(SizeChartAccessService::class)->accessForSeller($seller->id);
+
+        return response()->json(SizeChart::query()
+            ->where(function ($query) use ($access) {
+                $query->whereIn('seller_id', $access['seller_ids']);
+                if ($access['includes_house']) $query->orWhereNull('seller_id');
+            })
+            ->with('seller:id,store_name')
+            ->withCount('products')
+            ->latest()
+            ->get());
     }
 
     public function storeSeller(Request $request): JsonResponse
