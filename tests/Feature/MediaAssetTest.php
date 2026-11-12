@@ -162,4 +162,29 @@ class MediaAssetTest extends TestCase
         $this->withToken($token)->post('/api/admin/media', ['file' => $file])
             ->assertCreated()->assertJsonPath('mime_type', 'image/svg+xml');
     }
+
+    public function test_console_media_file_names_are_global_and_case_insensitive(): void
+    {
+        $first = Seller::create(['seller_name' => 'First', 'email' => 'global-first@example.test', 'store_name' => 'First Store', 'store_slug' => 'global-first', 'kyc_type' => 'nid', 'kyc_number' => '101', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
+        $second = Seller::create(['seller_name' => 'Second', 'email' => 'global-second@example.test', 'store_name' => 'Second Store', 'store_slug' => 'global-second', 'kyc_type' => 'nid', 'kyc_number' => '102', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
+        $firstToken = $first->createToken('test', ['seller'])->plainTextToken;
+        $secondToken = $second->createToken('test', ['seller'])->plainTextToken;
+
+        $this->withToken($firstToken)->postJson('/api/seller/media/link', ['url' => 'https://example.test/one.png', 'file_name' => 'walton-dark.png'])->assertCreated()->assertJsonPath('file_name', 'walton-dark.png');
+        $secondAsset = $this->withToken($secondToken)->postJson('/api/seller/media/link', ['url' => 'https://example.test/two.png', 'file_name' => 'walton-dark.png'])
+            ->assertCreated()->assertJsonPath('file_name', 'walton-dark-2.png')->json();
+
+        $this->mock(MediaUploadService::class)->shouldReceive('upload')->once()->andReturn('https://example.test/three.png');
+        $this->withToken($secondToken)->post('/api/seller/media', ['file' => UploadedFile::fake()->image('walton-dark.png')])
+            ->assertCreated()->assertJsonPath('file_name', 'walton-dark-3.png');
+
+        $this->withToken($secondToken)->postJson("/api/seller/media/{$secondAsset['id']}", ['file_name' => 'WALTON-DARK.PNG'])
+            ->assertUnprocessable()->assertJsonValidationErrors('file_name');
+        $this->withToken($secondToken)->postJson("/api/seller/media/{$secondAsset['id']}", ['file_name' => 'WALTON-DARK-2.PNG'])
+            ->assertOk()->assertJsonPath('file_name', 'WALTON-DARK-2.PNG');
+
+        MediaAsset::create(['owner_type' => 'customer', 'owner_id' => 1, 'source' => 'upload', 'url' => 'https://example.test/review.png', 'file_name' => 'review-only.png', 'mime_type' => 'image/png']);
+        $this->withToken($firstToken)->postJson('/api/seller/media/link', ['url' => 'https://example.test/reused.png', 'file_name' => 'review-only.png'])
+            ->assertCreated()->assertJsonPath('file_name', 'review-only.png');
+    }
 }

@@ -66,7 +66,7 @@ class MediaAssetController extends Controller
             ...$this->uploader($request, $actor),
             'source' => 'upload',
             'url' => $this->uploads->upload($file, 'media', $mimeType),
-            'file_name' => $file->getClientOriginalName(),
+            'file_name' => $this->nextAvailableFileName($file->getClientOriginalName()),
             'mime_type' => $mimeType,
             'size_bytes' => $file->getSize(),
             'alt_text' => $data['alt_text'] ?? null,
@@ -93,8 +93,10 @@ class MediaAssetController extends Controller
             'gif' => 'image/gif', 'mp4' => 'video/mp4', 'webm' => 'video/webm',
             default => null,
         };
+        $fileName = $this->nextAvailableFileName($data['file_name']);
         $asset = MediaAsset::create([
             ...$data,
+            'file_name' => $fileName,
             'mime_type' => $mime,
             'owner_type' => $actor instanceof Seller ? 'seller' : 'admin',
             'owner_id' => $actor->id,
@@ -115,6 +117,11 @@ class MediaAssetController extends Controller
             'file_name' => ['sometimes', 'required', 'string', 'max:255'],
             ...$this->libraryRules(),
         ]);
+        if (array_key_exists('file_name', $data) && $this->fileNameTaken($data['file_name'], $asset->id)) {
+            throw ValidationException::withMessages([
+                'file_name' => ['A file named “'.trim($data['file_name']).'” already exists.'],
+            ]);
+        }
         $asset->update(collect($data)->only(['alt_text', 'file_name'])->all());
         if ($actor instanceof Admin && $request->hasAny(['seller_id', 'seller_ids', 'include_house'])) {
             $this->syncLibraries($asset, $data, $actor);
@@ -155,6 +162,32 @@ class MediaAssetController extends Controller
         }
 
         return $meta;
+    }
+
+    /** Console-library names are global labels; customer review uploads are excluded. */
+    private function nextAvailableFileName(string $fileName): string
+    {
+        $fileName = trim($fileName);
+        $candidate = $fileName;
+        for ($number = 2; $this->fileNameTaken($candidate); $number++) {
+            $extension = pathinfo($fileName, PATHINFO_EXTENSION);
+            $suffix = '-'.$number;
+            $extensionSuffix = $extension === '' ? '' : '.'.$extension;
+            $base = pathinfo($fileName, PATHINFO_FILENAME);
+            $available = max(1, 255 - strlen($suffix.$extensionSuffix));
+            $candidate = mb_strimwidth($base, 0, $available, '').$suffix.$extensionSuffix;
+        }
+
+        return $candidate;
+    }
+
+    private function fileNameTaken(string $fileName, ?int $exceptId = null): bool
+    {
+        return MediaAsset::query()
+            ->whereIn('owner_type', ['admin', 'seller'])
+            ->when($exceptId !== null, fn ($query) => $query->whereKeyNot($exceptId))
+            ->whereRaw('LOWER(file_name) = ?', [mb_strtolower(trim($fileName))])
+            ->exists();
     }
 
     /** SVG is active XML, so clean it before it ever reaches the public media host. */
