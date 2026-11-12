@@ -8,9 +8,9 @@ use Tests\TestCase;
 class ReferencePersistenceTest extends TestCase {
  use RefreshDatabase;
  public function test_guest_contact_is_persisted_and_not_publicly_readable(): void {
-  $response=$this->postJson('/api/contact',['name'=>'Guest','email'=>'guest@example.test','subject'=>'Delivery question','message'=>'Please help with delivery.'])->assertCreated();
+  $response=$this->postJson('/api/contact',['name'=>'Guest','email'=>'guest@example.test','phone'=>'01712345678','subject'=>'Delivery question','message'=>'Please help with delivery.'])->assertCreated();
   $id=$response->json('id');
-  $this->assertDatabaseHas('support_tickets',['id'=>$id,'guest_email'=>'guest@example.test','customer_id'=>null]);
+  $this->assertDatabaseHas('support_tickets',['id'=>$id,'guest_email'=>'guest@example.test','guest_phone'=>'01712345678','customer_id'=>null]);
   $this->assertDatabaseHas('support_messages',['support_ticket_id'=>$id,'author_type'=>'guest','body'=>'Please help with delivery.']);
   $this->getJson("/api/admin/support-tickets/{$id}")->assertUnauthorized();
   $this->postJson('/api/contact',['name'=>'Guest'])->assertUnprocessable();

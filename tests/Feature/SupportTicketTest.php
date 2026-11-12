@@ -148,7 +148,7 @@ class SupportTicketTest extends TestCase
         $inbox = app(SupportInboxService::class);
         $subject = 'Re: Need help [SUP-00001]';
         $headers = "In-Reply-To: <sup-{$ticket->reply_token}-2@nexflifestyle.com>\r\nReferences: <sup-{$ticket->reply_token}-2@nexflifestyle.com>";
-        $this->assertTrue($inbox->ingest('guest@example.test', $subject, "Thanks for helping.\n\nOn yesterday wrote:\n> Old email", '<guest-reply-1@example.test>', [], $headers));
+        $this->assertTrue($inbox->ingest('guest@example.test', $subject, "Thanks for helping.\n\nOn yesterday NEXF Lifestyle wrote:\n> Old email", '<guest-reply-1@example.test>', [], $headers));
         $this->assertDatabaseHas('support_messages', ['support_ticket_id' => $ticket->id, 'author_type' => 'guest', 'body' => 'Thanks for helping.', 'inbound_message_id' => '<guest-reply-1@example.test>']);
         $this->assertDatabaseHas('support_tickets', ['id' => $ticket->id, 'status' => 'open', 'resolved_at' => null, 'store_read_at' => null]);
         $this->assertSame(1, ConsoleNotification::query()->where('type', 'support_reply')->count());
@@ -181,5 +181,30 @@ class SupportTicketTest extends TestCase
         $this->assertSame(1, count($message->attachments));
         $path = ltrim((string) parse_url($message->attachments[0], PHP_URL_PATH), '/');
         Storage::disk('r2')->assertExists($path);
+    }
+
+    public function test_inbound_guest_replies_strip_mail_client_quotes_and_signoffs(): void
+    {
+        $ticket = SupportTicket::create(['guest_name' => 'Guest', 'guest_email' => 'cleaner@example.test', 'category' => 'Contact', 'subject' => 'Cleaner']);
+        $ticket->update(['reference' => 'SUP-00003']);
+        $inbox = app(SupportInboxService::class);
+        $headers = "References: <sup-{$ticket->reply_token}-1@nexflifestyle.com>";
+        $replies = [
+            ["Thanks for the response. Is this working?\nOn Thu, Nov 12, 2026 at 9:47 AM NEXF Lifestyle <noreply@nexflifestyle.com>\nwrote:\n> Earlier reply", 'Thanks for the response. Is this working?'],
+            ["Looks good.\n________________________________________\nFrom: NEXF Lifestyle <noreply@nexflifestyle.com>\nSent: Thursday", 'Looks good.'],
+            ["Hey----------------\nTo: guest@yandex.com (guest@yandex.com);\nSubject: Test", 'Hey'],
+            ["Okay.\nSent with [Proton Mail](https://proton.me/mail/home) secure email.", 'Okay.'],
+            ["Thank you.\n--\nSent from my iPhone", 'Thank you.'],
+        ];
+
+        foreach ($replies as $index => [$body, $expected]) {
+            $id = "<cleaner-{$index}@example.test>";
+            $this->assertTrue($inbox->ingest('cleaner@example.test', 'Re: Cleaner [SUP-00003]', $body, $id, [], $headers));
+            $this->assertSame($expected, $ticket->messages()->where('inbound_message_id', $id)->value('body'));
+        }
+
+        $htmlToText = new \ReflectionMethod($inbox, 'htmlToText');
+        $htmlToText->setAccessible(true);
+        $this->assertSame("Hey\nThanks", $htmlToText->invoke($inbox, '<div>Hey</div><div>Thanks</div><blockquote><div>Earlier email</div></blockquote>'));
     }
 }

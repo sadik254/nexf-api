@@ -144,18 +144,94 @@ class SupportInboxService
 
     private function stripQuotedText(string $body): string
     {
-        $lines = preg_split('/\\r?\\n/', str_replace("\r\n", "\n", $body)) ?: [];
+        $original = trim(str_replace("\r\n", "\n", $body));
+        $lines = preg_split('/\\r?\\n/', $original) ?: [];
         $kept = [];
-        foreach ($lines as $line) {
-            if (preg_match('/^\\s*On .+wrote:\\s*$/i', $line) || preg_match('/^\\s*From:\\s+/i', $line) || trim($line) === '--') {
+
+        foreach ($lines as $index => $line) {
+            $trimmed = trim($line);
+
+            // Yandex can append its separator to the guest's final sentence.
+            if (preg_match('/^(.*?)-{8,}\\s*$/u', $trimmed, $matches)) {
+                if (trim($matches[1]) !== '') $kept[] = rtrim($matches[1]);
                 break;
             }
-            if (! str_starts_with(ltrim($line), '>')) {
-                $kept[] = rtrim($line);
+            if ($index > 0 && ($this->isQuoteAttribution($lines, $index)
+                || $this->isQuoteSeparator($trimmed)
+                || $this->isYandexHeader($trimmed)
+                || $this->isForwardedHeaderBlock($lines, $index)
+                || $trimmed === '--')) {
+                break;
+            }
+            if (str_starts_with(ltrim($line), '>')) continue;
+            $kept[] = rtrim($line);
+        }
+
+        while ($kept !== [] && (trim((string) end($kept)) === '' || $this->isMobileSignoff((string) end($kept)))) {
+            array_pop($kept);
+        }
+
+        $cleaned = trim(preg_replace("/\n{3,}/", "\n\n", implode("\n", $kept)) ?? '');
+
+        // A malformed reply must never turn into an empty ticket message.
+        return $cleaned !== '' ? $cleaned : $original;
+    }
+
+    private function isQuoteAttribution(array $lines, int $index): bool
+    {
+        $parts = [];
+        for ($offset = 0; $offset < 3 && isset($lines[$index + $offset]); $offset++) {
+            $part = trim((string) $lines[$index + $offset]);
+            if ($part === '') break;
+            $parts[] = $part;
+            $attribution = implode(' ', $parts);
+            if (str_contains(strtolower($attribution), 'nexf') && $this->hasQuoteAttributionSuffix($attribution)) {
+                return true;
+            }
+        }
+        $attribution = implode(' ', $parts);
+        if (! str_contains(strtolower($attribution), 'nexf')) return false;
+
+        return preg_match('/(?:wrote|schrieb|a\\s+écrit|escribió|пишет|লিখেছেন)\\s*:\\s*$/iu', $attribution) === 1
+            || preg_match('/>\\s*:\\s*$/u', $attribution) === 1;
+    }
+
+    private function hasQuoteAttributionSuffix(string $attribution): bool
+    {
+        return preg_match('/(?:wrote|schrieb|a\\s+écrit|escribió|пишет|লিখেছেন)\\s*:\\s*$/iu', $attribution) === 1
+            || preg_match('/>\\s*:\\s*$/u', $attribution) === 1;
+    }
+
+    private function isQuoteSeparator(string $line): bool
+    {
+        return preg_match('/^-{5,}\\s*(?:original\\s+message)?\\s*-*$/iu', $line) === 1
+            || preg_match('/^_{10,}\\s*$/u', $line) === 1;
+    }
+
+    private function isYandexHeader(string $line): bool
+    {
+        return preg_match('/^to:\\s*.*@.*;\\s*$/iu', $line) === 1;
+    }
+
+    private function isForwardedHeaderBlock(array $lines, int $index): bool
+    {
+        $line = trim((string) $lines[$index]);
+        if (preg_match('/^(?:from|de|von|от)\\s*:\\s*.*@/iu', $line) !== 1) return false;
+
+        for ($offset = 1; $offset <= 3 && isset($lines[$index + $offset]); $offset++) {
+            if (preg_match('/^(?:sent|date|to|subject|envoyé|gesendet|betreff|отправлено|кому|тема)\\s*:/iu', trim((string) $lines[$index + $offset])) === 1) {
+                return true;
             }
         }
 
-        return trim(preg_replace("/\n{3,}/", "\n\n", implode("\n", $kept)) ?? '');
+        return false;
+    }
+
+    private function isMobileSignoff(string $line): bool
+    {
+        $line = preg_replace('/\\[([^\\]]+)\\]\\([^)]*\\)/u', '$1', trim($line)) ?? trim($line);
+
+        return preg_match('/^(?:sent\\s+from\\s+(?:my\\s+)?(?:iphone|ipad|android|galaxy|yahoo|aol|outlook)|get\\s+outlook\\s+for|sent\\s+with\\s+proton\\s+mail|envoyé\\s+depuis|gesendet\\s+(?:von|mit)|enviado\\s+desde|отправлено\\s+из|отправлено\\s+с)/iu', $line) === 1;
     }
 
     private function fromAddress(object $header): string
@@ -205,9 +281,19 @@ class SupportInboxService
         }
 
         return [
-            'body' => ($part['html'] ?? false) ? trim(html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5)) : trim($text),
+            'body' => ($part['html'] ?? false) ? $this->htmlToText($text) : trim($text),
             'attachments' => $attachments,
         ];
+    }
+
+    private function htmlToText(string $html): string
+    {
+        // Reply clients generally place the old thread in a blockquote. Remove
+        // it before preserving structural line breaks from the new message.
+        $html = preg_replace('/<blockquote\\b[^>]*>.*?<\\/blockquote>/is', '', $html) ?? $html;
+        $html = preg_replace('/<(?:br\\s*\\/?|\\/(?:p|div|li|tr)|hr\\s*\\/?)\\s*>/i', "\n", $html) ?? $html;
+
+        return trim(html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5));
     }
 
     private function findTextPart(object $part, string $prefix = ''): ?array
