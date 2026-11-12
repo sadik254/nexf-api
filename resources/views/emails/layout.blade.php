@@ -40,7 +40,7 @@
 </style>
 </head>
 <body style="margin:0;padding:0;background:#ffffff;font-family:'Geist',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#09090b;-webkit-text-size-adjust:100%;">
-<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">@yield('preheader')&#8199;&#847;&#8199;&#847;&#8199;&#847;&#8199;&#847;&#8199;&#847;&#8199;&#847;</div>
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">@yield('preheader')@for ($i = 0; $i < 100; $i++)&#847;&zwnj;&nbsp;@endfor</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;">
 <tr>
 <td align="center" style="padding:32px 12px;">
