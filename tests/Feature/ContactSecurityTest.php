@@ -25,9 +25,13 @@ class ContactSecurityTest extends TestCase
             'repeat_order_minutes' => 2,
         ]);
 
-        $payload = ['name' => 'Guest', 'email' => 'contact-cooldown@example.test', 'subject' => 'Help', 'message' => 'Please help us.'];
+        $payload = ['name' => 'Guest', 'email' => 'contact-cooldown@example.test', 'phone' => '01712345678', 'subject' => 'Help', 'message' => 'Please help us.'];
+        $withoutPhone = $payload;
+        unset($withoutPhone['phone']);
+        $this->postJson('/api/contact', $withoutPhone)->assertUnprocessable()->assertJsonValidationErrors('phone');
         $this->postJson('/api/contact', $payload)->assertUnprocessable()->assertJsonValidationErrors('turnstile_token');
         $this->postJson('/api/contact', $payload + ['turnstile_token' => 'first-token'])->assertCreated();
+        $this->assertDatabaseHas('support_tickets', ['guest_email' => 'contact-cooldown@example.test', 'guest_phone' => '01712345678']);
         $blocked = $this->postJson('/api/contact', $payload + ['turnstile_token' => 'second-token'])->assertStatus(429);
         $this->assertGreaterThanOrEqual(119, (int) $blocked->headers->get('Retry-After'));
 

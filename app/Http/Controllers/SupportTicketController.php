@@ -31,6 +31,7 @@ class SupportTicketController extends Controller
         $data = $request->validate([
             'name' => ['required', 'string', 'max:150'],
             'email' => ['required', 'email', 'max:255'],
+            'phone' => ['required', 'string', 'regex:/^01[3-9][0-9]{8}$/'],
             'subject' => ['required', 'string', 'max:180'],
             'message' => ['required', 'string', 'max:5000'],
             'turnstile_token' => ['nullable', 'string', 'max:2048'],
@@ -47,7 +48,7 @@ class SupportTicketController extends Controller
 
         $ticket = DB::transaction(function () use ($data, $email, $request) {
             $ticket = SupportTicket::create([
-                'guest_name' => trim($data['name']), 'guest_email' => $email, 'contact_ip' => $request->ip(),
+                'guest_name' => trim($data['name']), 'guest_email' => $email, 'guest_phone' => $data['phone'], 'contact_ip' => $request->ip(),
                 'category' => 'Contact', 'subject' => trim($data['subject']),
             ]);
             $ticket->update(['reference' => 'SUP-'.str_pad((string) $ticket->id, 5, '0', STR_PAD_LEFT)]);
