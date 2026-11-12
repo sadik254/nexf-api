@@ -7,6 +7,7 @@ use App\Models\MediaAsset;
 use App\Models\MediaAssetStoreLibrary;
 use App\Models\Seller;
 use App\Services\MediaUploadService;
+use App\Services\MediaReferenceCleanupService;
 use enshrined\svgSanitize\Sanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,7 +17,7 @@ use Illuminate\Validation\ValidationException;
 
 class MediaAssetController extends Controller
 {
-    public function __construct(private MediaUploadService $uploads) {}
+    public function __construct(private MediaUploadService $uploads, private MediaReferenceCleanupService $references) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -139,9 +140,89 @@ class MediaAssetController extends Controller
 
             return response()->json(['message' => 'Removed from this store media library. The original file remains available for other stores.']);
         }
-        $asset->delete();
+        \Illuminate\Support\Facades\DB::transaction(function () use ($asset, $actor): void {
+            $this->references->clear($asset->url);
+            $asset->update(['deleted_by_name' => $actor instanceof Seller ? $actor->seller_name : $actor->name]);
+            $asset->delete();
+        });
 
-        return response()->json(['message' => 'Removed from every media library. The original file remains available at its URL.']);
+        return response()->json(['message' => 'Moved to trash. It will be permanently deleted in 30 days.']);
+    }
+
+    public function trash(Request $request): JsonResponse
+    {
+        $this->actor($request);
+        $page = MediaAsset::onlyTrashed()->whereIn('owner_type', ['admin', 'seller'])
+            ->with('storeLibraries.seller')->latest('deleted_at')
+            ->paginate(max(1, min((int) $request->query('per_page', 30), 100)));
+        $page->getCollection()->transform(fn (MediaAsset $asset) => $this->resource($asset) + [
+            'purge_at' => $asset->deleted_at?->copy()->addDays(30)->toISOString(),
+        ]);
+
+        return response()->json($page);
+    }
+
+    public function restore(Request $request, MediaAsset $asset): JsonResponse
+    {
+        $this->actor($request);
+        abort_unless($asset->trashed() && in_array($asset->owner_type, ['admin', 'seller'], true), 404);
+        $asset->restore();
+        $asset->update(['deleted_by_name' => null]);
+
+        return response()->json($this->resource($asset->fresh()->load('storeLibraries.seller')));
+    }
+
+    public function purge(Request $request, MediaAsset $asset): JsonResponse
+    {
+        $this->actor($request);
+        abort_unless($asset->trashed() && in_array($asset->owner_type, ['admin', 'seller'], true), 404);
+        $this->purgeAsset($asset);
+
+        return response()->json(['message' => 'Media file permanently deleted.']);
+    }
+
+    public function emptyTrash(Request $request): JsonResponse
+    {
+        $this->actor($request);
+        $count = 0;
+        MediaAsset::onlyTrashed()->whereIn('owner_type', ['admin', 'seller'])->orderBy('id')->each(function (MediaAsset $asset) use (&$count): void {
+            $this->purgeAsset($asset);
+            $count++;
+        });
+
+        return response()->json(['message' => "Permanently deleted {$count} media file(s).", 'count' => $count]);
+    }
+
+    public function purgeExpired(): int
+    {
+        $count = 0;
+        MediaAsset::onlyTrashed()->whereIn('owner_type', ['admin', 'seller'])
+            ->where('deleted_at', '<', now()->subDays(30))->orderBy('id')
+            ->each(function (MediaAsset $asset) use (&$count): void {
+                $this->purgeAsset($asset);
+                $count++;
+            });
+
+        return $count;
+    }
+
+    private function purgeAsset(MediaAsset $asset): void
+    {
+        $key = $this->r2Key($asset->url);
+        if ($key !== null && ! \Illuminate\Support\Facades\Storage::disk('r2')->delete($key)) {
+            throw new \RuntimeException('The R2 object could not be deleted. The media record was kept.');
+        }
+        $asset->forceDelete();
+    }
+
+    private function r2Key(string $url): ?string
+    {
+        $base = rtrim((string) config('filesystems.disks.r2.url'), '/');
+        if ($base === '' || ! str_starts_with($url, $base.'/')) {
+            return null;
+        }
+
+        return ltrim((string) parse_url($url, PHP_URL_PATH), '/');
     }
 
     private function metadata(UploadedFile $file): array

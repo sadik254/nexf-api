@@ -11,6 +11,8 @@ use App\Models\SellerStaff;
 use App\Services\MediaUploadService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class MediaAssetTest extends TestCase
@@ -186,5 +188,40 @@ class MediaAssetTest extends TestCase
         MediaAsset::create(['owner_type' => 'customer', 'owner_id' => 1, 'source' => 'upload', 'url' => 'https://example.test/review.png', 'file_name' => 'review-only.png', 'mime_type' => 'image/png']);
         $this->withToken($firstToken)->postJson('/api/seller/media/link', ['url' => 'https://example.test/reused.png', 'file_name' => 'review-only.png'])
             ->assertCreated()->assertJsonPath('file_name', 'review-only.png');
+    }
+
+    public function test_admin_trash_clears_references_and_can_restore_or_purge_an_r2_file(): void
+    {
+        config()->set('filesystems.disks.r2.url', 'https://media.example.test');
+        Storage::fake('r2');
+        $admin = Admin::create(['name' => 'Media admin', 'email' => 'trash-media@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $token = $admin->createToken('test', ['admin'])->plainTextToken;
+        $url = 'https://media.example.test/media/2026/11/trash-me.png';
+        Storage::disk('r2')->put('media/2026/11/trash-me.png', 'image');
+        $asset = MediaAsset::create(['owner_type' => 'admin', 'owner_id' => $admin->id, 'source' => 'upload', 'url' => $url, 'file_name' => 'trash-me.png', 'mime_type' => 'image/png']);
+        $asset->storeLibraries()->create(['seller_id' => null, 'library_key' => 'house']);
+        $category = ProductCategory::create(['name' => 'Trash category', 'slug' => 'trash-category']);
+        $productId = DB::table('products')->insertGetId(['category_id' => $category->id, 'name' => 'Trash product', 'slug' => 'trash-product', 'description' => '<p><img src="'.$url.'"></p>', 'thumbnail' => $url, 'gallery' => json_encode([$url]), 'videos' => json_encode([$url]), 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('homepage_clients')->insert(['name' => 'Trash client', 'logo' => $url, 'logo_dark' => $url, 'hidden' => false, 'sort_order' => 0, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('site_settings')->insert(['key' => 'payment_accounts', 'payload' => json_encode([['id' => 'bangla_qr', 'qrImage' => $url]]), 'created_at' => now(), 'updated_at' => now()]);
+
+        $this->withToken($token)->postJson("/api/admin/media/{$asset->id}/delete")
+            ->assertOk()->assertJsonPath('message', 'Moved to trash. It will be permanently deleted in 30 days.');
+        $this->withToken($token)->getJson('/api/admin/media')->assertOk()->assertJsonPath('total', 0);
+        $this->withToken($token)->getJson('/api/admin/media/trash')->assertOk()
+            ->assertJsonPath('total', 1)->assertJsonPath('data.0.id', $asset->id)
+            ->assertJsonPath('data.0.deleted_by_name', 'Media admin');
+        $this->assertDatabaseHas('products', ['id' => $productId, 'thumbnail' => null, 'gallery' => json_encode([]), 'videos' => json_encode([])]);
+        $this->assertDatabaseHas('homepage_clients', ['name' => 'Trash client', 'logo' => null, 'logo_dark' => null]);
+        $this->assertStringNotContainsString($url, (string) DB::table('products')->where('id', $productId)->value('description'));
+        $this->assertSame([['id' => 'bangla_qr', 'qrImage' => null]], json_decode((string) DB::table('site_settings')->where('key', 'payment_accounts')->value('payload'), true));
+        Storage::disk('r2')->assertExists('media/2026/11/trash-me.png');
+
+        $this->withToken($token)->postJson("/api/admin/media/{$asset->id}/restore")->assertOk()->assertJsonPath('id', $asset->id);
+        $this->assertDatabaseHas('media_assets', ['id' => $asset->id, 'deleted_at' => null]);
+        $this->withToken($token)->postJson("/api/admin/media/{$asset->id}/delete")->assertOk();
+        $this->withToken($token)->postJson("/api/admin/media/{$asset->id}/purge")->assertOk();
+        Storage::disk('r2')->assertMissing('media/2026/11/trash-me.png');
+        $this->assertDatabaseMissing('media_assets', ['id' => $asset->id]);
     }
 }

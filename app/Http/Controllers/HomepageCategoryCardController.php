@@ -14,7 +14,7 @@ class HomepageCategoryCardController extends Controller
     public function publicIndex(): JsonResponse
     {
         return response()->json(HomepageCategoryCard::with('category:id,name,slug,is_active')
-            ->where('hidden', false)->orderBy('sort_order')->get()
+            ->where('hidden', false)->whereNotNull('image')->orderBy('sort_order')->get()
             ->filter(fn ($card) => $card->category?->is_active ?? true)->values());
     }
 

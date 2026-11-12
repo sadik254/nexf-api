@@ -16,7 +16,7 @@ class HomepageClientController extends Controller
 
     public function publicIndex(): JsonResponse
     {
-        return response()->json(HomepageClient::query()->where('hidden', false)->orderBy('sort_order')->get());
+        return response()->json(HomepageClient::query()->where('hidden', false)->whereNotNull('logo')->orderBy('sort_order')->get());
     }
 
     public function index(Request $request): JsonResponse

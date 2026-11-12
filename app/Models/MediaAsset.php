@@ -4,11 +4,14 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class MediaAsset extends Model
 {
-    protected $fillable = ['owner_type', 'owner_id', 'uploaded_by_type', 'uploaded_by_id', 'uploader_name', 'source', 'url', 'file_name', 'mime_type', 'size_bytes', 'width', 'height', 'duration_seconds', 'alt_text'];
-    protected function casts(): array { return ['size_bytes' => 'integer', 'width' => 'integer', 'height' => 'integer', 'duration_seconds' => 'integer']; }
+    use SoftDeletes;
+
+    protected $fillable = ['owner_type', 'owner_id', 'uploaded_by_type', 'uploaded_by_id', 'uploader_name', 'source', 'url', 'file_name', 'mime_type', 'size_bytes', 'width', 'height', 'duration_seconds', 'alt_text', 'deleted_by_name'];
+    protected function casts(): array { return ['size_bytes' => 'integer', 'width' => 'integer', 'height' => 'integer', 'duration_seconds' => 'integer', 'deleted_at' => 'datetime']; }
 
     public function storeLibraries(): HasMany
     {

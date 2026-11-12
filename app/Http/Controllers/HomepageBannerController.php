@@ -12,8 +12,8 @@ class HomepageBannerController extends Controller
 {
     public function index(): JsonResponse
     {
-        $hero = HomepageBanner::where('placement', 'hero')->where('is_active', true)->orderBy('sort_order')->orderBy('id')->get();
-        $side = HomepageBanner::where('placement', '!=', 'hero')->orderBy('sort_order')->orderBy('id')->limit(2)->get();
+        $hero = HomepageBanner::where('placement', 'hero')->where('is_active', true)->whereNotNull('image')->orderBy('sort_order')->orderBy('id')->get();
+        $side = HomepageBanner::where('placement', '!=', 'hero')->whereNotNull('image')->orderBy('sort_order')->orderBy('id')->limit(2)->get();
         return response()->json($hero->concat($side)->values());
     }
 

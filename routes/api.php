@@ -387,8 +387,12 @@ Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {
     Route::get('/popups', [SitePopupController::class, 'index'])->middleware('perm:storefront.edit');
     Route::post('/popups', [SitePopupController::class, 'replace'])->middleware('perm:storefront.edit');
     Route::get('/media', [MediaAssetController::class, 'index'])->middleware('perm:media.manage');
+    Route::get('/media/trash', [MediaAssetController::class, 'trash'])->middleware('perm:media.manage');
+    Route::post('/media/trash/empty', [MediaAssetController::class, 'emptyTrash'])->middleware('perm:media.manage');
     Route::post('/media', [MediaAssetController::class, 'store'])->middleware('perm:media.manage');
     Route::post('/media/link', [MediaAssetController::class, 'link'])->middleware('perm:media.manage');
+    Route::post('/media/{asset}/restore', [MediaAssetController::class, 'restore'])->middleware('perm:media.manage')->withTrashed();
+    Route::post('/media/{asset}/purge', [MediaAssetController::class, 'purge'])->middleware('perm:media.manage')->withTrashed();
     Route::post('/media/{asset}', [MediaAssetController::class, 'update'])->middleware('perm:media.manage');
     Route::post('/media/{asset}/delete', [MediaAssetController::class, 'destroy'])->middleware('perm:media.manage');
     Route::get('/collection-products', [ProductCollectionController::class, 'candidates'])->middleware('perm:collections.manage');

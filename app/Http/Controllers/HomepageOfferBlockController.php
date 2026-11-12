@@ -14,7 +14,7 @@ class HomepageOfferBlockController extends Controller
 {
     public function publicIndex(): JsonResponse
     {
-        return response()->json(HomepageOfferBlock::where('hidden', false)->where(fn ($q) => $q->whereNull('expires_at')->orWhereDate('expires_at', '>=', today()))->orderByRaw("CASE row_type WHEN 'four' THEN 0 WHEN 'wide' THEN 1 ELSE 2 END")->orderBy('slot')->get());
+        return response()->json(HomepageOfferBlock::where('hidden', false)->where(fn ($q) => $q->where('row_type', 'coupons')->orWhereNotNull('image'))->where(fn ($q) => $q->whereNull('expires_at')->orWhereDate('expires_at', '>=', today()))->orderByRaw("CASE row_type WHEN 'four' THEN 0 WHEN 'wide' THEN 1 ELSE 2 END")->orderBy('slot')->get());
     }
 
     public function index(Request $request): JsonResponse
