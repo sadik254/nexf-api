@@ -34,7 +34,7 @@ class GuestSupportReplyMailService
 
         try {
             Mail::to($ticket->guest_email)->send(new NoticeMail(
-                "Re: {$ticket->subject} ({$ticket->reference})",
+                "Re: {$ticket->subject} [{$ticket->reference}]",
                 [
                     'heading' => 'We replied to your message',
                     'greeting' => 'Hi '.($ticket->guest_name ?: 'there').',',

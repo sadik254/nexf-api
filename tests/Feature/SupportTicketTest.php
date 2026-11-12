@@ -137,7 +137,7 @@ class SupportTicketTest extends TestCase
         Mail::assertSent(NoticeMail::class, function (NoticeMail $mail) use ($ticket): bool {
             $envelope = $mail->envelope();
 
-            return $mail->subjectLine === 'Re: Need help (SUP-00001)'
+            return $mail->subjectLine === 'Re: Need help [SUP-00001]'
                 && $mail->data['quote'] === 'We can help.'
                 && $mail->data['quoteAttachments'] === ['https://media.example.test/reply.pdf']
                 && $envelope->replyTo[0]->address === 'support@nexflifestyle.com'
@@ -146,7 +146,7 @@ class SupportTicketTest extends TestCase
 
         $ticket->update(['status' => 'resolved', 'resolved_at' => now()]);
         $inbox = app(SupportInboxService::class);
-        $subject = 'Re: Need help (SUP-00001)';
+        $subject = 'Re: Need help [SUP-00001]';
         $headers = "In-Reply-To: <sup-{$ticket->reply_token}-2@nexflifestyle.com>\r\nReferences: <sup-{$ticket->reply_token}-2@nexflifestyle.com>";
         $this->assertTrue($inbox->ingest('guest@example.test', $subject, "Thanks for helping.\n\nOn yesterday wrote:\n> Old email", '<guest-reply-1@example.test>', [], $headers));
         $this->assertDatabaseHas('support_messages', ['support_ticket_id' => $ticket->id, 'author_type' => 'guest', 'body' => 'Thanks for helping.', 'inbound_message_id' => '<guest-reply-1@example.test>']);
