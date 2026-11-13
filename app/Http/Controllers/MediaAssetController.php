@@ -8,6 +8,7 @@ use App\Models\MediaAssetStoreLibrary;
 use App\Models\Seller;
 use App\Services\MediaUploadService;
 use App\Services\MediaReferenceCleanupService;
+use App\Support\UploadFileRules;
 use enshrined\svgSanitize\Sanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -55,7 +56,7 @@ class MediaAssetController extends Controller
     {
         $actor = $this->actor($request);
         $data = $request->validate([
-            'file' => ['required', 'file', 'mimetypes:image/jpeg,image/png,image/webp,image/gif,image/svg+xml,video/mp4,video/webm', 'max:20480'],
+            'file' => UploadFileRules::media(allowSvg: true),
             'alt_text' => ['nullable', 'string', 'max:255'],
             ...$this->libraryRules(),
         ]);
@@ -84,14 +85,14 @@ class MediaAssetController extends Controller
         $data = $request->validate([
             'url' => ['required', 'url:http,https', 'max:2048'],
             'file_name' => ['required', 'string', 'max:255'],
-            'mime_type' => ['nullable', Rule::in(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm'])],
+            'mime_type' => ['nullable', Rule::in(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm', 'video/quicktime'])],
             'alt_text' => ['nullable', 'string', 'max:255'],
             ...$this->libraryRules(),
         ]);
         $extension = strtolower(pathinfo($data['file_name'], PATHINFO_EXTENSION));
         $mime = $data['mime_type'] ?? match ($extension) {
             'jpg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp',
-            'gif' => 'image/gif', 'mp4' => 'video/mp4', 'webm' => 'video/webm',
+            'gif' => 'image/gif', 'mp4' => 'video/mp4', 'webm' => 'video/webm', 'mov' => 'video/quicktime',
             default => null,
         };
         $fileName = $this->nextAvailableFileName($data['file_name']);

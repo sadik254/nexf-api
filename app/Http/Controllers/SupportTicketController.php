@@ -16,6 +16,7 @@ use App\Services\CustomerNotificationService;
 use App\Services\GuestSupportReplyMailService;
 use App\Services\SupportTicketResolvedMailService;
 use App\Services\MediaUploadService;
+use App\Support\UploadFileRules;
 use App\Services\TurnstileService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -65,7 +66,7 @@ class SupportTicketController extends Controller
     public function upload(Request $request): JsonResponse
     {
         $this->actor($request);
-        $file = $request->validate(['file' => ['required', 'file', 'mimetypes:image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm', 'max:20480']])['file'];
+        $file = $request->validate(['file' => UploadFileRules::media()])['file'];
 
         return response()->json(['url' => $this->uploads->upload($file)]);
     }
