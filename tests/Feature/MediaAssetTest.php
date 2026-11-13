@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Seller;
 use App\Models\SellerStaff;
+use App\Models\SupportTicket;
 use App\Services\MediaUploadService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -204,6 +205,9 @@ class MediaAssetTest extends TestCase
         $productId = DB::table('products')->insertGetId(['category_id' => $category->id, 'name' => 'Trash product', 'slug' => 'trash-product', 'description' => '<p><img src="'.$url.'"></p>', 'thumbnail' => $url, 'gallery' => json_encode([$url]), 'videos' => json_encode([$url]), 'created_at' => now(), 'updated_at' => now()]);
         DB::table('homepage_clients')->insert(['name' => 'Trash client', 'logo' => $url, 'logo_dark' => $url, 'hidden' => false, 'sort_order' => 0, 'created_at' => now(), 'updated_at' => now()]);
         DB::table('site_settings')->insert(['key' => 'payment_accounts', 'payload' => json_encode([['id' => 'bangla_qr', 'qrImage' => $url]]), 'created_at' => now(), 'updated_at' => now()]);
+        // A real ticket must not break media cleanup: ticket attachments live
+        // on support_messages, not on support_tickets.
+        SupportTicket::create(['guest_name' => 'Existing guest', 'guest_email' => 'existing-ticket@example.test', 'category' => 'Contact', 'subject' => 'Already here']);
 
         $this->withToken($token)->postJson("/api/admin/media/{$asset->id}/delete")
             ->assertOk()->assertJsonPath('message', 'Moved to trash. It will be permanently deleted in 30 days.');

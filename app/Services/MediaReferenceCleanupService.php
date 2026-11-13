@@ -52,7 +52,7 @@ class MediaReferenceCleanupService
         foreach ([
             ['products', 'gallery'], ['products', 'videos'],
             ['reviews', 'images'], ['reviews', 'videos'],
-            ['support_tickets', 'attachments'], ['support_messages', 'attachments'],
+            ['support_messages', 'attachments'],
             ['store_chat_messages', 'attachments'], ['return_requests', 'attachments'],
             ['seller_promotions', 'blocks'],
         ] as [$table, $column]) {
