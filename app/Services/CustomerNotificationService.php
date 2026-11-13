@@ -32,8 +32,8 @@ class CustomerNotificationService
         $this->send($return->customer_id, $type, $title, $body, ['return_reference' => $return->reference, 'order_number' => $return->order?->order_number, 'url' => '/account/returns']);
     }
 
-    public function supportReply(SupportTicket $ticket): void { $this->support($ticket, 'support_reply', "New reply on {$ticket->reference}"); }
-    public function supportResolved(SupportTicket $ticket): void { $this->support($ticket, 'support_resolved', "Ticket {$ticket->reference} resolved"); }
+    public function supportReply(SupportTicket $ticket): void { $this->support($ticket, 'support_reply', 'New support reply', "{$ticket->reference} has a new reply."); }
+    public function supportResolved(SupportTicket $ticket): void { $this->support($ticket, 'support_resolved', 'Support ticket resolved', "{$ticket->reference} is closed. Reply to reopen it."); }
 
     public function withdrawal(WithdrawalRequest $withdrawal): void
     {
@@ -48,10 +48,10 @@ class CustomerNotificationService
     public function walletCredit(CustomerWalletTransaction $transaction): void
     {
         [$title, $body] = match ($transaction->kind) {
-            'cashback' => ['Cashback added', $this->money($transaction->amount).' cashback added to your NEXF Balance.'],
-            'review_reward' => ['Review reward added', $this->money($transaction->amount).' added to your NEXF Balance for your approved review.'],
+            'cashback' => ['Cashback added', $this->money($transaction->amount).' added to your NEXF Balance.'],
+            'review_reward' => ['Review reward added', $this->money($transaction->amount).' added to your NEXF Balance.'],
             'referral_reward' => ['Referral reward added', $this->money($transaction->amount).' added to your NEXF Balance: someone you invited got their first order.'],
-            'cancellation_credit' => ['Balance returned', $this->money($transaction->amount).' from your cancelled order is back in your NEXF Balance.'],
+            'cancellation_credit' => ['Balance returned', $this->money($transaction->amount).' is back in your NEXF Balance.'],
             default => [null, null],
         };
         if (!$title) return;
@@ -59,11 +59,11 @@ class CustomerNotificationService
         $this->send($transaction->customer_id, 'wallet_'.$transaction->kind, $title, $body, ['order_number' => $transaction->order?->order_number, 'url' => '/account/balance']);
     }
 
-    private function support(SupportTicket $ticket, string $type, string $title): void
+    private function support(SupportTicket $ticket, string $type, string $title, string $body): void
     {
         if (!$ticket->customer_id) return;
         $ticket->loadMissing('order:id,order_number');
-        $this->send($ticket->customer_id, $type, $title, $ticket->subject, ['ticket_reference' => $ticket->reference, 'order_number' => $ticket->order?->order_number, 'url' => '/account/support']);
+        $this->send($ticket->customer_id, $type, $title, $body, ['ticket_reference' => $ticket->reference, 'order_number' => $ticket->order?->order_number, 'url' => '/account/support']);
     }
 
     private function send(int $customerId, string $type, string $title, ?string $body, array $data): void

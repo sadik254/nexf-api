@@ -8,8 +8,10 @@ use App\Models\CustomerInSiteNotification;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Seller;
+use App\Services\OrderNotificationService;
 use App\Services\WalletLedgerService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 class CustomerNotificationTest extends TestCase
@@ -39,6 +41,10 @@ class CustomerNotificationTest extends TestCase
         $this->withToken($sellerToken)->postJson("/api/seller/support-tickets/{$ticketId}/messages", ['body' => 'Checking.'])->assertOk();
         $this->withToken($sellerToken)->postJson("/api/seller/support-tickets/{$ticketId}/resolve")->assertOk();
         $this->assertSame(['support_reply', 'support_resolved'], CustomerInSiteNotification::where('type', 'like', 'support%')->orderBy('id')->pluck('type')->all());
+        $this->assertSame('New support reply', CustomerInSiteNotification::where('type', 'support_reply')->value('title'));
+        $this->assertSame('SUP-00001 has a new reply.', CustomerInSiteNotification::where('type', 'support_reply')->value('body'));
+        $this->assertSame('Support ticket resolved', CustomerInSiteNotification::where('type', 'support_resolved')->value('title'));
+        $this->assertSame('SUP-00001 is closed. Reply to reopen it.', CustomerInSiteNotification::where('type', 'support_resolved')->value('body'));
 
         $paid = $this->withToken($customerToken)->postJson('/api/customers/withdrawals', ['amount' => 60, 'method' => 'bKash', 'account_details' => '01700000000'])->assertCreated()->json('id');
         $rejected = $this->withToken($customerToken)->postJson('/api/customers/withdrawals', ['amount' => 40, 'method' => 'bKash', 'account_details' => '01700000000'])->assertCreated()->json('id');
@@ -60,8 +66,33 @@ class CustomerNotificationTest extends TestCase
 
         $notification = CustomerInSiteNotification::sole();
         $this->assertSame('wallet_cashback', $notification->type);
-        $this->assertSame('৳10.50 cashback added to your NEXF Balance.', $notification->body);
+        $this->assertSame('৳10.50 added to your NEXF Balance.', $notification->body);
         $this->assertSame(['order_number' => 'BELL-2', 'url' => '/account/balance'], $notification->data);
+    }
+
+    public function test_order_status_notifications_use_the_final_bell_copy(): void
+    {
+        Mail::fake();
+        $customer = Customer::create(['name' => 'Buyer', 'email' => 'bell-status@example.test', 'password' => 'password123']);
+        $order = Order::create(['order_number' => 'BELL-STATUS', 'customer_id' => $customer->id, 'status' => 'pending', 'subtotal' => 100, 'total' => 100, 'shipping_charge' => 0, 'shipping_name' => 'Buyer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka']);
+
+        $expected = [
+            'confirmed' => ['Order confirmed', "We're getting it ready."],
+            'packed' => ['Order packed', 'Your parcel is ready for the courier.'],
+            'shipped' => ['Order shipped', "It's with the courier now."],
+            'delivered' => ['Order delivered', 'We hope you enjoy it.'],
+            'returning' => ['Return started', "We'll keep you updated."],
+            'returned' => ['Return complete', 'Your return has been received.'],
+            'unknown_state' => ['Order update', 'Your order is now unknown_state.'],
+        ];
+
+        foreach ($expected as $status => [$title, $body]) {
+            $order->update(['status' => $status]);
+            app(OrderNotificationService::class)->statusChanged($order->fresh());
+            $notification = CustomerInSiteNotification::latest('id')->first();
+            $this->assertSame($title, $notification->title);
+            $this->assertSame($body, $notification->body);
+        }
     }
 
     public function test_opening_a_customer_bell_lazily_prunes_expired_notifications(): void

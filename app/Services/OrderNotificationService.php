@@ -23,16 +23,16 @@ class OrderNotificationService
     }
     public function statusChanged(Order $order): void {
         $copy = match ($order->status) {
-            'confirmed' => ["Your order {$order->order_number} is confirmed", 'Order confirmed', "We're getting it ready."],
-            'packed' => ["Your order {$order->order_number} is packed", 'Packed and ready to ship', 'Your parcel is ready for the courier.'],
-            'shipped' => ["Your order {$order->order_number} is on its way", 'Your order has shipped', "It's with the courier now."],
-            'delivered', 'completed' => ["Your order {$order->order_number} was delivered", 'Your order has arrived', 'We hope you enjoy it.'],
-            'return_pending', 'returning', 'in_transit' => ["Return started for order {$order->order_number}", 'Your return is in progress', 'We’ll keep you updated.'],
-            'returned' => ["Return complete for order {$order->order_number}", 'Your return is complete', 'Your return has been received.'],
-            default => ["Order update for {$order->order_number}", 'Order update', "Your order is now {$order->status}."],
+            'confirmed' => ["Your order {$order->order_number} is confirmed", 'Order confirmed', "We're getting it ready.", 'Order confirmed', "We're getting it ready."],
+            'packed' => ["Your order {$order->order_number} is packed", 'Packed and ready to ship', 'Your parcel is ready for the courier.', 'Order packed', 'Your parcel is ready for the courier.'],
+            'shipped' => ["Your order {$order->order_number} is on its way", 'Your order has shipped', "It's with the courier now.", 'Order shipped', "It's with the courier now."],
+            'delivered', 'completed' => ["Your order {$order->order_number} was delivered", 'Your order has arrived', 'We hope you enjoy it.', 'Order delivered', 'We hope you enjoy it.'],
+            'return_pending', 'returning', 'in_transit' => ["Return started for order {$order->order_number}", 'Your return is in progress', 'We’ll keep you updated.', 'Return started', "We'll keep you updated."],
+            'returned' => ["Return complete for order {$order->order_number}", 'Your return is complete', 'Your return has been received.', 'Return complete', 'Your return has been received.'],
+            default => ["Order update for {$order->order_number}", 'Order update', "Your order is now {$order->status}.", 'Order update', "Your order is now {$order->status}."],
         };
-        [$subject, $heading, $message] = $copy;
-        $this->notifyCustomer($order, 'order_status', 'Order status updated', "{$heading}. {$message}");
+        [$subject, $heading, $message, $bellTitle, $bellBody] = $copy;
+        $this->notifyCustomer($order, 'order_status', $bellTitle, $bellBody);
         $this->send($order, $subject, $message, $heading);
     }
     public function cancelled(Order $order): void { $this->notifyCustomer($order, 'order_cancelled', 'Order cancelled', 'Your order has been cancelled.'); $this->send($order, "Your order {$order->order_number} was cancelled", 'Your order has been cancelled.', 'Order cancelled'); if ($order->cancelled_by === 'customer') app(ConsoleNotificationService::class)->orderCancelled($order); }
