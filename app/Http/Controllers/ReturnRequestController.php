@@ -217,6 +217,67 @@ class ReturnRequestController extends Controller
         return $this->show($request, $returnRequest);
     }
 
+    /** A store creates and fulfils the replacement for its own exchange. */
+    public function createExchangeOrder(Request $request, ReturnRequest $returnRequest): JsonResponse
+    {
+        $seller = $this->actor($request);
+        abort_unless($seller instanceof Seller, 403);
+        $this->authorizeRequest($seller, $returnRequest);
+        $data = $request->validate([
+            'items' => ['required', 'array', 'min:1', 'max:50'],
+            'items.*.product_id' => ['required', 'integer', 'exists:products,id'],
+            'items.*.product_variation_id' => ['nullable', 'integer', 'exists:product_variations,id'],
+            'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'note' => ['nullable', 'string', 'max:5000'],
+        ]);
+
+        $returnRequest->loadMissing(['order', 'customer', 'exchangeOrder']);
+        if (
+            $returnRequest->type !== 'exchange'
+            || ! in_array($returnRequest->status, ['requested', 'approved', 'in_transit', 'received'], true)
+            || ($returnRequest->exchange_order_id && $returnRequest->exchangeOrder?->status !== 'cancelled')
+        ) {
+            throw ValidationException::withMessages(['return_request' => ['This exchange is not ready for a replacement order.']]);
+        }
+        abort_unless($returnRequest->customer && $returnRequest->order, 422, 'This return has no customer order.');
+
+        $products = \App\Models\Product::query()->whereIn('id', collect($data['items'])->pluck('product_id'))->get(['id', 'seller_id']);
+        if ($products->count() !== count(collect($data['items'])->pluck('product_id')->unique()) || $products->contains(fn ($product) => (int) $product->seller_id !== (int) $seller->id)) {
+            throw ValidationException::withMessages(['items' => ['An exchange can only use products from this store.']]);
+        }
+
+        $paymentMethod = \App\Models\PaymentMethod::query()->active()->find($returnRequest->order->payment_method_id)
+            ?? \App\Models\PaymentMethod::query()->active()->first();
+        $shippingMethod = \App\Models\ShippingMethod::query()->active()->find($returnRequest->order->shipping_method_id)
+            ?? \App\Models\ShippingMethod::query()->active()->first();
+        if (! $paymentMethod || ! $shippingMethod) {
+            throw ValidationException::withMessages(['return_request' => ['A payment and delivery method must be available before creating an exchange.']]);
+        }
+
+        $order = $returnRequest->order;
+        $exchangeRequest = Request::create('/api/seller/return-requests/'.$returnRequest->id.'/exchange-order', 'POST', [
+            'exchange_for' => $returnRequest->id,
+            'items' => collect($data['items'])->map(fn (array $item) => [
+                'product_id' => $item['product_id'], 'variation_id' => $item['product_variation_id'] ?? null, 'quantity' => $item['quantity'],
+            ])->all(),
+            'payment_method_id' => $paymentMethod->id,
+            'shipping_method_id' => $shippingMethod->id,
+            'shipping_name' => $order->shipping_name,
+            'shipping_phone' => $order->shipping_phone,
+            'shipping_email' => $order->shipping_email,
+            'shipping_address' => $order->shipping_address,
+            'shipping_area' => $order->shipping_area,
+            'shipping_district' => $order->shipping_district,
+            'notes' => $data['note'] ?? null,
+        ]);
+        $exchangeRequest->attributes->set('order_actor', $seller);
+        $exchangeRequest->attributes->set('force_individual_seller_shipping', $seller->id);
+        if ($staff = $request->attributes->get('seller_staff')) $exchangeRequest->attributes->set('seller_staff', $staff);
+        $exchangeRequest->setUserResolver(fn () => $returnRequest->customer);
+
+        return app(OrderController::class)->store($exchangeRequest);
+    }
+
     public function restock(Request $request, ReturnRequest $returnRequest): JsonResponse
     {
         $actor = $this->actor($request);

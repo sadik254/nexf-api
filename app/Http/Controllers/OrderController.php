@@ -1166,7 +1166,8 @@ class OrderController extends Controller
         $data['staff_order'] = $isAdminOrder || $actor instanceof Seller;
         $preview = $this->checkout->preview($customer, $data);
 
-        $order = DB::transaction(function () use ($customer, $actor, $isGuestOrder, $data, $preview, $exchangeReturn) {
+        $forceIndividualSellerId = $request->attributes->get('force_individual_seller_shipping');
+        $order = DB::transaction(function () use ($customer, $actor, $isGuestOrder, $data, $preview, $exchangeReturn, $forceIndividualSellerId) {
             $paymentMethod = PaymentMethod::query()->active()->find($data['payment_method_id']);
             if (!$paymentMethod) {
                 throw ValidationException::withMessages([
@@ -1350,7 +1351,7 @@ class OrderController extends Controller
                 $shippingLines[] = ['product' => $product, 'subtotal' => $lineSubtotal];
             }
 
-            $shipping = $this->storeShipping->quote($shippingLines, $shippingMethod, $data['store_shipping_methods'] ?? [], $data['store_delivery_options'] ?? []);
+            $shipping = $this->storeShipping->quote($shippingLines, $shippingMethod, $data['store_shipping_methods'] ?? [], $data['store_delivery_options'] ?? [], $forceIndividualSellerId ? (int) $forceIndividualSellerId : null);
             $appliedDiscounts = $this->lockAppliedDiscounts($preview, $customer, $data['shipping_phone']);
             $coupon = $appliedDiscounts[0]['coupon'] ?? null;
             $couponDiscount = round(array_sum(array_column($appliedDiscounts, 'amount')), 2);

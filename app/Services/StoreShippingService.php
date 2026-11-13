@@ -21,7 +21,7 @@ class StoreShippingService
      * @param array<int, array{product: Product, subtotal: float|int|string}> $lines
      * @return array{groups: array<int, array<string, mixed>>, total: float}
      */
-    public function quote(array $lines, ShippingMethod $shippingMethod, array $selectedMethods = [], array $selectedDeliveryOptions = []): array
+    public function quote(array $lines, ShippingMethod $shippingMethod, array $selectedMethods = [], array $selectedDeliveryOptions = [], ?int $forceIndividualSellerId = null): array
     {
         $deliveryGroups = DeliveryGroup::query()->get();
         $membership = [];
@@ -40,7 +40,9 @@ class StoreShippingService
             $product = $line['product'];
             $productSellerId = $product->seller_id === null ? null : (int) $product->seller_id;
             $memberKey = $productSellerId === null ? 'house' : "seller:{$productSellerId}";
-            $deliveryGroup = $membership[$memberKey] ?? null;
+            // Exchange replacements belong to the store that accepted the
+            // return; they must not be folded into a shared-delivery parcel.
+            $deliveryGroup = $productSellerId === $forceIndividualSellerId ? null : ($membership[$memberKey] ?? null);
             $billingSellerId = $deliveryGroup ? ($deliveryGroup->ships_from_seller_id === null ? null : (int) $deliveryGroup->ships_from_seller_id) : $productSellerId;
             $key = $deliveryGroup ? "delivery-group:{$deliveryGroup->id}" : $memberKey;
             $selectionKey = $billingSellerId === null ? 'house' : (string) $billingSellerId;

@@ -558,6 +558,7 @@ Route::prefix('seller')->middleware(['sanctum.type:seller', 'store.scope'])->gro
     Route::post('/chats/{chat}/messages', [StoreChatController::class, 'reply'])->middleware('perm:chats.reply');
     Route::get('/return-requests', [ReturnRequestController::class, 'index'])->middleware('perm:returns.manage');
     Route::get('/return-requests/{returnRequest}', [ReturnRequestController::class, 'show'])->middleware('perm:returns.manage');
+    Route::post('/return-requests/{returnRequest}/exchange-order', [ReturnRequestController::class, 'createExchangeOrder'])->middleware('perm:returns.manage');
     Route::post('/return-requests/{returnRequest}', [ReturnRequestController::class, 'update'])->middleware('perm:returns.manage');
     Route::post('/return-requests/{returnRequest}/restock', [ReturnRequestController::class, 'restock'])->middleware('perm:returns.manage');
     Route::get('/media', [MediaAssetController::class, 'index'])->middleware('perm:media.manage');

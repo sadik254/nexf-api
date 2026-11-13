@@ -236,6 +236,39 @@ class SubOrderTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors('items');
     }
 
+    public function test_a_store_creates_and_retries_its_own_exchange_replacement(): void
+    {
+        [$customer, $houseProduct, $sellerProduct, $seller] = $this->fixtures();
+        $order = $this->place($customer, [[$sellerProduct, 1]])->assertCreated()->json('order');
+        $item = OrderStoreGroup::query()->where('order_id', $order['id'])->sole()->items()->sole();
+        $item->update(['fulfillment_status' => 'delivered', 'delivered_at' => now()]);
+        $return = $this->withToken($customer->createToken('t', ['customer:basic'])->plainTextToken)->postJson('/api/customers/return-requests', [
+            'order_item_id' => $item->id, 'type' => 'exchange', 'quantity' => 1, 'reason' => 'Need another size',
+        ])->assertCreated()->json();
+        $sellerToken = $seller->createToken('t', ['seller:basic'])->plainTextToken;
+        $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$return['id']}", ['status' => 'approved'])->assertOk();
+
+        $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$return['id']}/exchange-order", [
+            'items' => [['product_id' => $houseProduct->id, 'quantity' => 1]],
+        ])->assertUnprocessable()->assertJsonValidationErrors('items');
+
+        $replacement = $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$return['id']}/exchange-order", [
+            'items' => [['product_id' => $sellerProduct->id, 'quantity' => 1]], 'note' => 'Replacement jacket',
+        ])->assertCreated()->assertJsonPath('order.manual_ship', true)->json('order');
+        $this->assertMatchesRegularExpression('/^EXC-\d{5}$/', $replacement['order_number']);
+        $this->assertSame((string) $return['id'], (string) $replacement['exchange_for']);
+        $group = OrderStoreGroup::query()->where('order_id', $replacement['id'])->sole();
+        $this->assertSame($seller->id, $group->seller_id);
+        $this->assertSame('seller', $group->ships_by);
+        $this->assertSame('0.00', $replacement['total']);
+
+        \App\Models\Order::whereKey($replacement['id'])->update(['status' => 'cancelled']);
+        $retry = $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$return['id']}/exchange-order", [
+            'items' => [['product_id' => $sellerProduct->id, 'quantity' => 1]],
+        ])->assertCreated()->json('order');
+        $this->assertNotSame($replacement['id'], $retry['id']);
+    }
+
     public function test_a_store_ticket_can_be_passed_to_nexf(): void
     {
         [$customer, , $sellerProduct, $seller] = $this->fixtures();
