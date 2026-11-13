@@ -213,7 +213,11 @@ class ReturnRequestController extends Controller
             return false;
         });
         app(\App\Services\CustomerNotificationService::class)->returnUpdated($returnRequest->fresh());
-        if ($ticketResolved) app(\App\Services\CustomerNotificationService::class)->supportResolved(SupportTicket::find($returnRequest->support_ticket_id));
+        if ($ticketResolved) {
+            $ticket = SupportTicket::find($returnRequest->support_ticket_id);
+            app(\App\Services\CustomerNotificationService::class)->supportResolved($ticket);
+            app(\App\Services\SupportTicketResolvedMailService::class)->send($ticket);
+        }
         return $this->show($request, $returnRequest);
     }
 

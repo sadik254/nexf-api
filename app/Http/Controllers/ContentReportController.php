@@ -13,6 +13,7 @@ use App\Models\SupportTicket;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use App\Services\SupportTicketResolvedMailService;
 
 class ContentReportController extends Controller
 {
@@ -37,7 +38,7 @@ class ContentReportController extends Controller
         return response()->json(ContentReport::create(['reporter_customer_id'=>$customer->id]+$data),201);
     }
     public function resolve(Request $request, ContentReport $contentReport): JsonResponse { $admin=$this->admin($request); $data=$request->validate(['status'=>['required',Rule::in(['actioned','dismissed'])],'resolution'=>['nullable','string','max:3000']]); if($data['status']==='actioned') $this->act($contentReport); ContentReport::query()->where('target_type',$contentReport->target_type)->where('target_id',$contentReport->target_id)->where('status','open')->update(['status'=>$data['status'],'resolution'=>$data['resolution']??null,'resolved_by_admin_id'=>$admin->id,'resolved_at'=>now()]); return response()->json($this->present($contentReport->fresh()->load(['reporter:id,name,email','product:id,name,slug']))); }
-    private function act(ContentReport $report): void { if($report->target_type==='product') Product::whereKey($report->target_id)->update(['status'=>'unlisted']); if($report->target_type==='review') Review::whereKey($report->target_id)->update(['status'=>'rejected']); if($report->target_type==='seller_response') Review::whereKey($report->target_id)->update(['seller_response'=>null,'seller_responded_at'=>null]); if($report->target_type==='question') ProductQuestion::whereKey($report->target_id)->delete(); if($report->target_type==='answer') ProductQuestion::whereKey($report->target_id)->update(['answer'=>null,'answered_at'=>null,'answered_by_type'=>null,'answered_by_id'=>null]); if($report->target_type==='chat') StoreChat::whereKey($report->target_id)->update(['store_read_at'=>now()]); if($report->target_type==='ticket') SupportTicket::whereKey($report->target_id)->update(['status'=>'resolved','resolved_at'=>now()]); }
+    private function act(ContentReport $report): void { if($report->target_type==='product') Product::whereKey($report->target_id)->update(['status'=>'unlisted']); if($report->target_type==='review') Review::whereKey($report->target_id)->update(['status'=>'rejected']); if($report->target_type==='seller_response') Review::whereKey($report->target_id)->update(['seller_response'=>null,'seller_responded_at'=>null]); if($report->target_type==='question') ProductQuestion::whereKey($report->target_id)->delete(); if($report->target_type==='answer') ProductQuestion::whereKey($report->target_id)->update(['answer'=>null,'answered_at'=>null,'answered_by_type'=>null,'answered_by_id'=>null]); if($report->target_type==='chat') StoreChat::whereKey($report->target_id)->update(['store_read_at'=>now()]); if($report->target_type==='ticket'){ $ticket=SupportTicket::query()->whereKey($report->target_id)->where('status','!=','resolved')->first(); if($ticket){$ticket->update(['status'=>'resolved','resolved_at'=>now()]); app(SupportTicketResolvedMailService::class)->send($ticket->fresh());} } }
     private function present(ContentReport $report): ContentReport {
         $target = match ($report->target_type) {
             'product' => Product::find($report->target_id),

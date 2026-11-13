@@ -93,6 +93,53 @@ class SupportTicketTest extends TestCase
         $this->assertDatabaseHas('support_tickets', ['id' => $ticketId, 'status' => 'open', 'store_read_at' => null]);
     }
 
+    public function test_staff_resolution_emails_customer_reseller_and_guest_once(): void
+    {
+        Mail::fake();
+        config()->set('app.frontend_url', 'https://nexflifestyle.test');
+        config()->set('support.inbox.address', 'support@nexflifestyle.com');
+        $admin = Admin::create(['name' => 'Admin', 'email' => 'resolved-admin@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $customer = Customer::create(['name' => 'Customer One', 'email' => 'resolved-customer@example.test', 'password' => 'password123']);
+        $reseller = Reseller::create(['name' => 'Reseller One', 'email' => 'resolved-reseller@example.test', 'password' => 'password123']);
+        $customerTicket = SupportTicket::create(['customer_id' => $customer->id, 'category' => 'Account', 'subject' => 'Customer ticket']);
+        $resellerTicket = SupportTicket::create(['reseller_id' => $reseller->id, 'category' => 'Account', 'subject' => 'Reseller ticket']);
+        $guestTicket = SupportTicket::create(['guest_name' => 'Guest One', 'guest_email' => 'resolved-guest@example.test', 'category' => 'Contact', 'subject' => 'Guest ticket']);
+        foreach ([$customerTicket, $resellerTicket, $guestTicket] as $ticket) $ticket->update(['reference' => 'SUP-'.str_pad((string) $ticket->id, 5, '0', STR_PAD_LEFT)]);
+        $adminToken = $admin->createToken('test', ['admin'])->plainTextToken;
+
+        foreach ([$customerTicket, $resellerTicket, $guestTicket] as $ticket) {
+            $this->withToken($adminToken)->postJson("/api/admin/support-tickets/{$ticket->id}/resolve")->assertOk()->assertJsonPath('status', 'resolved');
+        }
+        Mail::assertSent(NoticeMail::class, 3);
+        Mail::assertSent(NoticeMail::class, function (NoticeMail $mail) use ($customerTicket): bool {
+            return $mail->hasTo('resolved-customer@example.test')
+                && $mail->subjectLine === "Your support ticket is resolved [{$customerTicket->reference}]"
+                && $mail->data['button']['url'] === 'https://nexflifestyle.test/account/support';
+        });
+        Mail::assertSent(NoticeMail::class, function (NoticeMail $mail) use ($resellerTicket): bool {
+            return $mail->hasTo('resolved-reseller@example.test')
+                && $mail->data['button']['url'] === 'https://nexflifestyle.test/dashboard/support';
+        });
+        Mail::assertSent(NoticeMail::class, function (NoticeMail $mail) use ($guestTicket): bool {
+            return $mail->hasTo('resolved-guest@example.test')
+                && $mail->envelope()->replyTo[0]->address === 'support@nexflifestyle.com'
+                && $mail->headers()->messageId === "sup-{$guestTicket->fresh()->reply_token}-resolved@nexflifestyle.com";
+        });
+        // Resolving an already resolved ticket, or a shopper resolving their
+        // own ticket, never sends another email.
+        $this->withToken($adminToken)->postJson("/api/admin/support-tickets/{$customerTicket->id}/resolve")->assertOk();
+        $selfTicket = SupportTicket::create(['customer_id' => $customer->id, 'category' => 'Account', 'subject' => 'Self resolved']);
+        $selfTicket->update(['reference' => 'SUP-99999']);
+        $this->withToken($customer->createToken('customer', ['customer:basic'])->plainTextToken)
+            ->postJson("/api/customers/support-tickets/{$selfTicket->id}/resolve")->assertOk();
+        Mail::assertSent(NoticeMail::class, 3);
+
+        $token = $guestTicket->fresh()->reply_token;
+        $headers = "References: <sup-{$token}-resolved@nexflifestyle.com>";
+        $this->assertTrue(app(SupportInboxService::class)->ingest('resolved-guest@example.test', 'Re: Guest ticket', 'Still need help.', '<resolved-reply@example.test>', [], $headers));
+        $this->assertDatabaseHas('support_tickets', ['id' => $guestTicket->id, 'status' => 'open', 'resolved_at' => null]);
+    }
+
     public function test_console_staff_can_open_customer_and_guest_tickets_with_the_right_store_scope(): void
     {
         $customer = Customer::create(['name' => 'Suspended buyer', 'email' => 'suspended-ticket@example.test', 'phone' => '01766666666', 'password' => 'password123', 'crm_status' => 'suspended']);

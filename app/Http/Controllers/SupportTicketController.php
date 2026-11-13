@@ -14,6 +14,7 @@ use App\Services\ConsoleNotificationService;
 use App\Services\ContactMessageCooldownService;
 use App\Services\CustomerNotificationService;
 use App\Services\GuestSupportReplyMailService;
+use App\Services\SupportTicketResolvedMailService;
 use App\Services\MediaUploadService;
 use App\Services\TurnstileService;
 use Illuminate\Http\JsonResponse;
@@ -243,12 +244,15 @@ class SupportTicketController extends Controller
     {
         $actor = $this->actor($request);
         $this->authorizeTicket($actor, $ticket);
-        $ticket->update(['status' => 'resolved', 'resolved_at' => now()]);
-        if (! ($actor instanceof Customer)) {
+        $resolved = SupportTicket::query()->whereKey($ticket->id)->where('status', '!=', 'resolved')->update(['status' => 'resolved', 'resolved_at' => now()]) > 0;
+        if ($resolved && ! ($actor instanceof Customer)) {
             app(CustomerNotificationService::class)->supportResolved($ticket);
         }
+        if ($resolved && ! ($actor instanceof Customer || $actor instanceof Reseller)) {
+            app(SupportTicketResolvedMailService::class)->send($ticket->fresh());
+        }
 
-        return $this->show($request, $ticket);
+        return $this->show($request, $ticket->fresh());
     }
 
     public function reopen(Request $request, SupportTicket $ticket): JsonResponse
