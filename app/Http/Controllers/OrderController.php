@@ -6,28 +6,30 @@ use App\Models\Admin;
 use App\Models\Coupon;
 use App\Models\CouponRedemption;
 use App\Models\Customer;
+use App\Models\CustomerWalletTransaction;
 use App\Models\DeliveryGroup;
 use App\Models\Order;
-use App\Models\ReturnRequest;
+use App\Models\OrderItem;
+use App\Models\OrderStoreGroup;
 use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductVariation;
-use App\Models\ShippingMethod;
-use App\Models\OrderItem;
-use App\Models\OrderStoreGroup;
+use App\Models\ReturnRequest;
 use App\Models\Seller;
+use App\Models\ShippingMethod;
 use App\Models\Store;
-use App\Services\InventoryService;
-use App\Services\ProductBundleService;
-use App\Services\SubOrderService;
 use App\Services\CheckoutService;
+use App\Services\CouponUsageLimitService;
+use App\Services\InventoryService;
 use App\Services\OrderNotificationService;
+use App\Services\ProductBundleService;
 use App\Services\SteadfastService;
 use App\Services\StoreShippingService;
+use App\Services\SubOrderService;
 use App\Services\TurnstileService;
 use App\Services\WalletBalanceService;
 use App\Services\WalletLedgerService;
-use App\Models\CustomerWalletTransaction;
+use App\Services\WalletRewardService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -36,9 +38,7 @@ use Illuminate\Validation\ValidationException;
 
 class OrderController extends Controller
 {
-    public function __construct(private InventoryService $inventory, private CheckoutService $checkout, private OrderNotificationService $notifications, private SteadfastService $steadfast, private StoreShippingService $storeShipping, private TurnstileService $turnstile, private SubOrderService $subOrders, private ProductBundleService $bundles)
-    {
-    }
+    public function __construct(private InventoryService $inventory, private CheckoutService $checkout, private OrderNotificationService $notifications, private SteadfastService $steadfast, private StoreShippingService $storeShipping, private TurnstileService $turnstile, private SubOrderService $subOrders, private ProductBundleService $bundles) {}
 
     /**
      * A store sees the sub-orders carrying its lines: its own, or the shared
@@ -53,6 +53,7 @@ class OrderController extends Controller
     {
         /** @var Customer $customer */
         $customer = $request->user();
+
         return response()->json($this->paginateOrderList($customer->orders()->with(['items', 'storeGroups'])->latest(), $request));
     }
 
@@ -70,7 +71,7 @@ class OrderController extends Controller
 
     public function previewAdmin(Request $request): JsonResponse
     {
-        if (!$request->user() instanceof Admin) {
+        if (! $request->user() instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -84,8 +85,10 @@ class OrderController extends Controller
             'shipping_district' => ['nullable', 'string', 'max:150'],
         ] + $this->checkoutRules());
 
-        $customer = !empty($data['customer_id']) ? Customer::findOrFail($data['customer_id']) : null;
-        if (!empty($data['editing_order_id'])) $data['exclude_order_id'] = (int) $data['editing_order_id'];
+        $customer = ! empty($data['customer_id']) ? Customer::findOrFail($data['customer_id']) : null;
+        if (! empty($data['editing_order_id'])) {
+            $data['exclude_order_id'] = (int) $data['editing_order_id'];
+        }
         unset($data['editing_order_id']);
         $preview = $this->checkout->preview($customer, $data + ['ip_address' => $request->ip(), 'staff_order' => true]);
 
@@ -113,12 +116,14 @@ class OrderController extends Controller
         ]);
         $this->assertGuestPhone($data['shipping_phone']);
         $preview = $this->checkout->preview(null, $data + ['ip_address' => $request->ip()]);
+
         return $this->checkoutPreviewResponse($preview);
     }
 
     public function storeGuest(Request $request): JsonResponse
     {
         $request->attributes->set('guest_checkout', true);
+
         return $this->store($request);
     }
 
@@ -155,16 +160,21 @@ class OrderController extends Controller
     {
         /** @var Customer $customer */
         $customer = $request->user();
-        if ((int) $order->customer_id !== (int) $customer->id) return response()->json(['message' => 'Forbidden.'], 403);
-        if ($order->status !== 'pending') return response()->json(['message' => 'Only pending orders can be cancelled by customers.'], 422);
+        if ((int) $order->customer_id !== (int) $customer->id) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+        if ($order->status !== 'pending') {
+            return response()->json(['message' => 'Only pending orders can be cancelled by customers.'], 422);
+        }
         $order = $this->cancelOrder($order, $customer, 'customer');
         $this->notifications->cancelled($order);
+
         return response()->json(['message' => 'Order cancelled and inventory restored successfully.', 'order' => $order]);
     }
 
     public function indexAdmin(Request $request): JsonResponse
     {
-        if (!$request->user() instanceof Admin) {
+        if (! $request->user() instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -177,7 +187,7 @@ class OrderController extends Controller
 
     public function showAdmin(Request $request, Order $order): JsonResponse
     {
-        if (!$request->user() instanceof Admin) {
+        if (! $request->user() instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -186,23 +196,36 @@ class OrderController extends Controller
 
     public function indexSellerOrdersForSuperAdmin(Request $request, Seller $seller): JsonResponse
     {
-        if (!$request->user() instanceof Admin) return response()->json(['message' => 'Forbidden.'], 403);
+        if (! $request->user() instanceof Admin) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
         return response()->json($this->paginateOrderList(Order::whereHas('items', fn ($q) => $q->where('seller_id', $seller->id))->with(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => $this->sellerGroups($seller->id)])->latest(), $request, $seller->id));
     }
 
     public function showSellerOrderForSuperAdmin(Request $request, Seller $seller, Order $order): JsonResponse
     {
-        if (!$request->user() instanceof Admin) return response()->json(['message' => 'Forbidden.'], 403);
-        if (!$order->items()->where('seller_id', $seller->id)->exists()) return response()->json(['message' => 'Order does not contain items from this seller.'], 404);
+        if (! $request->user() instanceof Admin) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+        if (! $order->items()->where('seller_id', $seller->id)->exists()) {
+            return response()->json(['message' => 'Order does not contain items from this seller.'], 404);
+        }
+
         return response()->json($this->withLineStores($this->withCustomerHistory($order->load(['customer', 'items' => fn ($q) => $q->where('seller_id', $seller->id), 'storeGroups' => $this->sellerGroups($seller->id), 'paymentMethod', 'shippingMethod', 'coupon']))));
     }
 
     public function cancelSellerOrderForSuperAdmin(Request $request, Seller $seller, Order $order): JsonResponse
     {
-        if (!$request->user() instanceof Admin) return response()->json(['message' => 'Forbidden.'], 403);
-        if (!$order->items()->where('seller_id', $seller->id)->exists()) return response()->json(['message' => 'Order does not contain items from this seller.'], 404);
+        if (! $request->user() instanceof Admin) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+        if (! $order->items()->where('seller_id', $seller->id)->exists()) {
+            return response()->json(['message' => 'Order does not contain items from this seller.'], 404);
+        }
         $order = $this->cancelOrder($order, $request->user(), 'admin');
         $this->notifications->cancelled($order);
+
         return response()->json(['message' => 'Seller order cancelled and inventory restored successfully.', 'order' => $order]);
     }
 
@@ -210,6 +233,7 @@ class OrderController extends Controller
     {
         /** @var Seller $seller */
         $seller = $request->user();
+
         return response()->json($this->paginateOrderList(
             Order::query()
                 ->visibleToSeller()
@@ -220,7 +244,7 @@ class OrderController extends Controller
                     'storeGroups' => $this->sellerGroups($seller->id),
                     'shippingMethod',
                 ])
-            ->latest(), $request, $seller->id
+                ->latest(), $request, $seller->id
         ));
     }
 
@@ -237,6 +261,7 @@ class OrderController extends Controller
             'shippingMethod',
         ]))->toArray(), $seller->id);
         $view['customer_history'] = $this->customerHistory($order);
+
         return response()->json($view);
     }
 
@@ -262,14 +287,18 @@ class OrderController extends Controller
         if ($order['status'] !== 'cancelled' && $items->isNotEmpty()) {
             $rank = ['pending' => 0, 'confirmed' => 1, 'packed' => 2, 'shipped' => 3, 'delivered' => 4, 'return_pending' => 5, 'returned' => 6];
             $live = $items->pluck('fulfillment_status')->reject(fn ($s) => $s === 'cancelled');
-            if ($live->isNotEmpty()) $order['status'] = $live->sortBy(fn ($s) => $rank[$s] ?? 0)->first();
+            if ($live->isNotEmpty()) {
+                $order['status'] = $live->sortBy(fn ($s) => $rank[$s] ?? 0)->first();
+            }
         }
+
         return $order;
     }
 
     private function withCustomerHistory(Order $order): Order
     {
         $order->setAttribute('customer_history', $this->customerHistory($order));
+
         return $order;
     }
 
@@ -283,6 +312,7 @@ class OrderController extends Controller
             $item->setAttribute('store_slug', $item->seller_id === null ? 'admin' : $item->seller?->store_slug);
             $item->makeHidden('seller');
         }
+
         return $order;
     }
 
@@ -292,7 +322,9 @@ class OrderController extends Controller
         $phone = $this->normalizedHistoryPhone($order->shipping_phone);
         $orders = Order::query()->whereNull('exchange_for')
             ->where(function ($query) use ($order, $phone): void {
-                if ($order->customer_id) $query->orWhere('customer_id', $order->customer_id);
+                if ($order->customer_id) {
+                    $query->orWhere('customer_id', $order->customer_id);
+                }
                 if ($phone) {
                     $query->orWhere('shipping_phone', $phone)
                         ->orWhere('shipping_phone', '+88'.$phone)
@@ -301,19 +333,23 @@ class OrderController extends Controller
             })->get(['status']);
         $received = $orders->whereIn('status', ['delivered', 'completed'])->count();
         $failed = $orders->whereIn('status', ['cancelled', 'refused'])->count();
+
         return ['orders' => $orders->count(), 'received' => $received, 'failed' => $failed, 'pending' => $orders->count() - $received - $failed];
     }
 
     private function normalizedHistoryPhone(?string $phone): ?string
     {
         $digits = preg_replace('/\D/', '', (string) $phone);
-        if (str_starts_with($digits, '880')) $digits = '0'.substr($digits, 3);
+        if (str_starts_with($digits, '880')) {
+            $digits = '0'.substr($digits, 3);
+        }
+
         return preg_match('/^01[3-9]\d{8}$/', $digits) ? $digits : null;
     }
 
     public function updateStatus(Request $request, Order $order): JsonResponse
     {
-        if (!$request->user() instanceof Admin) {
+        if (! $request->user() instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
         $confirmsPayment = $request->has('paid_amount') || $request->has('payment_sender') || $request->has('payment_reference');
@@ -321,7 +357,9 @@ class OrderController extends Controller
             && ! $request->user()->hasPermission('payments.confirm')) {
             return response()->json(['message' => "You don't have access to this.", 'permission' => 'payments.confirm'], 403);
         }
-        if ($confirmsPayment) $request->attributes->set('audit_permission', 'payments.confirm');
+        if ($confirmsPayment) {
+            $request->attributes->set('audit_permission', 'payments.confirm');
+        }
         if ($request->exists('items') || $request->exists('payment_method_id') || $request->exists('shipping_method_id') || $request->exists('coupon_code') || $request->exists('customer_id')) {
             return $this->replacePendingAdminOrder($request, $order);
         }
@@ -344,7 +382,7 @@ class OrderController extends Controller
             'payment_reference' => ['sometimes', 'nullable', 'string', 'max:60'],
         ]);
         if (array_key_exists('status', $data)) {
-            if (!empty($data['packed'])) {
+            if (! empty($data['packed'])) {
                 throw ValidationException::withMessages(['status' => ['A processing order cannot be packed.']]);
             }
             unset($data['status']);
@@ -352,9 +390,10 @@ class OrderController extends Controller
                 $locked = Order::query()->lockForUpdate()->findOrFail($order->id);
                 $items = $locked->items()->lockForUpdate()->get();
                 $liveItems = $items->reject(fn (OrderItem $item) => $item->fulfillment_status === 'cancelled');
-                if ($liveItems->isEmpty() || $liveItems->every(fn (OrderItem $item) => $item->fulfillment_status === 'pending')) return;
-                if ($liveItems->contains(fn (OrderItem $item) =>
-                    !in_array($item->fulfillment_status, ['pending', 'confirmed', 'packed'], true)
+                if ($liveItems->isEmpty() || $liveItems->every(fn (OrderItem $item) => $item->fulfillment_status === 'pending')) {
+                    return;
+                }
+                if ($liveItems->contains(fn (OrderItem $item) => ! in_array($item->fulfillment_status, ['pending', 'confirmed', 'packed'], true)
                     || $item->courier_consignment_id !== null
                     || $item->shipped_at !== null
                     || $item->delivered_at !== null
@@ -372,7 +411,9 @@ class OrderController extends Controller
             unset($data['packed']);
             DB::transaction(function () use ($order, $packed): void {
                 $locked = Order::query()->lockForUpdate()->findOrFail($order->id);
-                if ($locked->storeGroups()->exists() && $locked->items()->whereNull('store_group_id')->exists()) $this->subOrders->sync($locked);
+                if ($locked->storeGroups()->exists() && $locked->items()->whereNull('store_group_id')->exists()) {
+                    $this->subOrders->sync($locked);
+                }
                 // Only NEXF's own parcels: third-party stores pack and ship theirs.
                 $groups = $locked->storeGroups()->where('ships_by', 'nexf')->lockForUpdate()->get()
                     ->each(fn (OrderStoreGroup $group) => $group->setRelation('items', $group->items()->where('fulfillment_status', '!=', 'cancelled')->lockForUpdate()->get()))
@@ -383,12 +424,16 @@ class OrderController extends Controller
                     }
                     // A manual-ship parcel (an exchange) is booked by hand; the rest go to Steadfast.
                     if ($locked->manual_ship) {
-                        foreach ($groups as $group) $group->items()->where('fulfillment_status', 'confirmed')->update(['fulfillment_status' => 'packed']);
+                        foreach ($groups as $group) {
+                            $group->items()->where('fulfillment_status', 'confirmed')->update(['fulfillment_status' => 'packed']);
+                        }
                     } else {
                         $this->bookGroups($groups);
                     }
                 } elseif ($groups->isNotEmpty() && $groups->every(fn (OrderStoreGroup $group) => $group->items->every(fn (OrderItem $item) => $item->fulfillment_status === 'packed'))) {
-                    foreach ($groups as $group) $group->items()->where('fulfillment_status', 'packed')->update(['fulfillment_status' => 'confirmed']);
+                    foreach ($groups as $group) {
+                        $group->items()->where('fulfillment_status', 'packed')->update(['fulfillment_status' => 'confirmed']);
+                    }
                 } else {
                     throw ValidationException::withMessages(['packed' => ['Only a fully packed, unshipped order can be unpacked.']]);
                 }
@@ -401,9 +446,179 @@ class OrderController extends Controller
         if ($wasHeldFromSeller && ! $freshOrder->isHeldFromSeller()) {
             $this->notifications->manualPaymentReceived($freshOrder->load(['items.seller']));
         }
+
         return response()->json([
             'message' => 'Order details updated successfully. Fulfilment status is derived from item fulfilment.',
             'order' => $freshOrder->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']),
+        ]);
+    }
+
+    /**
+     * A deliberate staff-only override. Unlike the normal fulfilment ladder,
+     * this never books or deletes a courier consignment. It is for correcting
+     * NEXF parcels; seller-shipped parcels retain their own status and courier.
+     */
+    public function overrideStatus(Request $request, Order $order): JsonResponse
+    {
+        if (! $request->user() instanceof Admin) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+        $data = $request->validate(['status' => ['required', 'in:pending,confirmed,packed,shipped,delivered']]);
+        $request->attributes->set('audit_permission', 'orders.manage');
+        $actor = $request->user();
+
+        $updated = DB::transaction(function () use ($order, $data, $actor) {
+            $lockedOrder = Order::query()->lockForUpdate()->findOrFail($order->id);
+            if ($lockedOrder->storeGroups()->doesntExist() && $lockedOrder->items()->whereNull('store_group_id')->exists()) {
+                $this->subOrders->sync($lockedOrder);
+            }
+
+            $groups = $lockedOrder->storeGroups()->where('ships_by', 'nexf')->lockForUpdate()->get();
+            $groups->each(fn (OrderStoreGroup $group) => $group->setRelation('items', $group->items()->lockForUpdate()->get()));
+            if ($groups->isEmpty()) {
+                throw ValidationException::withMessages(['status' => ['This order has no NEXF parcel to update.']]);
+            }
+
+            $target = $data['status'];
+            $restoringCancelledOrder = $lockedOrder->status === 'cancelled';
+            $changed = false;
+
+            foreach ($groups as $group) {
+                $items = $group->items->filter(fn (OrderItem $item) => $restoringCancelledOrder
+                    ? in_array($item->fulfillment_status, ['cancelled', 'return_pending'], true)
+                    : $item->fulfillment_status !== 'cancelled'
+                );
+                if ($items->isEmpty()) {
+                    continue;
+                }
+                $changed = true;
+
+                foreach ($items as $item) {
+                    // Cancellation restocks cancelled lines. A shipped line became
+                    // return_pending without a restock, so it is not consumed twice.
+                    if ($restoringCancelledOrder && $item->fulfillment_status === 'cancelled' && ! $item->awaiting_stock) {
+                        $this->retakeCancelledStock($item, $actor);
+                    }
+                    $this->setAdminOverrideItemStatus($item, $target);
+                }
+
+                $this->clearOverrideCourierData($group, $items, $target);
+                $this->subOrders->refreshStatus($group->fresh());
+            }
+
+            if (! $changed) {
+                throw ValidationException::withMessages(['status' => ['This order has no live NEXF lines to update.']]);
+            }
+
+            if ($restoringCancelledOrder) {
+                app(WalletLedgerService::class)->reverseCancellationCredit($lockedOrder);
+                $lockedOrder->update(['cancelled_at' => null, 'cancelled_by' => null, 'payment_rejected_at' => null]);
+            }
+
+            $this->refreshOrderStatus($lockedOrder);
+
+            return $lockedOrder->fresh()->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
+        });
+
+        $this->notifications->statusChanged($updated);
+
+        return response()->json(['order' => $updated]);
+    }
+
+    private function setAdminOverrideItemStatus(OrderItem $item, string $status): void
+    {
+        $values = ['fulfillment_status' => $status];
+        if ($status === 'pending') {
+            $values['confirmed_at'] = null;
+        }
+        if (in_array($status, ['pending', 'confirmed', 'packed'], true)) {
+            $values['shipped_at'] = null;
+        }
+        if ($status !== 'delivered') {
+            $values['delivered_at'] = null;
+        }
+        if ($status === 'shipped') {
+            $values['shipped_at'] = now();
+        }
+        if ($status === 'delivered') {
+            $values['delivered_at'] = now();
+        }
+        $item->update($values);
+    }
+
+    private function clearOverrideCourierData(OrderStoreGroup $group, $items, string $target): void
+    {
+        // Delivered -> shipped keeps a real tracking record. Any move before
+        // shipped removes the stale local record; staff remove it at Steadfast.
+        if (in_array($target, ['pending', 'confirmed', 'packed'], true)) {
+            $courier = [
+                'courier_provider' => null,
+                'tracking_number' => null,
+                'courier_tracking_url' => null,
+                'courier_consignment_id' => null,
+                'courier_invoice' => null,
+                'courier_status' => null,
+                'courier_error' => null,
+                'shipped_at' => null,
+                'delivered_at' => null,
+            ];
+            if ($target !== 'packed') {
+                $courier['packed_at'] = null;
+            }
+            $group->update($courier);
+            $items->each(fn (OrderItem $item) => $item->update($courier + [
+                'courier_created_at' => null,
+                'courier_updated_at' => null,
+                'courier_tracking_message' => null,
+            ]));
+
+            return;
+        }
+
+        if ($target === 'shipped') {
+            $group->update(['delivered_at' => null]);
+            $items->each(fn (OrderItem $item) => $item->update(['delivered_at' => null]));
+        }
+    }
+
+    private function retakeCancelledStock(OrderItem $item, $actor): void
+    {
+        $product = $item->product_id ? Product::query()->find($item->product_id) : null;
+        $variation = $item->variation_id ? ProductVariation::query()->find($item->variation_id) : null;
+        if (! $product && ! $variation) {
+            throw ValidationException::withMessages(['status' => ["{$item->product_name} is no longer in the catalogue, so its stock cannot be taken."]]);
+        }
+
+        try {
+            if ($item->bundle_items) {
+                if (! $product) {
+                    throw ValidationException::withMessages(['status' => ['missing']]);
+                }
+                $components = [];
+                foreach ($item->bundle_items as $piece) {
+                    $pieceVariation = ! empty($piece['variation_id']) ? ProductVariation::query()->find($piece['variation_id']) : null;
+                    if (! empty($piece['variation_id']) && ! $pieceVariation) {
+                        throw ValidationException::withMessages(['status' => ['missing']]);
+                    }
+                    $components[] = ['variation' => $pieceVariation, 'quantity' => (int) ($piece['quantity'] ?? 0)];
+                }
+                $result = $this->consumeBundle($product, $components, (int) $item->quantity, $actor, false, $item->order_id, (float) $item->line_subtotal / max(1, (int) $item->quantity));
+            } elseif ($variation) {
+                $result = $this->inventory->consumeVariation($variation, (int) $item->quantity, $actor, 'order_reopened', ['order_id' => $item->order_id, 'order_item_id' => $item->id]);
+            } else {
+                $result = $this->inventory->consumeProduct($product, (int) $item->quantity, $actor, 'order_reopened', ['order_id' => $item->order_id, 'order_item_id' => $item->id]);
+            }
+        } catch (ValidationException $e) {
+            throw ValidationException::withMessages(['status' => ["{$item->product_name} no longer has enough stock to reopen this order."]]);
+        }
+
+        $cost = (float) $result['totals']['cost'];
+        $item->update([
+            'lot_allocations' => $result['allocations'],
+            'unit_buying_price' => round($cost / max(1, (int) $item->quantity), 2),
+            'line_cost' => $cost,
+            'line_profit' => round((float) $item->line_subtotal - $cost, 2),
+            'awaiting_stock' => false,
         ]);
     }
 
@@ -425,7 +640,7 @@ class OrderController extends Controller
             'manual_discount_value' => ['nullable', 'numeric', 'min:0'],
         ] + $this->checkoutRules());
 
-        $customer = !empty($data['customer_id']) ? Customer::findOrFail($data['customer_id']) : null;
+        $customer = ! empty($data['customer_id']) ? Customer::findOrFail($data['customer_id']) : null;
         $data['ip_address'] = $request->ip();
         $data['exclude_order_id'] = $order->id;
         $actor = $request->attributes->get('seller_staff') ?? $request->user();
@@ -448,8 +663,8 @@ class OrderController extends Controller
             }
 
             $fulfillmentStates = $nexfItems->pluck('fulfillment_status')->unique()->values();
-            if (!in_array($locked->status, ['pending', 'confirmed'], true) || $fulfillmentStates->count() > 1 || ($fulfillmentStates->isNotEmpty() && !in_array($fulfillmentStates->first(), ['pending', 'confirmed'], true))) {
-                throw ValidationException::withMessages(['order' => ["Only a pending or fully confirmed NEXF parcel can be edited before shipping."]]);
+            if (! in_array($locked->status, ['pending', 'confirmed'], true) || $fulfillmentStates->count() > 1 || ($fulfillmentStates->isNotEmpty() && ! in_array($fulfillmentStates->first(), ['pending', 'confirmed'], true))) {
+                throw ValidationException::withMessages(['order' => ['Only a pending or fully confirmed NEXF parcel can be edited before shipping.']]);
             }
             $itemFulfillmentState = $fulfillmentStates->first() ?? 'pending';
             if ($nexfItems->contains(fn (OrderItem $item) => $item->review()->exists()) || DB::table('return_requests')->whereIn('order_item_id', $nexfItems->pluck('id'))->exists()) {
@@ -469,14 +684,18 @@ class OrderController extends Controller
             $data['stock_request'] = $keepRequest;
             // Requote only after the old lot allocations are restored, so unchanged quantities remain available.
             $quoteData = ['items' => $nexfData->values()->all()] + $data;
-            if ($keptRedemptions->contains(fn (CouponRedemption $r) => strcasecmp((string) $r->coupon_code, (string) ($data['coupon_code'] ?? '')) === 0)) unset($quoteData['coupon_code']);
+            if ($keptRedemptions->contains(fn (CouponRedemption $r) => strcasecmp((string) $r->coupon_code, (string) ($data['coupon_code'] ?? '')) === 0)) {
+                unset($quoteData['coupon_code']);
+            }
             // With no NEXF lines left there's nothing to quote: the stores' parcels carry the order.
             $preview = $nexfData->isEmpty()
                 ? ['shippingMethod' => ShippingMethod::query()->findOrFail($data['shipping_method_id']), 'applied_discounts' => []]
                 : $this->checkout->preview($customer, $quoteData);
 
             $oldRedemptions->each(function (CouponRedemption $oldRedemption): void {
-                if ($oldRedemption->coupon_id) Coupon::query()->whereKey($oldRedemption->coupon_id)->decrement('used_count');
+                if ($oldRedemption->coupon_id) {
+                    Coupon::query()->whereKey($oldRedemption->coupon_id)->decrement('used_count');
+                }
                 $oldRedemption->delete();
             });
             OrderItem::query()->whereIn('id', $nexfItems->pluck('id'))->delete();
@@ -496,6 +715,7 @@ class OrderController extends Controller
             $couponDiscount = round(array_sum(array_column($appliedDiscounts, 'amount')) + $keptRedemptions->sum(fn (CouponRedemption $r) => (float) $r->discount_amount), 2);
             $locked->storeGroups()->createMany(collect($shipping['groups'])->map(function (array $group) {
                 unset($group['shipping_options']);
+
                 return $group;
             })->all());
 
@@ -531,6 +751,7 @@ class OrderController extends Controller
             }
             $this->subOrders->sync($locked);
             $this->refreshOrderStatus($locked);
+
             return $locked->fresh()->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
 
@@ -539,7 +760,7 @@ class OrderController extends Controller
 
     public function destroyAdmin(Request $request, Order $order): JsonResponse
     {
-        if (!$request->user() instanceof Admin) {
+        if (! $request->user() instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -567,7 +788,7 @@ class OrderController extends Controller
 
     public function fulfillAdminItem(Request $request, Order $order, OrderItem $item): JsonResponse
     {
-        if (!$request->user() instanceof Admin) {
+        if (! $request->user() instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
         if ((int) $item->order_id !== (int) $order->id) {
@@ -579,7 +800,7 @@ class OrderController extends Controller
 
     public function fulfillSellerItemForSuperAdmin(Request $request, Seller $seller, Order $order, OrderItem $item): JsonResponse
     {
-        if (!$request->user() instanceof Admin) {
+        if (! $request->user() instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
         if ((int) $item->order_id !== (int) $order->id || (int) $item->seller_id !== (int) $seller->id) {
@@ -591,7 +812,7 @@ class OrderController extends Controller
 
     public function reconcileReturn(Request $request, Order $order, OrderItem $item): JsonResponse
     {
-        if (!$request->user() instanceof Admin || (int) $item->order_id !== (int) $order->id) {
+        if (! $request->user() instanceof Admin || (int) $item->order_id !== (int) $order->id) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
         $result = DB::transaction(function () use ($order, $item, $request) {
@@ -602,12 +823,16 @@ class OrderController extends Controller
             }
             $this->inventory->restoreOrderItem($lockedItem, $request->user(), 'return_reconciliation');
             $lockedItem->update(['fulfillment_status' => 'returned']);
-            if ($lockedItem->storeGroup) $this->subOrders->refreshStatus($lockedItem->storeGroup);
-            if (!$lockedOrder->items()->whereNotIn('fulfillment_status', ['returned', 'cancelled'])->exists()) {
+            if ($lockedItem->storeGroup) {
+                $this->subOrders->refreshStatus($lockedItem->storeGroup);
+            }
+            if (! $lockedOrder->items()->whereNotIn('fulfillment_status', ['returned', 'cancelled'])->exists()) {
                 $lockedOrder->update(['status' => 'cancelled', 'cancelled_at' => $lockedOrder->cancelled_at ?? now(), 'cancelled_by' => $lockedOrder->cancelled_by ?? 'admin']);
             }
+
             return $lockedOrder->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
+
         return response()->json(['message' => 'Returned item reconciled and inventory restored.', 'order' => $result]);
     }
 
@@ -618,7 +843,9 @@ class OrderController extends Controller
     public function bulkShipAdmin(Request $request): JsonResponse
     {
         $admin = $request->user();
-        if (!$admin instanceof Admin) return response()->json(['message' => 'Forbidden.'], 403);
+        if (! $admin instanceof Admin) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
         $data = $request->validate([
             'store_group_ids' => ['required_without:order_item_ids', 'array', 'min:1', 'max:500'],
             'store_group_ids.*' => ['integer', 'distinct', 'exists:order_store_groups,id'],
@@ -626,9 +853,11 @@ class OrderController extends Controller
             'order_item_ids.*' => ['integer', 'distinct', 'exists:order_items,id'],
         ]);
         $groupIds = collect($data['store_group_ids'] ?? []);
-        if (!empty($data['order_item_ids'])) {
+        if (! empty($data['order_item_ids'])) {
             $items = OrderItem::query()->whereIn('id', $data['order_item_ids'])->get();
-            foreach ($items->whereNull('store_group_id')->pluck('order_id')->unique() as $orderId) $this->subOrders->sync(Order::findOrFail($orderId));
+            foreach ($items->whereNull('store_group_id')->pluck('order_id')->unique() as $orderId) {
+                $this->subOrders->sync(Order::findOrFail($orderId));
+            }
             $groupIds = $groupIds->merge(OrderItem::query()->whereIn('id', $data['order_item_ids'])->pluck('store_group_id'))->filter()->unique();
         }
         $groups = OrderStoreGroup::query()->with(['order.customer'])->whereIn('id', $groupIds)->get()
@@ -671,10 +900,11 @@ class OrderController extends Controller
         $failed = [];
         foreach ($groups as $group) {
             $result = $byInvoice->get($group->number);
-            if (!$result || ($result['status'] ?? null) === 'error' || empty($result['tracking_code'])) {
+            if (! $result || ($result['status'] ?? null) === 'error' || empty($result['tracking_code'])) {
                 $group->update(['courier_error' => $result['message'] ?? $group->fresh()->courier_error ?? 'SteadFast did not create this consignment.']);
                 $this->subOrders->refreshStatus($group);
                 $failed[] = $group->id;
+
                 continue;
             }
             $this->markGroupShipped($group, [
@@ -688,6 +918,7 @@ class OrderController extends Controller
             $this->refreshOrderStatus($group->order);
             $successful[] = $group->id;
         }
+
         return [$successful, $failed];
     }
 
@@ -709,7 +940,7 @@ class OrderController extends Controller
     {
         /** @var Admin $admin */
         $admin = $request->user();
-        if (!$admin instanceof Admin) {
+        if (! $admin instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -734,7 +965,9 @@ class OrderController extends Controller
             }
 
             $this->cancelLines($lockedOrder->items, $actor);
-            foreach ($lockedOrder->storeGroups()->get() as $group) $this->subOrders->refreshStatus($group);
+            foreach ($lockedOrder->storeGroups()->get() as $group) {
+                $this->subOrders->refreshStatus($group);
+            }
 
             $lockedOrder->update(array_merge([
                 'status' => 'cancelled',
@@ -761,9 +994,12 @@ class OrderController extends Controller
         }
 
         foreach ($items as $item) {
-            if (in_array($item->fulfillment_status, ['cancelled', 'returned', 'return_pending'], true)) continue;
+            if (in_array($item->fulfillment_status, ['cancelled', 'returned', 'return_pending'], true)) {
+                continue;
+            }
             if ($item->fulfillment_status === 'shipped') {
                 $item->update(['fulfillment_status' => 'return_pending']);
+
                 continue;
             }
 
@@ -807,7 +1043,9 @@ class OrderController extends Controller
             return $lockedOrder;
         });
 
-        if ($closed) $this->notifications->cancelled($order);
+        if ($closed) {
+            $this->notifications->cancelled($order);
+        }
 
         return response()->json([
             'message' => 'Parcel cancelled.',
@@ -844,8 +1082,8 @@ class OrderController extends Controller
             $parcel = OrderStoreGroup::query()->lockForUpdate()->findOrFail($group->id);
             $items = $parcel->items()->lockForUpdate()->get();
             $states = $items->pluck('fulfillment_status')->unique();
-            if (!in_array($locked->status, ['pending', 'confirmed'], true) || $parcel->courier_consignment_id !== null || $parcel->shipped_at !== null
-                || $states->count() > 1 || ($states->isNotEmpty() && !in_array($states->first(), ['pending', 'confirmed'], true))) {
+            if (! in_array($locked->status, ['pending', 'confirmed'], true) || $parcel->courier_consignment_id !== null || $parcel->shipped_at !== null
+                || $states->count() > 1 || ($states->isNotEmpty() && ! in_array($states->first(), ['pending', 'confirmed'], true))) {
                 throw ValidationException::withMessages(['order' => ['Only a pending or confirmed parcel can be edited before shipping.']]);
             }
             if ($items->contains(fn (OrderItem $item) => $item->review()->exists()) || DB::table('return_requests')->whereIn('order_item_id', $items->pluck('id'))->exists()) {
@@ -856,7 +1094,9 @@ class OrderController extends Controller
             $sellerIds = $deliveryGroups
                 ->flatMap(fn (DeliveryGroup $deliveryGroup) => array_map('intval', $deliveryGroup->seller_ids ?? []))
                 ->push($seller->id)->unique()->values()->all();
-            if ($deliveryGroups->contains('includes_house', true)) $sellerIds[] = null;
+            if ($deliveryGroups->contains('includes_house', true)) {
+                $sellerIds[] = null;
+            }
 
             foreach ($items as $oldItem) {
                 $this->inventory->restoreOrderItem($oldItem, $actor, 'store_order_edit_restore');
@@ -882,6 +1122,7 @@ class OrderController extends Controller
             ]);
             $this->subOrders->sync($locked);
             $this->refreshOrderStatus($locked);
+
             return $locked;
         });
 
@@ -904,13 +1145,19 @@ class OrderController extends Controller
         if ((int) $group->order_id !== (int) $order->id || (int) $group->seller_id !== (int) $seller->id) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
+
         return $this->fulfill($request, $order, $group, null, $seller->id);
     }
 
     public function fulfillAdminGroup(Request $request, Order $order, OrderStoreGroup $group): JsonResponse
     {
-        if (!$request->user() instanceof Admin) return response()->json(['message' => 'Forbidden.'], 403);
-        if ((int) $group->order_id !== (int) $order->id) return response()->json(['message' => 'This parcel does not belong to this order.'], 422);
+        if (! $request->user() instanceof Admin) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+        if ((int) $group->order_id !== (int) $order->id) {
+            return response()->json(['message' => 'This parcel does not belong to this order.'], 422);
+        }
+
         return $this->fulfill($request, $order, $group);
     }
 
@@ -921,12 +1168,17 @@ class OrderController extends Controller
      */
     private function fulfillItem(Request $request, Order $order, OrderItem $item, ?int $sellerId = null): JsonResponse
     {
-        if (!$item->store_group_id && $order->storeGroups()->exists()) $this->subOrders->sync($order);
+        if (! $item->store_group_id && $order->storeGroups()->exists()) {
+            $this->subOrders->sync($order);
+        }
         $group = $item->fresh()->storeGroup;
-        if (!$group) throw ValidationException::withMessages(['order' => ['This order has no parcel to fulfil.']]);
+        if (! $group) {
+            throw ValidationException::withMessages(['order' => ['This order has no parcel to fulfil.']]);
+        }
         if ($sellerId !== null && $request->input('status') !== 'confirmed' && (int) $group->seller_id !== $sellerId) {
             throw ValidationException::withMessages(['status' => ["These lines ship in {$group->store_name}'s parcel, so that store packs and ships them."]]);
         }
+
         return $this->fulfill($request, $order, $group, $item, $sellerId);
     }
 
@@ -961,26 +1213,37 @@ class OrderController extends Controller
             $rank = fn (OrderItem $item) => array_search($item->fulfillment_status, $ladder, true);
             $back = $only ? $items->where('id', $only->id)->values() : $items;
             if ($back->isNotEmpty() && $back->every(fn (OrderItem $item) => $rank($item) !== false && $rank($item) >= $target) && $back->contains(fn (OrderItem $item) => $rank($item) > $target)) {
-                if ($lockedGroup->courier_consignment_id || $lockedGroup->shipped_at || $back->contains(fn (OrderItem $item) =>
-                    in_array($item->fulfillment_status, ['shipped', 'delivered'], true) || $item->courier_consignment_id !== null || $item->shipped_at !== null
+                if ($lockedGroup->courier_consignment_id || $lockedGroup->shipped_at || $back->contains(fn (OrderItem $item) => in_array($item->fulfillment_status, ['shipped', 'delivered'], true) || $item->courier_consignment_id !== null || $item->shipped_at !== null
                 )) {
                     throw ValidationException::withMessages(['status' => ['A parcel that is booked or shipped cannot go back.']]);
                 }
                 foreach ($back->filter(fn (OrderItem $item) => $rank($item) > $target) as $item) {
                     $item->update(['fulfillment_status' => $data['status']] + ($target === 0 ? ['confirmed_at' => null] : []));
                 }
-                if ($target < 2) $lockedGroup->update(['packed_at' => null]);
+                if ($target < 2) {
+                    $lockedGroup->update(['packed_at' => null]);
+                }
                 $this->subOrders->refreshStatus($lockedGroup->fresh());
                 $this->refreshOrderStatus($lockedOrder);
-                if ($target < 2 && !$lockedOrder->items()->where('fulfillment_status', 'packed')->exists()) $lockedOrder->update(['packed_at' => null]);
+                if ($target < 2 && ! $lockedOrder->items()->where('fulfillment_status', 'packed')->exists()) {
+                    $lockedOrder->update(['packed_at' => null]);
+                }
+
                 return $lockedOrder->load(['customer', 'items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
             }
-            if ($target === 0) throw ValidationException::withMessages(['status' => ['This parcel is already pending.']]);
+            if ($target === 0) {
+                throw ValidationException::withMessages(['status' => ['This parcel is already pending.']]);
+            }
 
             // Each store confirms its own lines, even inside a shared parcel.
-            if ($only && $data['status'] === 'confirmed') $items = $items->where('id', $only->id)->values();
-            elseif ($sellerId !== null && $data['status'] === 'confirmed') $items = $items->where('seller_id', $sellerId)->values();
-            if ($items->isEmpty()) throw ValidationException::withMessages(['status' => ['This parcel has nothing left to fulfil.']]);
+            if ($only && $data['status'] === 'confirmed') {
+                $items = $items->where('id', $only->id)->values();
+            } elseif ($sellerId !== null && $data['status'] === 'confirmed') {
+                $items = $items->where('seller_id', $sellerId)->values();
+            }
+            if ($items->isEmpty()) {
+                throw ValidationException::withMessages(['status' => ['This parcel has nothing left to fulfil.']]);
+            }
 
             $from = $ladder[$target - 1];
             $moving = $items->where('fulfillment_status', $from);
@@ -991,20 +1254,24 @@ class OrderController extends Controller
                 throw ValidationException::withMessages(['status' => [$only ? "Item must transition from {$at} to {$next}." : "Parcel must move from {$at} to {$next} first."]]);
             }
 
-            $nexfBooks = $lockedGroup->ships_by === 'nexf' && !$lockedOrder->manual_ship;
+            $nexfBooks = $lockedGroup->ships_by === 'nexf' && ! $lockedOrder->manual_ship;
             // A store that connected its own Steadfast account gets the same automatic booking, on its account.
-            $storeBooks = $lockedGroup->ships_by === 'seller' && !$lockedOrder->manual_ship && SteadfastService::storeConnected($lockedGroup->seller);
+            $storeBooks = $lockedGroup->ships_by === 'seller' && ! $lockedOrder->manual_ship && SteadfastService::storeConnected($lockedGroup->seller);
             switch ($data['status']) {
                 case 'confirmed':
                     foreach ($moving as $item) {
-                        if ($item->awaiting_stock) $this->takeAwaitedStock($item, $actor);
+                        if ($item->awaiting_stock) {
+                            $this->takeAwaitedStock($item, $actor);
+                        }
                         $item->update(['fulfillment_status' => 'confirmed']);
                     }
                     break;
                 case 'packed':
-                    foreach ($moving as $item) $item->update(['fulfillment_status' => 'packed']);
+                    foreach ($moving as $item) {
+                        $item->update(['fulfillment_status' => 'packed']);
+                    }
                     // Packing hands the parcel to Steadfast (NEXF's or the store's own account); a refusal aborts the step.
-                    if (($nexfBooks || $storeBooks) && !$lockedGroup->courier_consignment_id) {
+                    if (($nexfBooks || $storeBooks) && ! $lockedGroup->courier_consignment_id) {
                         $lockedGroup->load(['order.customer', 'items']);
                         $courier = $this->steadfast->createConsignment($lockedGroup);
                         $this->markGroupShipped($lockedGroup, [
@@ -1018,7 +1285,9 @@ class OrderController extends Controller
                     }
                     break;
                 case 'shipped':
-                    if ($nexfBooks) throw ValidationException::withMessages(['status' => ['NEXF parcels are booked with Steadfast when they are packed.']]);
+                    if ($nexfBooks) {
+                        throw ValidationException::withMessages(['status' => ['NEXF parcels are booked with Steadfast when they are packed.']]);
+                    }
                     if ($lockedGroup->ships_by === 'seller' && empty($data['courier_provider'])) {
                         throw ValidationException::withMessages(['courier_provider' => ['Parcel service is required when marking an item shipped.']]);
                     }
@@ -1034,7 +1303,9 @@ class OrderController extends Controller
                     ]);
                     break;
                 case 'delivered':
-                    foreach ($moving as $item) $item->update(['fulfillment_status' => 'delivered', 'delivered_at' => now()]);
+                    foreach ($moving as $item) {
+                        $item->update(['fulfillment_status' => 'delivered', 'delivered_at' => now()]);
+                    }
                     break;
             }
 
@@ -1066,28 +1337,36 @@ class OrderController extends Controller
         $quantity = (int) $item->quantity;
         $variation = $item->variation_id ? ProductVariation::query()->find($item->variation_id) : null;
         $product = $item->product_id ? Product::query()->find($item->product_id) : null;
-        if (!$variation && !$product) throw ValidationException::withMessages(['status' => ["{$item->product_name} is no longer in the catalogue, so its stock cannot be taken."]]);
+        if (! $variation && ! $product) {
+            throw ValidationException::withMessages(['status' => ["{$item->product_name} is no longer in the catalogue, so its stock cannot be taken."]]);
+        }
         try {
             if ($item->bundle_items) {
                 $components = [];
                 foreach ($item->bundle_items as $piece) {
-                    $pieceVariation = !empty($piece['variation_id']) ? ProductVariation::find($piece['variation_id']) : null;
-                    if (!empty($piece['variation_id']) && !$pieceVariation) throw ValidationException::withMessages(['status' => ['missing']]);
+                    $pieceVariation = ! empty($piece['variation_id']) ? ProductVariation::find($piece['variation_id']) : null;
+                    if (! empty($piece['variation_id']) && ! $pieceVariation) {
+                        throw ValidationException::withMessages(['status' => ['missing']]);
+                    }
                     $components[] = ['variation' => $pieceVariation, 'quantity' => (int) $piece['quantity']];
                 }
                 $result = $this->consumeBundle($product, $components, $quantity, $actor, false, $item->order_id, (float) $item->line_subtotal / max(1, $quantity));
             } else {
                 $result = $variation ? $this->inventory->consumeVariation($variation, $quantity, $actor, 'order_sale', ['order_id' => $item->order_id, 'stock_request' => true]) : $this->inventory->consumeProduct($product, $quantity, $actor, 'order_sale', ['order_id' => $item->order_id, 'stock_request' => true]);
             }
+        } catch (ValidationException $e) {
+            throw ValidationException::withMessages(['status' => ["{$item->product_name} is still out of stock. Add stock before confirming this request."]]);
         }
-        catch (ValidationException $e) { throw ValidationException::withMessages(['status' => ["{$item->product_name} is still out of stock. Add stock before confirming this request."]]); }
-        $cost=(float)$result['totals']['cost']; $revenue=(float)$item->line_subtotal;
-        $item->update(['lot_allocations'=>$result['allocations'],'unit_buying_price'=>round($cost/max(1,$quantity),2),'line_cost'=>$cost,'line_profit'=>round($revenue-$cost,2),'awaiting_stock'=>false]);
+        $cost = (float) $result['totals']['cost'];
+        $revenue = (float) $item->line_subtotal;
+        $item->update(['lot_allocations' => $result['allocations'], 'unit_buying_price' => round($cost / max(1, $quantity), 2), 'line_cost' => $cost, 'line_profit' => round($revenue - $cost, 2), 'awaiting_stock' => false]);
     }
 
     public function refreshOrderStatus(Order $order): void
     {
-        foreach ($order->storeGroups()->get() as $group) $this->subOrders->refreshStatus($group);
+        foreach ($order->storeGroups()->get() as $group) {
+            $this->subOrders->refreshStatus($group);
+        }
         $statuses = $order->items()->pluck('fulfillment_status');
         if ($statuses->isEmpty()) {
             return;
@@ -1095,6 +1374,7 @@ class OrderController extends Controller
 
         if ($statuses->every(fn (string $status) => in_array($status, ['returned', 'cancelled'], true))) {
             $order->update(['status' => 'cancelled', 'cancelled_at' => $order->cancelled_at ?? now(), 'cancelled_by' => $order->cancelled_by ?? 'system']);
+
             return;
         }
 
@@ -1106,7 +1386,9 @@ class OrderController extends Controller
             'status' => $lowest,
             'packed_at' => $allPackedOrFurther ? ($order->packed_at ?? now()) : null,
         ]);
-        if (in_array($lowest, ['delivered', 'completed'], true)) app(\App\Services\WalletRewardService::class)->orderDelivered($order->fresh());
+        if (in_array($lowest, ['delivered', 'completed'], true)) {
+            app(WalletRewardService::class)->orderDelivered($order->fresh());
+        }
     }
 
     public function store(Request $request): JsonResponse
@@ -1114,11 +1396,11 @@ class OrderController extends Controller
         /** @var Customer $customer */
         $customer = $request->user();
         $isGuestCheckout = (bool) $request->attributes->get('guest_checkout', false);
-        $isAdminOrder = !$isGuestCheckout && ($request->user() instanceof Admin || $request->attributes->has('order_actor'));
+        $isAdminOrder = ! $isGuestCheckout && ($request->user() instanceof Admin || $request->attributes->has('order_actor'));
         $actor = $request->attributes->get('order_actor') ?? $customer;
         $isGuestOrder = $isGuestCheckout || ($isAdminOrder && (bool) $request->attributes->get('admin_guest', false));
 
-        if (!$isAdminOrder && !$isGuestCheckout && !$customer instanceof Customer) {
+        if (! $isAdminOrder && ! $isGuestCheckout && ! $customer instanceof Customer) {
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
 
@@ -1136,22 +1418,24 @@ class OrderController extends Controller
             // Cloudflare Turnstile token - required once TURNSTILE_SECRET_KEY is set.
             'turnstile_token' => ['nullable', 'string', 'max:2048'],
         ]);
-        if ($isGuestCheckout) $this->assertGuestPhone($data['shipping_phone']);
+        if ($isGuestCheckout) {
+            $this->assertGuestPhone($data['shipping_phone']);
+        }
 
-        if (!$isAdminOrder) {
+        if (! $isAdminOrder) {
             $this->turnstile->assertHuman($request, $isGuestCheckout);
         }
 
         $exchangeReturn = null;
-        if (!empty($data['exchange_for'])) {
+        if (! empty($data['exchange_for'])) {
             $exchangeReturn = ReturnRequest::query()->with(['order:id,customer_id', 'exchangeOrder:id,status'])->findOrFail($data['exchange_for']);
-            if ($exchangeReturn->type !== 'exchange' || !in_array($exchangeReturn->status, ['requested', 'approved', 'in_transit', 'received'], true) || ($exchangeReturn->exchange_order_id && $exchangeReturn->exchangeOrder?->status !== 'cancelled')) {
+            if ($exchangeReturn->type !== 'exchange' || ! in_array($exchangeReturn->status, ['requested', 'approved', 'in_transit', 'received'], true) || ($exchangeReturn->exchange_order_id && $exchangeReturn->exchangeOrder?->status !== 'cancelled')) {
                 throw ValidationException::withMessages(['exchange_for' => ['This exchange is not ready for a replacement order.']]);
             }
             if ((int) $exchangeReturn->customer_id !== (int) ($customer?->id)) {
                 throw ValidationException::withMessages(['customer_id' => ['The replacement customer must match the return request.']]);
             }
-            if (!empty($data['coupon_code'])) {
+            if (! empty($data['coupon_code'])) {
                 throw ValidationException::withMessages(['coupon_code' => ['Exchange orders cannot use coupons.']]);
             }
             // An exchange is a swap with the store that sold the item; another store's goods are a new order.
@@ -1169,7 +1453,7 @@ class OrderController extends Controller
         $forceIndividualSellerId = $request->attributes->get('force_individual_seller_shipping');
         $order = DB::transaction(function () use ($customer, $actor, $isGuestOrder, $data, $preview, $exchangeReturn, $forceIndividualSellerId) {
             $paymentMethod = PaymentMethod::query()->active()->find($data['payment_method_id']);
-            if (!$paymentMethod) {
+            if (! $paymentMethod) {
                 throw ValidationException::withMessages([
                     'payment_method_id' => ['Selected payment method is unavailable.'],
                 ]);
@@ -1177,12 +1461,14 @@ class OrderController extends Controller
 
             $shippingMethod = $preview['shippingMethod'];
 
-            $useWallet = $paymentMethod->code === 'wallet' || !empty($data['use_wallet']);
+            $useWallet = $paymentMethod->code === 'wallet' || ! empty($data['use_wallet']);
             $walletAmount = 0.0;
             $walletRewardAmount = 0.0;
             $walletWithdrawableAmount = 0.0;
             if ($useWallet) {
-                if (!$customer) throw ValidationException::withMessages(['payment_method_id' => ['NEXF Balance is available only to signed-in customers.']]);
+                if (! $customer) {
+                    throw ValidationException::withMessages(['payment_method_id' => ['NEXF Balance is available only to signed-in customers.']]);
+                }
                 Customer::whereKey($customer->id)->lockForUpdate()->firstOrFail();
                 $buckets = app(WalletBalanceService::class)->buckets($customer->id, true);
                 if ($paymentMethod->code === 'wallet' && $buckets['total'] < (float) $preview['total']) {
@@ -1218,7 +1504,7 @@ class OrderController extends Controller
                 'wallet_reward_amount' => $walletRewardAmount,
                 'wallet_withdrawable_amount' => $walletWithdrawableAmount,
                 'manual_ship' => (bool) $exchangeReturn,
-                'stock_request' => !$exchangeReturn && !empty($data['stock_request']),
+                'stock_request' => ! $exchangeReturn && ! empty($data['stock_request']),
                 'exchange_for' => $exchangeReturn ? (string) $exchangeReturn->id : null,
                 'manual_discount_kind' => $data['manual_discount_kind'] ?? null,
                 'manual_discount_value' => $data['manual_discount_value'] ?? null,
@@ -1247,13 +1533,13 @@ class OrderController extends Controller
                     ->lockForUpdate()
                     ->find($itemData['product_id']);
 
-                if (!$product) {
+                if (! $product) {
                     throw ValidationException::withMessages([
                         'items' => ['One or more products are unavailable.'],
                     ]);
                 }
 
-                if ($product->seller_id !== null && (!$product->seller || $product->seller->status !== 'approved' || !$product->seller->is_active)) {
+                if ($product->seller_id !== null && (! $product->seller || $product->seller->status !== 'approved' || ! $product->seller->is_active)) {
                     throw ValidationException::withMessages([
                         'items' => ["Product {$product->name} is unavailable."],
                     ]);
@@ -1268,7 +1554,7 @@ class OrderController extends Controller
 
                 if ($bundle) {
                     $finalBundle = $this->bundles->resolve($product, $itemData, true, "items.{$lineIndex}");
-                    if (!$finalBundle || (int) $finalBundle['bundle']->id !== (int) $bundle->id || round((float) $finalBundle['unitPrice'], 2) !== round($bundleUnitPrice, 2)) {
+                    if (! $finalBundle || (int) $finalBundle['bundle']->id !== (int) $bundle->id || round((float) $finalBundle['unitPrice'], 2) !== round($bundleUnitPrice, 2)) {
                         throw ValidationException::withMessages(["items.{$lineIndex}" => ['This combo changed. Review your cart and try again.']]);
                     }
                     $bundle = $finalBundle['bundle'];
@@ -1277,12 +1563,12 @@ class OrderController extends Controller
                     $bundleLabel = $finalBundle['label'];
                 }
 
-                if (!$bundle && $product->product_type === 'variable' && empty($itemData['variation_id'])) {
+                if (! $bundle && $product->product_type === 'variable' && empty($itemData['variation_id'])) {
                     throw ValidationException::withMessages([
                         'items' => ["A variation must be selected for {$product->name}."],
                     ]);
                 }
-                if (!$bundle && $product->product_type === 'simple' && !empty($itemData['variation_id'])) {
+                if (! $bundle && $product->product_type === 'simple' && ! empty($itemData['variation_id'])) {
                     throw ValidationException::withMessages([
                         'items' => ["{$product->name} does not have purchasable variations."],
                     ]);
@@ -1290,13 +1576,13 @@ class OrderController extends Controller
 
                 if ($bundle) {
                     $result = $this->consumeBundle($product, $bundleComponents, $quantity, $actor, $order->stock_request, $order->id, $bundleUnitPrice);
-                } elseif (!empty($itemData['variation_id'])) {
+                } elseif (! empty($itemData['variation_id'])) {
                     $variation = ProductVariation::query()
                         ->where('product_id', $product->id)
                         ->where('is_active', true)
                         ->find($itemData['variation_id']);
 
-                    if (!$variation) {
+                    if (! $variation) {
                         throw ValidationException::withMessages([
                             'items' => ["Selected variation for {$product->name} is unavailable."],
                         ]);
@@ -1363,6 +1649,7 @@ class OrderController extends Controller
                     $group['shipping_method_code'] = 'exchange';
                     $group['shipping_method_name'] = 'Exchange - no charge';
                     $group['shipping_charge'] = 0;
+
                     return $group;
                 }, $shipping['groups']);
             }
@@ -1371,6 +1658,7 @@ class OrderController extends Controller
 
             $order->storeGroups()->createMany(collect($shipping['groups'])->map(function (array $group) {
                 unset($group['shipping_options']);
+
                 return $group;
             })->all());
 
@@ -1414,13 +1702,14 @@ class OrderController extends Controller
             if ($exchangeReturn) {
                 $lockedReturn = ReturnRequest::query()->lockForUpdate()->findOrFail($exchangeReturn->id);
                 $linkedOrder = $lockedReturn->exchange_order_id ? Order::query()->lockForUpdate()->find($lockedReturn->exchange_order_id) : null;
-                if (!in_array($lockedReturn->status, ['requested', 'approved', 'in_transit', 'received'], true) || ($linkedOrder && $linkedOrder->status !== 'cancelled')) {
+                if (! in_array($lockedReturn->status, ['requested', 'approved', 'in_transit', 'received'], true) || ($linkedOrder && $linkedOrder->status !== 'cancelled')) {
                     throw ValidationException::withMessages(['exchange_for' => ['A replacement order has already been created for this exchange.']]);
                 }
                 $lockedReturn->update(['exchange_order_id' => $order->id]);
             }
 
             $this->subOrders->sync($order);
+
             return $order->load(['items', 'storeGroups', 'paymentMethod', 'shippingMethod', 'coupon']);
         });
 
@@ -1435,7 +1724,7 @@ class OrderController extends Controller
     /** Create an order from the admin console using the same authoritative checkout path. */
     public function storeAdmin(Request $request): JsonResponse
     {
-        if (!$request->user() instanceof Admin) {
+        if (! $request->user() instanceof Admin) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
         $data = $request->validate([
@@ -1451,7 +1740,7 @@ class OrderController extends Controller
             'exchange_for' => ['nullable', 'integer', 'exists:return_requests,id'],
         ] + $this->checkoutRules());
 
-        $customer = !empty($data['customer_id']) ? Customer::findOrFail($data['customer_id']) : null;
+        $customer = ! empty($data['customer_id']) ? Customer::findOrFail($data['customer_id']) : null;
         $request->attributes->set('order_actor', $request->user());
         $request->attributes->set('admin_guest', empty($data['customer_id']) || (bool) ($data['guest'] ?? false));
         $request->setUserResolver(fn () => $customer);
@@ -1462,6 +1751,7 @@ class OrderController extends Controller
             Order::whereKey($payload['order']['id'])->update(['is_guest' => $payload['order']['is_guest']]);
             $response->setData($payload);
         }
+
         return $response;
     }
 
@@ -1471,13 +1761,18 @@ class OrderController extends Controller
         $applied = [];
         foreach ($preview['applied_discounts'] ?? [] as $discount) {
             $coupon = Coupon::query()->lockForUpdate()->find($discount['coupon']->id);
-            if (!$coupon) throw ValidationException::withMessages(['coupon_code' => ['A discount is no longer available.']]);
-            if ($reason = $coupon->unusableReason()) throw ValidationException::withMessages(['coupon_code' => [$reason]]);
-            if (app(\App\Services\CouponUsageLimitService::class)->reached($coupon, $customer, $shippingPhone)) {
+            if (! $coupon) {
+                throw ValidationException::withMessages(['coupon_code' => ['A discount is no longer available.']]);
+            }
+            if ($reason = $coupon->unusableReason()) {
+                throw ValidationException::withMessages(['coupon_code' => [$reason]]);
+            }
+            if (app(CouponUsageLimitService::class)->reached($coupon, $customer, $shippingPhone)) {
                 throw ValidationException::withMessages(['coupon_code' => ['Coupon usage limit reached for this customer.']]);
             }
             $applied[] = ['coupon' => $coupon, 'amount' => (float) $discount['amount']];
         }
+
         return $applied;
     }
 
@@ -1510,18 +1805,27 @@ class OrderController extends Controller
 
     private function variationLabels(Product $product, ?ProductVariation $variation): ?array
     {
-        if (!$variation) return null;
+        if (! $variation) {
+            return null;
+        }
         $attributes = $variation->attributes ?? [];
         $labels = [];
         $handledKeys = [];
         foreach ($product->option_groups ?? [] as $group) {
             $key = (string) ($group['key'] ?? '');
-            if ($key === '' || !array_key_exists($key, $attributes)) continue;
+            if ($key === '' || ! array_key_exists($key, $attributes)) {
+                continue;
+            }
             $selected = collect($group['values'] ?? [])->first(fn (array $value) => (string) ($value['value'] ?? '') === (string) $attributes[$key]);
             $labels[] = ['group' => $group['label'] ?? $key, 'value' => $selected['label'] ?? (string) $attributes[$key], 'swatch' => $selected['swatch'] ?? null];
             $handledKeys[] = $key;
         }
-        foreach ($attributes as $key => $value) if (!in_array((string) $key, $handledKeys, true)) $labels[] = ['group' => (string) $key, 'value' => (string) $value, 'swatch' => null];
+        foreach ($attributes as $key => $value) {
+            if (! in_array((string) $key, $handledKeys, true)) {
+                $labels[] = ['group' => (string) $key, 'value' => (string) $value, 'swatch' => null];
+            }
+        }
+
         return $labels;
     }
 
@@ -1542,24 +1846,28 @@ class OrderController extends Controller
         foreach ($components as $componentIndex => $component) {
             $pieceQuantity = (int) $component['quantity'] * $comboQuantity;
             $variation = $component['variation'];
-            if ($stockRequest) continue;
+            if ($stockRequest) {
+                continue;
+            }
             $consumed = $variation
                 ? $this->inventory->consumeVariation($variation, $pieceQuantity, $actor, 'order_sale', ['order_id' => $orderId, 'bundle' => true])
                 : $this->inventory->consumeProduct($product, $pieceQuantity, $actor, 'order_sale', ['order_id' => $orderId, 'bundle' => true]);
             $allocations = array_merge($allocations, array_map(function (array $allocation) use ($componentIndex, $component) {
                 $allocation['bundle_component'] = $componentIndex;
                 $allocation['bundle_component_quantity'] = (int) $component['quantity'];
+
                 return $allocation;
             }, $consumed['allocations']));
             $cost = round($cost + (float) $consumed['totals']['cost'], 2);
         }
         $revenue = round($quotedPrice * $comboQuantity, 2);
+
         return ['allocations' => $allocations, 'totals' => ['cost' => $stockRequest ? 0.0 : $cost, 'revenue' => $revenue, 'profit' => $stockRequest ? $revenue : round($revenue - $cost, 2)]];
     }
 
     private function assertGuestPhone(string $phone): void
     {
-        if (!preg_match('/^01[3-9][0-9]{8}$/', $phone)) {
+        if (! preg_match('/^01[3-9][0-9]{8}$/', $phone)) {
             throw ValidationException::withMessages(['shipping_phone' => ['Enter a valid Bangladesh mobile number.']]);
         }
     }
@@ -1572,10 +1880,10 @@ class OrderController extends Controller
     private function addEditedLine(Order $order, array $itemData, $actor, string $state, bool $keepRequest, ?array $sellerIds = null, array $attributes = [], string $field = 'items'): array
     {
         $product = Product::query()->with('seller')->availableForSale()->find($itemData['product_id']);
-        if (!$product || ($product->seller_id !== null && (!$product->seller || $product->seller->status !== 'approved' || !$product->seller->is_active))) {
+        if (! $product || ($product->seller_id !== null && (! $product->seller || $product->seller->status !== 'approved' || ! $product->seller->is_active))) {
             throw ValidationException::withMessages(['items' => ['One or more products are unavailable.']]);
         }
-        if ($sellerIds !== null && !in_array($product->seller_id, $sellerIds, true)) {
+        if ($sellerIds !== null && ! in_array($product->seller_id, $sellerIds, true)) {
             throw ValidationException::withMessages(['items' => ["{$product->name} doesn't ship in this parcel."]]);
         }
         $quantity = (int) $itemData['quantity'];
@@ -1585,15 +1893,17 @@ class OrderController extends Controller
         $bundleComponents = $resolvedBundle['components'] ?? [];
         $bundleUnitPrice = (float) ($resolvedBundle['unitPrice'] ?? 0);
         $bundleLabel = $resolvedBundle['label'] ?? null;
-        if (!$bundle && $product->product_type === 'variable' && empty($itemData['variation_id'])) {
+        if (! $bundle && $product->product_type === 'variable' && empty($itemData['variation_id'])) {
             throw ValidationException::withMessages(['items' => ["A variation must be selected for {$product->name}."]]);
         }
-        if (!$bundle && $product->product_type === 'simple' && !empty($itemData['variation_id'])) {
+        if (! $bundle && $product->product_type === 'simple' && ! empty($itemData['variation_id'])) {
             throw ValidationException::withMessages(['items' => ["{$product->name} does not have purchasable variations."]]);
         }
-        if (!$bundle && !empty($itemData['variation_id'])) {
+        if (! $bundle && ! empty($itemData['variation_id'])) {
             $variation = ProductVariation::query()->where('product_id', $product->id)->where('is_active', true)->find($itemData['variation_id']);
-            if (!$variation) throw ValidationException::withMessages(['items' => ["Selected variation for {$product->name} is unavailable."]]);
+            if (! $variation) {
+                throw ValidationException::withMessages(['items' => ["Selected variation for {$product->name} is unavailable."]]);
+            }
         }
         if ($bundle) {
             $result = $this->consumeBundle($product, $bundleComponents, $quantity, $actor, $keepRequest, $order->id, $bundleUnitPrice);
@@ -1620,6 +1930,7 @@ class OrderController extends Controller
             'line_subtotal' => $lineSubtotal, 'line_cost' => $lineCost, 'line_profit' => (float) $result['totals']['profit'], 'commission_rate' => $product->seller?->commission_rate,
             'lot_allocations' => $result['allocations'], 'fulfillment_status' => $state, 'awaiting_stock' => $keepRequest,
         ] + $attributes);
+
         return [$product, $lineSubtotal];
     }
 
@@ -1635,24 +1946,28 @@ class OrderController extends Controller
                     ->sort()->values()->implode(',');
                 $key = data_get($item, 'product_id').":bundle:{$bundleId}:{$pieces}";
             } else {
-                $key = data_get($item, 'product_id') . ':' . (data_get($item, 'variation_id') ?? '');
+                $key = data_get($item, 'product_id').':'.(data_get($item, 'variation_id') ?? '');
             }
             $keys[$key] = ($keys[$key] ?? 0) + (int) data_get($item, 'quantity');
         }
         ksort($keys);
+
         return $keys;
     }
 
     private function manualDiscountAmount(float $subtotal, ?string $kind, float $value): float
     {
-        if ($value <= 0 || !in_array($kind, ['flat', 'percent'], true)) return 0.0;
+        if ($value <= 0 || ! in_array($kind, ['flat', 'percent'], true)) {
+            return 0.0;
+        }
         $amount = $kind === 'percent' ? round($subtotal * $value / 100) : round($value);
+
         return min($subtotal, max(0, $amount));
     }
 
     private function resolveCoupon(?string $couponCode, float $subtotal, Customer $customer): ?Coupon
     {
-        if (!$couponCode) {
+        if (! $couponCode) {
             return null;
         }
 
@@ -1662,7 +1977,7 @@ class OrderController extends Controller
             ->lockForUpdate()
             ->first();
 
-        if (!$coupon) {
+        if (! $coupon) {
             throw ValidationException::withMessages([
                 'coupon_code' => ['Coupon code was not found.'],
             ]);
@@ -1703,7 +2018,7 @@ class OrderController extends Controller
         $number = (int) $sequence->next_value;
         DB::table('order_number_sequences')->where('prefix', $prefix)->update(['next_value' => $number + 1]);
 
-        return $prefix . '-' . str_pad((string) $number, 5, '0', STR_PAD_LEFT);
+        return $prefix.'-'.str_pad((string) $number, 5, '0', STR_PAD_LEFT);
     }
 
     private function paginateOrderList($query, Request $request, ?int $sellerId = null): array
@@ -1717,17 +2032,25 @@ class OrderController extends Controller
             'exchange' => ['sometimes', 'boolean'],
             'search' => ['sometimes', 'string', 'max:100'],
         ]);
-        if (isset($filters['payment_status'])) $query->where('payment_status', $filters['payment_status']);
-        if (($filters['guest'] ?? false) === true || ($filters['guest'] ?? null) === '1') $query->where('is_guest', true);
-        if (($filters['exchange'] ?? false) === true || ($filters['exchange'] ?? null) === '1') $query->whereNotNull('exchange_for');
-        if (!empty($filters['search'])) {
+        if (isset($filters['payment_status'])) {
+            $query->where('payment_status', $filters['payment_status']);
+        }
+        if (($filters['guest'] ?? false) === true || ($filters['guest'] ?? null) === '1') {
+            $query->where('is_guest', true);
+        }
+        if (($filters['exchange'] ?? false) === true || ($filters['exchange'] ?? null) === '1') {
+            $query->whereNotNull('exchange_for');
+        }
+        if (! empty($filters['search'])) {
             $search = trim($filters['search']);
             $query->where(fn ($q) => $q->where('order_number', 'like', "%{$search}%")
                 ->orWhere('shipping_name', 'like', "%{$search}%")
                 ->orWhere('shipping_phone', 'like', "%{$search}%"));
         }
         $counts = (clone $query)->reorder()->selectRaw('status, count(*) as count')->groupBy('status')->pluck('count', 'status')->map(fn ($count) => (int) $count)->all();
-        if (isset($filters['status'])) $query->where('status', $filters['status']);
+        if (isset($filters['status'])) {
+            $query->where('status', $filters['status']);
+        }
         $page = $query->paginate($filters['per_page'] ?? 25);
         $page->getCollection()->loadMissing('items.seller:id,store_name,store_slug');
         $houseStore = Store::primary();
@@ -1736,6 +2059,7 @@ class OrderController extends Controller
         if ($sellerId !== null) {
             $result['data'] = array_map(fn (array $order) => $this->sellerView($order, $sellerId), $result['data'] ?? []);
         }
+
         return array_merge($result, ['status_counts' => $counts]);
     }
 }

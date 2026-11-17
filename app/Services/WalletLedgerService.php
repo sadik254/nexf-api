@@ -13,19 +13,54 @@ class WalletLedgerService
 {
     public function cancellationCredit(Order $order): ?CustomerWalletTransaction
     {
-        if (!$order->customer_id) return null;
+        if (! $order->customer_id) {
+            return null;
+        }
         $reward = (float) ($order->wallet_reward_amount ?? 0);
         $withdrawable = (float) ($order->wallet_withdrawable_amount ?? 0);
         if ($reward <= 0 && $withdrawable <= 0) {
             $reward = (float) ($order->wallet_amount ?? 0);
-            if ($reward <= 0 && $order->payment_method_code === 'wallet') $reward = (float) ($order->paid_amount ?: $order->total);
+            if ($reward <= 0 && $order->payment_method_code === 'wallet') {
+                $reward = (float) ($order->paid_amount ?: $order->total);
+            }
         }
         // Parcels a store cancelled earlier already gave their share back.
         $reward = round($reward - $this->parcelCreditsIn($order, 'reward'), 2);
         $withdrawable = round($withdrawable - $this->parcelCreditsIn($order, 'withdrawable'), 2);
         $first = $this->credit($order->customer, $order, 'cancellation_credit', $reward, "Cancellation credit for order {$order->order_number}", "order:{$order->id}:cancellation:reward", 'reward');
         $second = $this->credit($order->customer, $order, 'cancellation_credit', $withdrawable, "Cancellation credit for order {$order->order_number}", "order:{$order->id}:cancellation:withdrawable", 'withdrawable');
+
         return $first ?? $second;
+    }
+
+    /** Reverse the whole-order cancellation credit when staff reopen it. */
+    public function reverseCancellationCredit(Order $order): void
+    {
+        if (! $order->customer_id) {
+            return;
+        }
+
+        CustomerWalletTransaction::query()
+            ->where('customer_id', $order->customer_id)
+            ->where('order_id', $order->id)
+            ->where('kind', 'cancellation_credit')
+            ->whereIn('source_key', ["order:{$order->id}:cancellation:reward", "order:{$order->id}:cancellation:withdrawable"])
+            ->lockForUpdate()
+            ->get()
+            ->each(function (CustomerWalletTransaction $credit) use ($order): void {
+                CustomerWalletTransaction::firstOrCreate(
+                    ['source_key' => "{$credit->source_key}:reversal"],
+                    [
+                        'customer_id' => $credit->customer_id,
+                        'order_id' => $order->id,
+                        'type' => 'debit',
+                        'kind' => 'cancellation_reversal',
+                        'bucket' => $credit->bucket,
+                        'amount' => $credit->amount,
+                        'description' => "Cancellation credit reversed for order {$order->order_number}",
+                    ],
+                );
+            });
     }
 
     /**
@@ -37,7 +72,9 @@ class WalletLedgerService
     public function parcelCancellationCredit(Order $order, OrderStoreGroup $group): ?CustomerWalletTransaction
     {
         $amount = round((float) $group->prepaid_amount, 2);
-        if ($amount <= 0 || !$order->customer_id) return null;
+        if ($amount <= 0 || ! $order->customer_id) {
+            return null;
+        }
         $manualPaid = in_array($order->payment_method_code, Order::MANUAL_PAYMENT_CODES, true) && $order->payment_received_at
             ? min((float) ($order->paid_amount ?? 0), max(0, (float) $order->total - (float) ($order->wallet_amount ?? 0)))
             : 0.0;
@@ -46,6 +83,7 @@ class WalletLedgerService
         $description = "Cancellation credit for parcel {$group->number}";
         $first = $this->credit($order->customer, $order, 'cancellation_credit', round($amount - $withdrawable, 2), $description, "order:{$order->id}:parcel:{$group->id}:cancellation:reward", 'reward');
         $second = $this->credit($order->customer, $order, 'cancellation_credit', $withdrawable, $description, "order:{$order->id}:parcel:{$group->id}:cancellation:withdrawable", 'withdrawable');
+
         return $first ?? $second;
     }
 
@@ -63,6 +101,7 @@ class WalletLedgerService
             $parcel = (int) explode(':', $row->source_key)[3];
             $credited[$parcel] = round(($credited[$parcel] ?? 0) + (float) $row->amount, 2);
         }
+
         return $credited;
     }
 
@@ -85,6 +124,7 @@ class WalletLedgerService
     public function reviewReward(Customer $customer, Review $review, float $amount): ?CustomerWalletTransaction
     {
         $order = $review->orderItem?->order;
+
         return $this->credit($customer, $order, 'review_reward', $amount, 'Reward for an approved review', "review:{$review->id}", 'reward');
     }
 
@@ -95,7 +135,9 @@ class WalletLedgerService
 
     public function refundCredit(ReturnRequest $return, float $amount): void
     {
-        if ($amount <= 0 || !$return->customer_id) return;
+        if ($amount <= 0 || ! $return->customer_id) {
+            return;
+        }
         $order = $return->order;
         $manualPaid = 0.0;
         if ($order && in_array($order->payment_method_code, Order::MANUAL_PAYMENT_CODES, true) && $order->payment_received_at) {
@@ -110,13 +152,18 @@ class WalletLedgerService
 
     private function credit(?Customer $customer, ?Order $order, string $kind, float $amount, string $description, string $sourceKey, string $bucket, ?int $returnRequestId = null): ?CustomerWalletTransaction
     {
-        if (!$customer || $amount <= 0) return null;
+        if (! $customer || $amount <= 0) {
+            return null;
+        }
         $transaction = CustomerWalletTransaction::firstOrCreate(
             ['customer_id' => $customer->id, 'kind' => $kind, 'source_key' => $sourceKey],
             ['order_id' => $order?->id, 'return_request_id' => $returnRequestId, 'type' => 'credit', 'bucket' => $bucket, 'amount' => $amount, 'description' => $description],
         );
         // A retry returns the existing row, so it cannot repeat the bell event.
-        if ($transaction->wasRecentlyCreated) app(CustomerNotificationService::class)->walletCredit($transaction);
+        if ($transaction->wasRecentlyCreated) {
+            app(CustomerNotificationService::class)->walletCredit($transaction);
+        }
+
         return $transaction;
     }
 }

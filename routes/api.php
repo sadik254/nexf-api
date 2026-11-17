@@ -289,6 +289,7 @@ Route::prefix('admin')->group(function () {
     Route::middleware(['sanctum.type:admin', 'perm:orders.manage'])->post('/orders/bulk-ship', [OrderController::class, 'bulkShipAdmin']);
     Route::middleware(['sanctum.type:admin', 'perm:orders.manage'])->get('/orders/{order}', [OrderController::class, 'showAdmin']);
     Route::middleware(['sanctum.type:admin', 'perm:orders.manage'])->post('/orders/{order}', [OrderController::class, 'updateStatus']);
+    Route::middleware(['sanctum.type:admin', 'perm:orders.manage'])->post('/orders/{order}/status', [OrderController::class, 'overrideStatus']);
     Route::middleware(['sanctum.type:admin', 'perm:orders.manage'])->post('/orders/{order}/items/{item}/fulfillment', [OrderController::class, 'fulfillAdminItem']);
     Route::middleware(['sanctum.type:admin', 'perm:orders.manage'])->post('/orders/{order}/groups/{group}/fulfillment', [OrderController::class, 'fulfillAdminGroup']);
     Route::middleware(['sanctum.type:admin', 'perm:orders.manage'])->post('/orders/{order}/items/{item}/reconcile-return', [OrderController::class, 'reconcileReturn']);
