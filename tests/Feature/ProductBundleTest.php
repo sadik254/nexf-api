@@ -7,6 +7,7 @@ use App\Models\ProductBundle;
 use App\Models\ProductCategory;
 use App\Models\ProductVariation;
 use App\Models\ProductLot;
+use App\Models\Admin;
 use App\Models\Customer;
 use App\Models\Coupon;
 use App\Models\PaymentMethod;
@@ -93,6 +94,44 @@ class ProductBundleTest extends TestCase
         $this->assertSame('2 pcs', $order['items'][0]['bundle_label']);
         $this->assertDatabaseHas('product_lots', ['id' => ProductLot::where('variation_id', $red->id)->value('id'), 'quantity_remaining' => 4]);
         $this->assertDatabaseHas('product_lots', ['id' => ProductLot::where('variation_id', $blue->id)->value('id'), 'quantity_remaining' => 4]);
+    }
+
+    public function test_an_admin_can_edit_an_order_with_a_combo_line_without_losing_its_snapshot_or_stock(): void
+    {
+        $category = ProductCategory::create(['name' => 'Admin edit combos', 'slug' => 'admin-edit-combos']);
+        $product = Product::create(['category_id' => $category->id, 'name' => 'Combo book', 'slug' => 'combo-book', 'product_type' => 'variable', 'status' => 'active', 'option_groups' => [[
+            'key' => 'design', 'label' => 'Design', 'display_type' => 'button', 'values' => [['value' => 'birds', 'label' => 'Birds'], ['value' => 'flowers', 'label' => 'Flowers']],
+        ]]]);
+        $birds = ProductVariation::create(['product_id' => $product->id, 'attributes' => ['design' => 'birds'], 'default_selling_price' => 100, 'is_active' => true]);
+        $flowers = ProductVariation::create(['product_id' => $product->id, 'attributes' => ['design' => 'flowers'], 'default_selling_price' => 100, 'is_active' => true]);
+        foreach ([$birds, $flowers] as $variation) ProductLot::create(['variation_id' => $variation->id, 'lot_number' => "EDIT-{$variation->id}", 'buying_price' => 30, 'selling_price' => 100, 'quantity' => 5, 'quantity_remaining' => 5]);
+        app(ProductBundleService::class)->replace($product, [['label' => 'Two-book set', 'mode' => 'pick', 'size' => 2, 'price' => 150]]);
+        $bundle = $product->bundles()->sole();
+        $customer = Customer::create(['name' => 'Editor buyer', 'email' => 'editor-buyer@example.test', 'phone' => '01700000003', 'password' => 'password123']);
+        $payment = PaymentMethod::create(['name' => 'Cash on Delivery', 'code' => 'cod', 'is_active' => true]);
+        $shipping = ShippingMethod::create(['name' => 'Outside Dhaka', 'code' => 'outside_dhaka', 'charge' => 20, 'currency' => 'BDT', 'is_active' => true]);
+        $pieces = [['variation_id' => $birds->id, 'quantity' => 1], ['variation_id' => $flowers->id, 'quantity' => 1]];
+        $customerToken = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+        $order = $this->withToken($customerToken)->postJson('/api/customers/orders', [
+            'items' => [['product_id' => $product->id, 'bundle_id' => $bundle->id, 'bundle_items' => $pieces, 'quantity' => 1]],
+            'payment_method_id' => $payment->id, 'shipping_method_id' => $shipping->id, 'shipping_name' => 'Editor buyer', 'shipping_phone' => '01700000003', 'shipping_address' => 'Dhaka',
+        ])->assertCreated()->json('order');
+        $admin = Admin::create(['name' => 'Admin', 'email' => 'combo-edit-admin@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+
+        $updated = $this->withToken($admin->createToken('test', ['admin'])->plainTextToken)->postJson("/api/admin/orders/{$order['id']}", [
+            'customer_id' => $customer->id,
+            'items' => [['product_id' => $product->id, 'bundle_id' => $bundle->id, 'bundle_items' => $pieces, 'quantity' => 1]],
+            'payment_method_id' => $payment->id, 'shipping_method_id' => $shipping->id,
+            'shipping_name' => 'Editor buyer', 'shipping_phone' => '01700000003', 'shipping_address' => 'Dhaka',
+        ])->assertOk()->json('order');
+
+        $line = $updated['items'][0];
+        $this->assertSame('2 pcs', $line['bundle_label']);
+        $this->assertSame($bundle->id, $line['bundle_source_id']);
+        $this->assertSame('150.00', $line['line_subtotal']);
+        $this->assertCount(2, $line['bundle_items']);
+        $this->assertDatabaseHas('product_lots', ['id' => ProductLot::where('variation_id', $birds->id)->value('id'), 'quantity_remaining' => 4]);
+        $this->assertDatabaseHas('product_lots', ['id' => ProductLot::where('variation_id', $flowers->id)->value('id'), 'quantity_remaining' => 4]);
     }
 
     public function test_coupon_validation_keeps_combo_data_and_parent_categories_apply_to_children(): void

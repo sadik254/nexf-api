@@ -483,8 +483,8 @@ class OrderController extends Controller
             $locked->storeGroups()->whereNotIn('id', $storeParcels->pluck('id'))->delete();
 
             $shippingLines = [];
-            foreach ($nexfData as $itemData) {
-                [$product, $lineSubtotal] = $this->addEditedLine($locked, $itemData, $actor, $itemFulfillmentState, $keepRequest);
+            foreach ($nexfData as $lineIndex => $itemData) {
+                [$product, $lineSubtotal] = $this->addEditedLine($locked, $itemData, $actor, $itemFulfillmentState, $keepRequest, field: "items.{$lineIndex}");
                 $shippingLines[] = ['product' => $product, 'subtotal' => $lineSubtotal];
             }
 
@@ -863,8 +863,8 @@ class OrderController extends Controller
                 $oldItem->delete();
             }
             $subtotal = 0.0;
-            foreach ($data['items'] as $itemData) {
-                [, $lineSubtotal] = $this->addEditedLine($locked, $itemData, $actor, $state, false, $sellerIds, ['store_group_id' => $parcel->id]);
+            foreach ($data['items'] as $lineIndex => $itemData) {
+                [, $lineSubtotal] = $this->addEditedLine($locked, $itemData, $actor, $state, false, $sellerIds, ['store_group_id' => $parcel->id], "items.{$lineIndex}");
                 $subtotal = round($subtotal + $lineSubtotal, 2);
             }
             $discount = $this->manualDiscountAmount($subtotal, $data['manual_discount_kind'] ?? null, (float) ($data['manual_discount_value'] ?? 0));
@@ -1569,7 +1569,7 @@ class OrderController extends Controller
      * variation, take the stock (unless the order waits on a stock request) and
      * create the line. `$sellerIds`, when given, limits whose products it takes.
      */
-    private function addEditedLine(Order $order, array $itemData, $actor, string $state, bool $keepRequest, ?array $sellerIds = null, array $attributes = []): array
+    private function addEditedLine(Order $order, array $itemData, $actor, string $state, bool $keepRequest, ?array $sellerIds = null, array $attributes = [], string $field = 'items'): array
     {
         $product = Product::query()->with('seller')->availableForSale()->find($itemData['product_id']);
         if (!$product || ($product->seller_id !== null && (!$product->seller || $product->seller->status !== 'approved' || !$product->seller->is_active))) {
@@ -1580,17 +1580,24 @@ class OrderController extends Controller
         }
         $quantity = (int) $itemData['quantity'];
         $variation = null;
-        if ($product->product_type === 'variable' && empty($itemData['variation_id'])) {
+        $resolvedBundle = $this->bundles->resolve($product, $itemData, true, $field);
+        $bundle = $resolvedBundle['bundle'] ?? null;
+        $bundleComponents = $resolvedBundle['components'] ?? [];
+        $bundleUnitPrice = (float) ($resolvedBundle['unitPrice'] ?? 0);
+        $bundleLabel = $resolvedBundle['label'] ?? null;
+        if (!$bundle && $product->product_type === 'variable' && empty($itemData['variation_id'])) {
             throw ValidationException::withMessages(['items' => ["A variation must be selected for {$product->name}."]]);
         }
-        if ($product->product_type === 'simple' && !empty($itemData['variation_id'])) {
+        if (!$bundle && $product->product_type === 'simple' && !empty($itemData['variation_id'])) {
             throw ValidationException::withMessages(['items' => ["{$product->name} does not have purchasable variations."]]);
         }
-        if (!empty($itemData['variation_id'])) {
+        if (!$bundle && !empty($itemData['variation_id'])) {
             $variation = ProductVariation::query()->where('product_id', $product->id)->where('is_active', true)->find($itemData['variation_id']);
             if (!$variation) throw ValidationException::withMessages(['items' => ["Selected variation for {$product->name} is unavailable."]]);
         }
-        if ($keepRequest) {
+        if ($bundle) {
+            $result = $this->consumeBundle($product, $bundleComponents, $quantity, $actor, $keepRequest, $order->id, $bundleUnitPrice);
+        } elseif ($keepRequest) {
             $revenue = round($this->inventory->unitSellingPrice($product, $variation) * $quantity, 2);
             $result = ['allocations' => [], 'totals' => ['cost' => 0.0, 'revenue' => $revenue, 'profit' => $revenue]];
         } elseif ($variation) {
@@ -1598,7 +1605,7 @@ class OrderController extends Controller
         } else {
             $result = $this->inventory->consumeProduct($product, $quantity, $actor, 'order_sale', ['order_id' => $order->id]);
         }
-        $lineSubtotal = (float) $result['totals']['revenue'];
+        $lineSubtotal = $bundle ? round($bundleUnitPrice * $quantity, 2) : (float) $result['totals']['revenue'];
         $lineCost = (float) $result['totals']['cost'];
         $order->items()->create([
             'product_id' => $product->id, 'variation_id' => $variation?->id, 'seller_id' => $product->seller_id,
@@ -1606,6 +1613,9 @@ class OrderController extends Controller
             'product_gallery' => $product->gallery, 'product_image_variants' => $product->image_variants,
             'sku' => $variation?->sku, 'variation_attributes' => $variation?->attributes, 'quantity' => $quantity,
             'variation_labels' => $this->variationLabels($product, $variation), 'variation_image' => $variation?->image_url,
+            'bundle_label' => $bundleLabel, 'bundle_source_id' => $bundle?->id, 'bundle_source_label' => $bundle?->label,
+            'bundle_source_size' => $bundle?->size, 'bundle_source_price' => $bundle?->price,
+            'bundle_items' => $bundle ? $this->bundleSnapshot($product, $bundleComponents) : null,
             'unit_selling_price' => round($lineSubtotal / $quantity, 2), 'unit_buying_price' => round($lineCost / $quantity, 2),
             'line_subtotal' => $lineSubtotal, 'line_cost' => $lineCost, 'line_profit' => (float) $result['totals']['profit'], 'commission_rate' => $product->seller?->commission_rate,
             'lot_allocations' => $result['allocations'], 'fulfillment_status' => $state, 'awaiting_stock' => $keepRequest,
@@ -1613,12 +1623,20 @@ class OrderController extends Controller
         return [$product, $lineSubtotal];
     }
 
-    /** Lines (order items or submitted lines) as "product:variation" => quantity, to tell whether a parcel's lines changed. */
+    /** Lines (order items or submitted lines) as product/variation-or-combo => quantity, to tell whether a parcel's lines changed. */
     private function lineKeys($items): array
     {
         $keys = [];
         foreach ($items as $item) {
-            $key = data_get($item, 'product_id') . ':' . (data_get($item, 'variation_id') ?? '');
+            $bundleId = data_get($item, 'bundle_id') ?? data_get($item, 'bundle_source_id');
+            if ($bundleId) {
+                $pieces = collect(data_get($item, 'bundle_items', []))
+                    ->map(fn (array $piece) => (int) ($piece['variation_id'] ?? 0).':'.(int) ($piece['quantity'] ?? 0))
+                    ->sort()->values()->implode(',');
+                $key = data_get($item, 'product_id').":bundle:{$bundleId}:{$pieces}";
+            } else {
+                $key = data_get($item, 'product_id') . ':' . (data_get($item, 'variation_id') ?? '');
+            }
             $keys[$key] = ($keys[$key] ?? 0) + (int) data_get($item, 'quantity');
         }
         ksort($keys);
