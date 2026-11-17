@@ -39,7 +39,7 @@ class CustomerNotificationService
     {
         $amount = $this->money($withdrawal->amount);
         [$type, $title, $body] = $withdrawal->status === 'paid'
-            ? ['withdraw_paid', "Withdrawal {$withdrawal->reference} paid", "{$amount} sent".($withdrawal->transaction_id ? " (transaction {$withdrawal->transaction_id})." : '.')]
+            ? ['withdraw_paid', "Withdrawal {$withdrawal->reference} paid", $withdrawal->transaction_id ? "{$amount} sent. Transaction ID {$withdrawal->transaction_id}" : "{$amount} sent."]
             : ['withdraw_rejected', "Withdrawal {$withdrawal->reference} declined", "{$amount} is back in your NEXF Balance.".($withdrawal->admin_note ? ' '.$withdrawal->admin_note : '')];
         $this->send($withdrawal->customer_id, $type, $title, $body, ['reference' => $withdrawal->reference, 'url' => '/account/balance']);
     }

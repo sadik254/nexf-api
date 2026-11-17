@@ -52,7 +52,7 @@ class CustomerNotificationTest extends TestCase
         $rejected = $this->withToken($customerToken)->postJson('/api/customers/withdrawals', ['amount' => 40, 'method' => 'bKash', 'account_details' => '01700000000'])->assertCreated()->json('id');
         $this->withToken($adminToken)->postJson("/api/admin/withdrawals/{$paid}", ['status' => 'paid', 'transaction_id' => 'TX9'])->assertOk();
         $this->withToken($adminToken)->postJson("/api/admin/withdrawals/{$rejected}", ['status' => 'rejected'])->assertOk();
-        $this->assertSame('৳60 sent (transaction TX9).', CustomerInSiteNotification::where('type', 'withdraw_paid')->value('body'));
+        $this->assertSame('৳60 sent. Transaction ID TX9', CustomerInSiteNotification::where('type', 'withdraw_paid')->value('body'));
         $this->assertSame('৳40 is back in your NEXF Balance.', CustomerInSiteNotification::where('type', 'withdraw_rejected')->value('body'));
 
         $this->withToken($customerToken)->getJson('/api/customers/notifications')->assertOk()->assertJsonPath('unread_count', 7);
