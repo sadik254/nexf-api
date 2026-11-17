@@ -176,7 +176,6 @@ class ReturnRequestController extends Controller
             // NEXF can overrule a store's rejection once the customer escalates it.
             'rejected' => $actor instanceof Admin && $returnRequest->escalated_at ? ['approved'] : []];
         $next = $data['status'];
-        if ($actor instanceof Seller && $next === 'refunded') abort(403, 'Only an administrator can record a completed refund.');
         if (!in_array($next, $allowed[$returnRequest->status] ?? [], true)) throw ValidationException::withMessages(['status' => 'Invalid return transition.']);
         if ($next === 'in_transit' && empty($data['return_tracking'])) throw ValidationException::withMessages(['return_tracking' => 'Enter the courier tracking code before marking this return in transit.']);
         if ($next === 'exchanged') {

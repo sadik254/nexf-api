@@ -197,7 +197,7 @@ class PartnerPayoutController extends Controller
                 if ((float) $group->cod_amount > 0) $rows->push($row('cod-' . $group->id, 'cod', $group->number, $group->delivered_at, 0, (float) $group->cod_amount, false));
             }
             // Refunds NEXF paid out on the store's returns come back off its earnings.
-            $refunds = ReturnRequest::query()->with('item:id,commission_rate')->where('seller_id', $owner->id)->where('status', 'refunded')->whereNotNull('completed_at')->get();
+            $refunds = ReturnRequest::query()->with('item:id,commission_rate')->where('seller_id', $owner->id)->where('status', 'refunded')->where('refund_to', 'balance')->whereNotNull('completed_at')->get();
             foreach ($refunds as $return) {
                 $refund = (float) $return->refund_amount;
                 $rows->push($row('refund-' . $return->id, 'refund', $return->reference, $return->completed_at, -$refund, -$refund * $rate($return->item?->commission_rate), false));

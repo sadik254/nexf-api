@@ -32,9 +32,8 @@ class ReturnRequestTest extends TestCase
         $sellerToken = $seller->createToken('test', ['seller:basic'])->plainTextToken;
         $this->withToken($sellerToken)->getJson('/api/seller/return-requests')->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.item.variation_image', 'https://media.test/coat-red.jpg');
         $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$id}", ['status' => 'approved'])->assertOk()->assertJsonPath('status', 'approved');
-        $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$id}", ['status' => 'refunded', 'refund_amount' => 100, 'outcome_reference' => 'TX-1'])->assertForbidden();
         $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$id}", ['status' => 'received'])->assertOk()->assertJsonPath('status', 'received');
-        $this->withToken($admin->createToken('test', ['admin:orders'])->plainTextToken)->postJson("/api/admin/return-requests/{$id}", ['status' => 'refunded', 'refund_amount' => 100])->assertOk()->assertJsonPath('status', 'refunded');
+        $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$id}", ['status' => 'refunded', 'refund_amount' => 100, 'outcome_reference' => 'TX-1'])->assertOk()->assertJsonPath('status', 'refunded');
     }
 
     public function test_completed_refund_creates_wallet_credit_and_withdrawal_is_reserved(): void
