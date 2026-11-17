@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Admin;
 use App\Models\Customer;
+use App\Models\OrderItem;
 use App\Models\OrderStoreGroup;
 use App\Models\PaymentMethod;
 use App\Models\Product;
@@ -49,6 +50,29 @@ class SubOrderTest extends TestCase
         $this->assertSame('0.00', $groups['nexf']->cod_amount);
         $this->assertSame('50.00', $groups['seller']->prepaid_amount);
         $this->assertSame('270.00', $groups['seller']->cod_amount);
+    }
+
+    public function test_fulfillment_names_the_other_line_that_is_holding_a_parcel_back(): void
+    {
+        [$customer, $house, , , $admin] = $this->fixtures();
+        $order = $this->place($customer, [[$house, 1]])->assertCreated()->json('order');
+        $group = OrderStoreGroup::query()->where('order_id', $order['id'])->sole();
+        $first = $group->items()->sole();
+        OrderItem::create([
+            'order_id' => $order['id'], 'store_group_id' => $group->id, 'product_id' => $house->id,
+            'product_name' => 'Blue T-shirt', 'product_slug' => 'blue-t-shirt', 'quantity' => 1,
+            'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 100, 'line_cost' => 50, 'line_profit' => 50,
+            'fulfillment_status' => 'pending', 'variation_labels' => [['group' => 'Size', 'value' => 'M', 'swatch' => null]],
+        ]);
+        $token = $admin->createToken('t', ['admin:orders'])->plainTextToken;
+        $itemUrl = "/api/admin/orders/{$order['id']}/items/{$first->id}/fulfillment";
+        $expected = 'Blue T-shirt (M) is still pending. Confirm it first.';
+
+        $this->withToken($token)->postJson($itemUrl, ['status' => 'confirmed'])->assertOk();
+        $this->withToken($token)->postJson($itemUrl, ['status' => 'packed'])
+            ->assertUnprocessable()->assertJsonPath('errors.status.0', $expected);
+        $this->withToken($token)->postJson("/api/admin/orders/{$order['id']}/groups/{$group->id}/fulfillment", ['status' => 'packed'])
+            ->assertUnprocessable()->assertJsonPath('errors.status.0', $expected);
     }
 
     public function test_a_seller_edits_only_its_own_unshipped_parcel_and_funds_its_discount(): void

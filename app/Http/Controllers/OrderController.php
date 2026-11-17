@@ -1249,6 +1249,12 @@ class OrderController extends Controller
             $moving = $items->where('fulfillment_status', $from);
             $behind = $items->first(fn (OrderItem $item) => ($i = array_search($item->fulfillment_status, $ladder, true)) !== false && $i < $target - 1);
             if ($moving->isEmpty() || $behind) {
+                if ($behind) {
+                    $behindRank = array_search($behind->fulfillment_status, $ladder, true);
+                    $next = $ladder[($behindRank === false ? 0 : $behindRank) + 1] ?? null;
+                    $verb = ['confirmed' => 'Confirm', 'packed' => 'Pack', 'shipped' => 'Ship', 'delivered' => 'Deliver'][$next] ?? ucfirst((string) $next);
+                    throw ValidationException::withMessages(['status' => ["{$this->fulfillmentLineLabel($behind)} is still {$behind->fulfillment_status}. {$verb} it first."]]);
+                }
                 $at = $only?->fresh()->fulfillment_status ?? ($behind?->fulfillment_status ?? $items->first()->fulfillment_status);
                 $next = $ladder[(array_search($at, $ladder, true) ?: 0) + 1] ?? null;
                 throw ValidationException::withMessages(['status' => [$only ? "Item must transition from {$at} to {$next}." : "Parcel must move from {$at} to {$next} first."]]);
@@ -1330,6 +1336,17 @@ class OrderController extends Controller
             'message' => 'Item fulfilment updated successfully.',
             'order' => $order,
         ]);
+    }
+
+    /** The order-line snapshot is the stable source for a fulfillment error. */
+    private function fulfillmentLineLabel(OrderItem $item): string
+    {
+        $variant = collect($item->variation_labels ?? [])->map(function ($label) {
+            if (! is_array($label)) return null;
+            return $label['value'] ?? null;
+        })->filter()->implode(', ');
+
+        return $variant === '' ? $item->product_name : "{$item->product_name} ({$variant})";
     }
 
     private function takeAwaitedStock(OrderItem $item, $actor): void
