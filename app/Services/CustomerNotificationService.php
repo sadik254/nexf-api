@@ -23,7 +23,7 @@ class CustomerNotificationService
             'approved' => [strtolower($label).'_approved', "{$label} {$return->reference} approved", 'We approved your request.'.$note],
             'rejected' => [strtolower($label).'_rejected', "{$label} {$return->reference} declined", "We couldn't accept this request.".$note],
             'returning' => [strtolower($label).'_returning', "{$label} {$return->reference} pickup arranged", "We're arranging the return of your item."],
-            'in_transit' => [strtolower($label).'_in_transit', "{$label} {$return->reference} on its way back", 'Your item is on its way back to us'.($return->return_tracking ? " (tracking {$return->return_tracking})." : '.')],
+            'in_transit' => [strtolower($label).'_in_transit', "{$label} {$return->reference} on its way back", 'Your item is on its way back to us.'],
             'received' => [strtolower($label).'_received', "{$label} {$return->reference} item received", 'We received your returned item.'],
             'cancelled' => [strtolower($label).'_cancelled', "{$label} {$return->reference} cancelled", 'This request was cancelled.'.$note],
             default => [null, null, null],

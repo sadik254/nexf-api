@@ -7,7 +7,9 @@ use App\Models\Customer;
 use App\Models\CustomerInSiteNotification;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\ReturnRequest;
 use App\Models\Seller;
+use App\Services\CustomerNotificationService;
 use App\Services\OrderNotificationService;
 use App\Services\WalletLedgerService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -93,6 +95,21 @@ class CustomerNotificationTest extends TestCase
             $this->assertSame($title, $notification->title);
             $this->assertSame($body, $notification->body);
         }
+    }
+
+    public function test_return_in_transit_notification_never_includes_its_tracking_value(): void
+    {
+        $customer = Customer::create(['name' => 'Buyer', 'email' => 'bell-return-tracking@example.test', 'password' => 'password123']);
+        $order = Order::create(['order_number' => 'BELL-RETURN', 'customer_id' => $customer->id, 'status' => 'delivered', 'subtotal' => 100, 'total' => 100, 'shipping_charge' => 0, 'shipping_name' => 'Buyer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka']);
+        $item = OrderItem::create(['order_id' => $order->id, 'product_name' => 'Coat', 'quantity' => 1, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 100, 'line_cost' => 50, 'line_profit' => 50, 'fulfillment_status' => 'delivered']);
+        $return = ReturnRequest::create(['order_id' => $order->id, 'order_item_id' => $item->id, 'customer_id' => $customer->id, 'reference' => 'RET-TRACKING', 'type' => 'refund', 'status' => 'in_transit', 'quantity' => 1, 'reason' => 'Damaged', 'return_tracking' => 'https://steadfast.com.bd/tl/private-tracking-link']);
+
+        app(CustomerNotificationService::class)->returnUpdated($return);
+
+        $notification = CustomerInSiteNotification::sole();
+        $this->assertSame('Return RET-TRACKING on its way back', $notification->title);
+        $this->assertSame('Your item is on its way back to us.', $notification->body);
+        $this->assertStringNotContainsString('steadfast', $notification->body);
     }
 
     public function test_opening_a_customer_bell_lazily_prunes_expired_notifications(): void
