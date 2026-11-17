@@ -52,7 +52,10 @@ class OrderLifecycleTest extends TestCase
             'shipping_charge' => 140, 'shipping_method_name' => 'Inside Dhaka', 'coupon_code' => 'NEW50', 'discount_total' => 50,
             'wallet_amount' => 40, 'total' => 3189, 'shipping_name' => 'Buyer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka',
         ]);
-        OrderItem::create(['order_id' => $order->id, 'seller_id' => $seller->id, 'product_name' => 'Store item', 'quantity' => 1, 'unit_selling_price' => 999, 'unit_buying_price' => 500, 'line_subtotal' => 999, 'line_cost' => 500, 'line_profit' => 499]);
+        OrderItem::create(['order_id' => $order->id, 'seller_id' => $seller->id, 'product_name' => 'A very long store item title that should be clipped on one email line', 'quantity' => 1, 'unit_selling_price' => 999, 'unit_buying_price' => 500, 'line_subtotal' => 999, 'line_cost' => 500, 'line_profit' => 499,
+            'bundle_label' => '15 pc', 'bundle_source_label' => '15 pc combo', 'bundle_source_size' => 3,
+            'bundle_items' => [['labels' => [['group' => 'Books', 'value' => 'Birds']], 'quantity' => 2], ['labels' => [['group' => 'Books', 'value' => 'Flowers']], 'quantity' => 1]],
+        ]);
         OrderStoreGroup::create(['order_id' => $order->id, 'number' => 1, 'seller_id' => $seller->id, 'ships_by' => 'seller', 'status' => 'pending', 'store_name' => $seller->store_name, 'subtotal' => 999, 'shipping_method_name' => 'Inside Dhaka', 'shipping_charge' => 70, 'discount_share' => 20, 'prepaid_amount' => 30, 'cod_amount' => 1019]);
 
         $customerHtml = (new OrderNotificationMail($order, 'Order', 'Received'))->render();
@@ -60,6 +63,9 @@ class OrderLifecycleTest extends TestCase
         $this->assertStringContainsString('Coupon (NEW50)', $customerHtml);
         $this->assertStringContainsString('NEXF Balance', $customerHtml);
         $this->assertStringContainsString('৳3,149.00', $customerHtml);
+        $this->assertStringContainsString('15 pc combo: Birds ×2, Flowers', $customerHtml);
+        $this->assertStringContainsString('Qty: 1', $customerHtml);
+        $this->assertStringContainsString('text-overflow:ellipsis', $customerHtml);
 
         $sellerHtml = (new OrderNotificationMail($order, 'Order', 'Received', 'seller', $seller->id))->render();
         $this->assertStringContainsString('Paid in advance', $sellerHtml);

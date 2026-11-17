@@ -10,6 +10,23 @@
         'return_pending' => ['#fff7ed', '#c2410c'],
         default => ['#f4f4f5', '#3f3f46'],
     };
+    // Combo lines have no single variation. Their immutable piece snapshot is
+    // the same source the order page and invoice use to describe the purchase.
+    $comboVariant = function ($item) {
+        if (! $item->bundle_label) return '';
+        $pieces = collect($item->bundle_items ?? [])->map(function ($piece) {
+            $labels = collect($piece['labels'] ?? [])->pluck('value')->filter()->implode(' / ');
+            if ($labels === '') return null;
+            $quantity = (int) ($piece['quantity'] ?? 1);
+            return $labels.($quantity > 1 ? ' ×'.$quantity : '');
+        })->filter()->values();
+        $pieceCount = collect($item->bundle_items ?? [])->sum(fn ($piece) => (int) ($piece['quantity'] ?? 0));
+        $label = $pieceCount === (int) ($item->bundle_source_size ?? 0)
+            ? ($item->bundle_source_label ?: $item->bundle_label)
+            : $item->bundle_label;
+
+        return $pieces->isEmpty() ? $label : $label.': '.$pieces->implode(', ');
+    };
     // Lines snapshot raw option keys ({"vg-1": "white"}); the product's option groups name them ("Color: White").
     $variant = function ($item) {
         $attributes = $item->variation_attributes;
@@ -108,15 +125,15 @@
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 4px;">
         @foreach ($items as $item)
-            @php $variantText = $variant($item); @endphp
+            @php $variantText = $comboVariant($item) ?: $variant($item); @endphp
             <tr>
-                <td style="padding:12px 0;border-bottom:1px solid #e4e4e7;vertical-align:top;">
-                    <div style="font-size:14px;line-height:20px;font-weight:600;color:#09090b;">{{ $item->product_name }}</div>
+                <td style="padding:12px 0;border-bottom:1px solid #e4e4e7;vertical-align:top;width:100%;max-width:0;">
+                    <div style="font-size:14px;line-height:20px;font-weight:600;color:#09090b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ $item->product_name }}</div>
                     <div style="font-size:13px;line-height:18px;color:#71717a;">
-                        @if ($variantText){{ $variantText }} &middot; @endif Qty {{ $item->quantity }}
+                        @if ($variantText){{ $variantText }} &middot; @endif<span style="white-space:nowrap;">Qty: {{ $item->quantity }}</span>
                     </div>
                 </td>
-                <td align="right" style="padding:12px 0 12px 12px;border-bottom:1px solid #e4e4e7;vertical-align:top;white-space:nowrap;font-size:14px;line-height:20px;color:#09090b;">{{ $money($item->line_subtotal) }}</td>
+                <td align="right" style="padding:12px 0 12px 12px;border-bottom:1px solid #e4e4e7;vertical-align:top;width:1%;white-space:nowrap;font-size:14px;line-height:20px;color:#09090b;">{{ $money($item->line_subtotal) }}</td>
             </tr>
         @endforeach
     </table>
