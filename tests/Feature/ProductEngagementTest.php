@@ -12,6 +12,7 @@ use App\Models\ProductCategory;
 use App\Models\ProductQuestion;
 use App\Models\Review;
 use App\Models\Seller;
+use App\Models\SellerStaff;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -240,7 +241,7 @@ class ProductEngagementTest extends TestCase
         $this->getJson('/api/admin/product-questions?state=rejected')->assertOk()->assertJsonCount(1, 'data');
         $this->getJson("/api/store/products/{$product->slug}/questions")->assertOk()->assertJsonCount(0, 'data');
         $this->postJson("/api/admin/product-questions/{$question->id}/moderate", ['status' => 'approved'])->assertOk()->assertJsonPath('question.rejection_note', null);
-        $this->postJson("/api/admin/product-questions/{$question->id}", ['question' => 'Is this machine washable?', 'answer' => 'Yes, use cold water.'])->assertOk()->assertJsonPath('question.answered_by', 'Moderator');
+        $this->postJson("/api/admin/product-questions/{$question->id}", ['question' => 'Is this machine washable?', 'answer' => 'Yes, use cold water.'])->assertOk()->assertJsonPath('question.answered_by', 'Admin');
         $answeredAt = $question->fresh()->answered_at->toISOString();
         $this->travel(1)->day();
         $this->postJson("/api/admin/product-questions/{$question->id}", ['question' => 'Is this garment machine washable?', 'answer' => 'Yes, use cold water.'])->assertOk();
@@ -262,6 +263,19 @@ class ProductEngagementTest extends TestCase
         $product->update(['seller_id' => $seller->id]);
         $this->postJson("/api/seller/product-questions/{$question->id}", ['question' => 'Is this washable?', 'answer' => 'Yes, cold wash.'])->assertOk();
         $this->postJson("/api/seller/product-questions/{$question->id}/delete")->assertOk();
+    }
+
+    public function test_public_question_answers_show_the_store_or_admin_role_not_a_personal_name(): void
+    {
+        [$customer, $product] = $this->fixtures();
+        $seller = Seller::create(['seller_name' => 'Store owner', 'email' => 'question-staff-store@example.test', 'store_name' => 'Answer Store', 'store_slug' => 'answer-store', 'kyc_type' => 'nid', 'kyc_number' => 'staff-test', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
+        $product->update(['seller_id' => $seller->id]);
+        $staff = SellerStaff::create(['seller_id' => $seller->id, 'name' => 'Private staff name', 'email' => 'question-staff@example.test', 'password' => 'password123', 'status' => 'active']);
+        $question = ProductQuestion::create(['product_id' => $product->id, 'customer_id' => $customer->id, 'question' => 'Does staff identity stay private?', 'answer' => 'Yes.', 'answered_by_type' => 'seller_staff', 'answered_by_id' => $staff->id, 'answered_by_name' => $staff->name, 'answered_at' => now()]);
+
+        $this->getJson("/api/store/products/{$product->slug}/questions")
+            ->assertOk()->assertJsonPath('data.0.id', $question->id)
+            ->assertJsonPath('data.0.answered_by', 'Answer Store');
     }
 
     public function test_review_media_requires_owned_assets_and_delivered_items(): void

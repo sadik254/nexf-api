@@ -11,6 +11,7 @@ use App\Models\ProductQuestion;
 use App\Models\Review;
 use App\Models\ReviewLike;
 use App\Models\Seller;
+use App\Models\SellerStaff;
 use App\Models\Store;
 use App\Services\ConsoleNotificationService;
 use App\Services\WalletRewardService;
@@ -237,10 +238,15 @@ class ProductEngagementController extends Controller
             $answeredBy = Seller::find($question->answered_by_id)?->store_name;
         }
         if ($question->answered_by_type === 'seller_staff') {
-            $answeredBy = $question->answered_by_name;
+            $answeredBy = SellerStaff::find($question->answered_by_id)?->seller?->store_name;
         }
         if ($question->answered_by_type === 'admin') {
-            $answeredBy = Admin::find($question->answered_by_id)?->name ?? 'NEXF Lifestyle';
+            $answeredBy = match (Admin::find($question->answered_by_id)?->role) {
+                'super_admin' => 'Super Admin',
+                'moderator' => 'Moderator',
+                'editor' => 'Editor',
+                default => 'Admin',
+            };
         }
 
         return ['id' => $question->id, 'question' => $question->question, 'customer_name' => $question->customer?->name, 'answer' => $question->answer, 'answered_by' => $answeredBy, 'created_at' => $question->created_at?->toDateString(), 'answered_at' => $question->answered_at?->toDateString(), 'status' => $question->status, 'rejection_note' => $question->rejection_note, 'moderated_at' => $question->moderated_at?->toDateString()];
