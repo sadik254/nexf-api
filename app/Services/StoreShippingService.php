@@ -42,7 +42,9 @@ class StoreShippingService
             $memberKey = $productSellerId === null ? 'house' : "seller:{$productSellerId}";
             // Exchange replacements belong to the store that accepted the
             // return; they must not be folded into a shared-delivery parcel.
-            $deliveryGroup = $productSellerId === $forceIndividualSellerId ? null : ($membership[$memberKey] ?? null);
+            $deliveryGroup = $forceIndividualSellerId !== null && $productSellerId === $forceIndividualSellerId
+                ? null
+                : ($membership[$memberKey] ?? null);
             $billingSellerId = $deliveryGroup ? ($deliveryGroup->ships_from_seller_id === null ? null : (int) $deliveryGroup->ships_from_seller_id) : $productSellerId;
             $key = $deliveryGroup ? "delivery-group:{$deliveryGroup->id}" : $memberKey;
             $selectionKey = $billingSellerId === null ? 'house' : (string) $billingSellerId;

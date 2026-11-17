@@ -70,13 +70,21 @@ class SubOrderService
             if ((int) $item->store_group_id !== (int) $group->id) $item->update(['store_group_id' => $group->id]);
         }
 
+        // Existing invoice numbers are immutable. New parcels normally use the
+        // store code, but never let a malformed quote turn a duplicate into a
+        // database error that rejects the whole checkout.
+        $usedNumbers = $groups->pluck('number')->filter()->all();
         foreach ($groups as $group) {
+            if ($group->number !== null) continue;
             $code = $group->seller_id === null ? 'NEXF' : $sellers->get($group->seller_id)?->sku_prefix;
             $suffix = is_string($code) && preg_match('/^[A-Z0-9]{4}$/', $code) ? $code : 'S' . $group->seller_id;
+            $number = "{$order->order_number}-{$suffix}";
+            if (in_array($number, $usedNumbers, true)) $number .= "-{$group->id}";
             $group->update([
-                'number' => $group->number ?? "{$order->order_number}-{$suffix}",
+                'number' => $number,
                 'ships_by' => $group->seller_id === null ? 'nexf' : 'seller',
             ]);
+            $usedNumbers[] = $number;
         }
     }
 

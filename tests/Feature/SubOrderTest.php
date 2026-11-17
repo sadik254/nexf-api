@@ -194,6 +194,29 @@ class SubOrderTest extends TestCase
         $this->assertEquals(270, $ledger['balance']['available']);
     }
 
+    public function test_a_house_shared_delivery_group_merges_house_and_member_store_lines_into_one_parcel(): void
+    {
+        [$customer, $houseProduct, $sellerProduct, $seller] = $this->fixtures();
+        \App\Models\DeliveryGroup::create([
+            'name' => 'NEXF shared delivery',
+            'seller_ids' => [$seller->id],
+            'includes_house' => true,
+            'ships_from_seller_id' => null,
+        ]);
+
+        $order = $this->place($customer, [[$houseProduct, 1], [$sellerProduct, 1]])
+            ->assertCreated()
+            ->json('order');
+        $groups = OrderStoreGroup::query()->where('order_id', $order['id'])->get();
+
+        $this->assertCount(1, $groups);
+        $group = $groups->sole();
+        $this->assertSame('nexf', $group->ships_by);
+        $this->assertSame($order['order_number'].'-NEXF', $group->number);
+        $this->assertSame('20.00', $group->shipping_charge);
+        $this->assertSame(2, $group->items()->count());
+    }
+
     public function test_returns_route_to_the_shipping_store_and_can_be_escalated(): void
     {
         [$customer, , $sellerProduct, $seller, $admin] = $this->fixtures();
