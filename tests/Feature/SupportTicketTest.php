@@ -8,6 +8,7 @@ use App\Models\ConsoleNotification;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\ReturnRequest;
 use App\Models\Reseller;
 use App\Models\Seller;
 use App\Models\SellerStaff;
@@ -21,6 +22,21 @@ use Tests\TestCase;
 class SupportTicketTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_staff_resolving_a_ticket_just_reopened_after_return_completion_does_not_send_a_second_notice(): void
+    {
+        Mail::fake();
+        $admin = Admin::create(['name' => 'Admin', 'email' => 'return-ticket-admin@example.test', 'password' => 'password123', 'role' => 'super_admin']);
+        $customer = Customer::create(['name' => 'Buyer', 'email' => 'return-ticket-buyer@example.test', 'password' => 'password123']);
+        $order = Order::create(['order_number' => 'RETURN-TICKET', 'customer_id' => $customer->id, 'status' => 'delivered', 'subtotal' => 100, 'total' => 100, 'shipping_name' => 'Buyer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka']);
+        $item = OrderItem::create(['order_id' => $order->id, 'product_name' => 'Item', 'quantity' => 1, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 100, 'line_cost' => 50, 'line_profit' => 50, 'fulfillment_status' => 'delivered']);
+        $ticket = SupportTicket::create(['customer_id' => $customer->id, 'order_id' => $order->id, 'reference' => 'SUP-RETURN', 'category' => 'Order', 'subject' => 'Refund', 'status' => 'open']);
+        ReturnRequest::create(['order_id' => $order->id, 'order_item_id' => $item->id, 'customer_id' => $customer->id, 'support_ticket_id' => $ticket->id, 'reference' => 'RET-RETURN', 'type' => 'refund', 'status' => 'refunded', 'quantity' => 1, 'reason' => 'Damaged', 'refund_to' => 'balance', 'refund_amount' => 100, 'completed_at' => now()]);
+
+        $this->withToken($admin->createToken('admin', ['admin:basic'])->plainTextToken)->postJson("/api/admin/support-tickets/{$ticket->id}/resolve")->assertOk();
+
+        Mail::assertNothingSent();
+    }
 
     public function test_customer_seller_and_admin_only_see_their_tickets_and_can_reply(): void
     {

@@ -14,6 +14,7 @@ use App\Services\ConsoleNotificationService;
 use App\Services\ContactMessageCooldownService;
 use App\Services\CustomerNotificationService;
 use App\Services\GuestSupportReplyMailService;
+use App\Services\ReturnCompletionMailService;
 use App\Services\SupportTicketResolvedMailService;
 use App\Services\MediaUploadService;
 use App\Support\UploadFileRules;
@@ -246,10 +247,11 @@ class SupportTicketController extends Controller
         $actor = $this->actor($request);
         $this->authorizeTicket($actor, $ticket);
         $resolved = SupportTicket::query()->whereKey($ticket->id)->where('status', '!=', 'resolved')->update(['status' => 'resolved', 'resolved_at' => now()]) > 0;
-        if ($resolved && ! ($actor instanceof Customer)) {
+        $returnJustCompleted = $resolved && app(ReturnCompletionMailService::class)->suppressesRecentTicketResolution($ticket);
+        if ($resolved && ! ($actor instanceof Customer) && ! $returnJustCompleted) {
             app(CustomerNotificationService::class)->supportResolved($ticket);
         }
-        if ($resolved && ! ($actor instanceof Customer || $actor instanceof Reseller)) {
+        if ($resolved && ! ($actor instanceof Customer || $actor instanceof Reseller) && ! $returnJustCompleted) {
             app(SupportTicketResolvedMailService::class)->send($ticket->fresh());
         }
 

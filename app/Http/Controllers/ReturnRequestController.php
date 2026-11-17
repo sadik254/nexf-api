@@ -201,21 +201,19 @@ class ReturnRequestController extends Controller
         if (in_array($next, ['approved', 'rejected'], true)) $updates['reviewed_at'] = now();
         if ($next === 'received') $updates['received_at'] = now();
         if (in_array($next, ['refunded', 'exchanged'], true)) { $updates['completed_at'] = now(); $updates['outcome_reference'] = $data['outcome_reference'] ?? $returnRequest->outcome_reference; $updates['refund_amount'] = $data['refund_amount'] ?? null; }
-        $ticketResolved = DB::transaction(function () use ($returnRequest, $updates, $next) {
+        DB::transaction(function () use ($returnRequest, $updates, $next) {
             $returnRequest->update($updates);
             if ($next === 'refunded' && $returnRequest->refund_to === 'balance') {
                 app(\App\Services\WalletLedgerService::class)->refundCredit($returnRequest->fresh('order', 'customer'), (float) $updates['refund_amount']);
             }
             if (in_array($next, ['refunded', 'exchanged'], true) && $returnRequest->support_ticket_id) {
-                return SupportTicket::query()->whereKey($returnRequest->support_ticket_id)->where('status', '!=', 'resolved')->update(['status' => 'resolved', 'resolved_at' => now()]) > 0;
+                SupportTicket::query()->whereKey($returnRequest->support_ticket_id)->where('status', '!=', 'resolved')->update(['status' => 'resolved', 'resolved_at' => now()]);
             }
-            return false;
         });
-        app(\App\Services\CustomerNotificationService::class)->returnUpdated($returnRequest->fresh());
-        if ($ticketResolved) {
-            $ticket = SupportTicket::find($returnRequest->support_ticket_id);
-            app(\App\Services\CustomerNotificationService::class)->supportResolved($ticket);
-            app(\App\Services\SupportTicketResolvedMailService::class)->send($ticket);
+        $completed = $returnRequest->fresh();
+        app(\App\Services\CustomerNotificationService::class)->returnUpdated($completed);
+        if (in_array($next, ['refunded', 'exchanged'], true)) {
+            app(\App\Services\ReturnCompletionMailService::class)->send($completed);
         }
         return $this->show($request, $returnRequest);
     }

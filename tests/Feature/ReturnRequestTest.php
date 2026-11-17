@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Mail\NoticeMail;
 use App\Models\Admin;
 use App\Models\Customer;
 use App\Models\Order;
@@ -9,7 +10,9 @@ use App\Models\OrderItem;
 use App\Models\ReturnRequest;
 use App\Models\Seller;
 use App\Models\SupportTicket;
+use App\Services\ReturnCompletionMailService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 class ReturnRequestTest extends TestCase
@@ -18,6 +21,7 @@ class ReturnRequestTest extends TestCase
 
     public function test_customer_seller_and_admin_return_workflow_is_scoped(): void
     {
+        Mail::fake();
         $customer = Customer::create(['name' => 'Buyer', 'email' => 'return-buyer@example.test', 'password' => 'password123']);
         $other = Customer::create(['name' => 'Other', 'email' => 'return-other@example.test', 'password' => 'password123']);
         $seller = Seller::create(['seller_name' => 'Seller', 'email' => 'return-seller@example.test', 'store_name' => 'Store', 'store_slug' => 'return-store', 'kyc_type' => 'nid', 'kyc_number' => '1', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
@@ -27,6 +31,8 @@ class ReturnRequestTest extends TestCase
         $customerToken = $customer->createToken('test', ['customer:basic'])->plainTextToken;
         $payload = ['order_item_id' => $item->id, 'type' => 'refund', 'quantity' => 1, 'reason' => 'Wrong size'];
         $id = $this->withToken($customerToken)->postJson('/api/customers/return-requests', $payload)->assertCreated()->assertJsonPath('status', 'requested')->json('id');
+        $ticket = SupportTicket::create(['customer_id' => $customer->id, 'seller_id' => $seller->id, 'order_id' => $order->id, 'reference' => 'SUP-00001', 'category' => 'Order', 'subject' => 'Refund my coat', 'status' => 'open']);
+        ReturnRequest::whereKey($id)->update(['support_ticket_id' => $ticket->id]);
         $this->withToken($customerToken)->postJson('/api/customers/return-requests', $payload)->assertUnprocessable();
         $this->withToken($other->createToken('test', ['customer:basic'])->plainTextToken)->getJson("/api/customers/return-requests/{$id}")->assertNotFound();
         $sellerToken = $seller->createToken('test', ['seller:basic'])->plainTextToken;
@@ -34,6 +40,32 @@ class ReturnRequestTest extends TestCase
         $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$id}", ['status' => 'approved'])->assertOk()->assertJsonPath('status', 'approved');
         $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$id}", ['status' => 'received'])->assertOk()->assertJsonPath('status', 'received');
         $this->withToken($sellerToken)->postJson("/api/seller/return-requests/{$id}", ['status' => 'refunded', 'refund_amount' => 100, 'outcome_reference' => 'TX-1'])->assertOk()->assertJsonPath('status', 'refunded');
+        $this->assertDatabaseHas('support_tickets', ['id' => $ticket->id, 'status' => 'resolved']);
+        Mail::assertSent(NoticeMail::class, 1);
+        Mail::assertSent(NoticeMail::class, function (NoticeMail $mail): bool {
+            return $mail->subjectLine === 'Your refund for RET-00001 is done'
+                && $mail->data['rows']['Amount'] === '৳100'
+                && $mail->data['rows']['Refunded to'] === 'NEXF Balance'
+                && $mail->data['footnote'] === 'Something not right? Reply on your support ticket SUP-00001 and it opens again.';
+        });
+    }
+
+    public function test_exchange_completion_email_names_the_replacement_order(): void
+    {
+        Mail::fake();
+        $customer = Customer::create(['name' => 'Exchange Buyer', 'email' => 'exchange-email@example.test', 'password' => 'password123']);
+        $order = Order::create(['order_number' => 'NEXF-00001', 'customer_id' => $customer->id, 'status' => 'delivered', 'subtotal' => 100, 'total' => 100, 'shipping_name' => 'Exchange Buyer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka']);
+        $item = OrderItem::create(['order_id' => $order->id, 'product_name' => 'Coat', 'quantity' => 1, 'unit_selling_price' => 100, 'unit_buying_price' => 50, 'line_subtotal' => 100, 'line_cost' => 50, 'line_profit' => 50, 'fulfillment_status' => 'delivered']);
+        $replacement = Order::create(['order_number' => 'EXC-00002', 'customer_id' => $customer->id, 'exchange_for' => '1', 'status' => 'delivered', 'subtotal' => 0, 'total' => 0, 'shipping_name' => 'Exchange Buyer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka']);
+        $return = ReturnRequest::create(['order_id' => $order->id, 'order_item_id' => $item->id, 'customer_id' => $customer->id, 'reference' => 'RET-00002', 'type' => 'exchange', 'status' => 'exchanged', 'quantity' => 1, 'reason' => 'Size', 'exchange_order_id' => $replacement->id, 'completed_at' => now()]);
+
+        app(ReturnCompletionMailService::class)->send($return);
+
+        Mail::assertSent(NoticeMail::class, function (NoticeMail $mail): bool {
+            return $mail->subjectLine === 'Your exchange RET-00002 is complete'
+                && $mail->data['rows']['Replacement order'] === 'EXC-00002'
+                && $mail->data['lines'][0] === "Your replacement EXC-00002 was delivered and we've received the original item.";
+        });
     }
 
     public function test_completed_refund_creates_wallet_credit_and_withdrawal_is_reserved(): void
