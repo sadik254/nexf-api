@@ -13,6 +13,7 @@ use enshrined\svgSanitize\Sanitizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -28,7 +29,7 @@ class MediaAssetController extends Controller
             $query->where(function ($assets) use ($actor) {
                 $assets->whereHas('storeLibraries', fn ($libraries) => $libraries->where('seller_id', $actor->id))
                     // Keeps pre-migration rows usable until their backfill has run.
-                    ->orWhere(fn ($legacy) => $legacy->doesntHave('storeLibraries')->where('owner_type', 'seller')->where('owner_id', $actor->id));
+                    ->orWhere(fn ($legacy) => $legacy->doesntHave('allStoreLibraries')->where('owner_type', 'seller')->where('owner_id', $actor->id));
             });
         }
         if ($actor instanceof Admin && $request->query('owner_type') === 'admin') {
@@ -137,9 +138,11 @@ class MediaAssetController extends Controller
         $actor = $this->actor($request);
         $this->authorizeAsset($actor, $asset);
         if ($actor instanceof Seller) {
-            $asset->storeLibraries()->where('seller_id', $actor->id)->delete();
+            $library = $asset->storeLibraries()->where('seller_id', $actor->id)->firstOrFail();
+            $library->update(['deleted_by_name' => $this->libraryDeletedByName($request, $actor)]);
+            $library->delete();
 
-            return response()->json(['message' => 'Removed from this store media library. The original file remains available for other stores.']);
+            return response()->json(['message' => 'Moved to this store\'s trash. It will be removed from the store library in 30 days.']);
         }
         \Illuminate\Support\Facades\DB::transaction(function () use ($asset, $actor): void {
             $this->references->clear($asset->url);
@@ -204,7 +207,61 @@ class MediaAssetController extends Controller
                 $count++;
             });
 
+        MediaAssetStoreLibrary::onlyTrashed()->where('deleted_at', '<', now()->subDays(30))->orderBy('id')
+            ->each(function (MediaAssetStoreLibrary $library) use (&$count): void {
+                $this->purgeStoreLibrary($library);
+                $count++;
+            });
+
         return $count;
+    }
+
+    public function sellerTrash(Request $request): JsonResponse
+    {
+        $seller = $this->sellerActor($request);
+        $page = MediaAssetStoreLibrary::onlyTrashed()->where('seller_id', $seller->id)
+            ->whereHas('asset')->with('asset.storeLibraries.seller')->latest('deleted_at')
+            ->paginate(max(1, min((int) $request->query('per_page', 30), 100)));
+        $page->getCollection()->transform(fn (MediaAssetStoreLibrary $library) => array_merge($this->resource($library->asset), [
+            'deleted_at' => $library->deleted_at?->toISOString(),
+            'purge_at' => $library->deleted_at?->copy()->addDays(30)->toISOString(),
+            'deleted_by_name' => $library->deleted_by_name,
+        ]));
+
+        return response()->json($page);
+    }
+
+    public function restoreSellerLibrary(Request $request, MediaAsset $asset): JsonResponse
+    {
+        $seller = $this->sellerActor($request);
+        $library = MediaAssetStoreLibrary::onlyTrashed()->where('media_asset_id', $asset->id)->where('seller_id', $seller->id)->firstOrFail();
+        $library->restore();
+        $library->update(['deleted_by_name' => null]);
+
+        return response()->json($this->resource($asset->fresh()->load('storeLibraries.seller')));
+    }
+
+    public function purgeSellerLibrary(Request $request, MediaAsset $asset): JsonResponse
+    {
+        $seller = $this->sellerActor($request);
+        $library = MediaAssetStoreLibrary::onlyTrashed()->where('media_asset_id', $asset->id)->where('seller_id', $seller->id)->firstOrFail();
+        DB::transaction(fn () => $this->purgeStoreLibrary($library));
+
+        return response()->json(['message' => 'Removed from this store trash.']);
+    }
+
+    public function emptySellerTrash(Request $request): JsonResponse
+    {
+        $seller = $this->sellerActor($request);
+        $count = 0;
+        DB::transaction(function () use ($seller, &$count): void {
+            MediaAssetStoreLibrary::onlyTrashed()->where('seller_id', $seller->id)->orderBy('id')->each(function (MediaAssetStoreLibrary $library) use (&$count): void {
+                $this->purgeStoreLibrary($library);
+                $count++;
+            });
+        });
+
+        return response()->json(['message' => "Removed {$count} file(s) from this store trash.", 'count' => $count]);
     }
 
     private function purgeAsset(MediaAsset $asset): void
@@ -214,6 +271,23 @@ class MediaAssetController extends Controller
             throw new \RuntimeException('The R2 object could not be deleted. The media record was kept.');
         }
         $asset->forceDelete();
+    }
+
+    /** Permanently removes only one store's removed library link. */
+    private function purgeStoreLibrary(MediaAssetStoreLibrary $library): void
+    {
+        $asset = MediaAsset::withTrashed()->find($library->media_asset_id);
+        $deletedBy = $library->deleted_by_name;
+        $library->forceDelete();
+        if (! $asset || $asset->trashed()) return;
+
+        // This runs only at the moment a store drops its final link. A
+        // deliberately linkless Site-library file is never swept up later.
+        if (! MediaAssetStoreLibrary::withTrashed()->where('media_asset_id', $asset->id)->exists()
+            && ! $this->references->isReferenced($asset->url)) {
+            $asset->update(['deleted_by_name' => $deletedBy]);
+            $asset->delete();
+        }
     }
 
     private function r2Key(string $url): ?string
@@ -301,6 +375,19 @@ class MediaAssetController extends Controller
         return $actor;
     }
 
+    private function sellerActor(Request $request): Seller
+    {
+        $actor = $this->actor($request);
+        abort_unless($actor instanceof Seller, 403);
+
+        return $actor;
+    }
+
+    private function libraryDeletedByName(Request $request, Seller $seller): string
+    {
+        return $request->attributes->get('seller_staff')?->name ?? $seller->seller_name;
+    }
+
     private function authorizeAsset(Admin|Seller $actor, MediaAsset $asset): void
     {
         abort_if($asset->owner_type === 'customer', 404);
@@ -334,7 +421,7 @@ class MediaAssetController extends Controller
             $includeHouse = array_key_exists('include_house', $data) ? (bool) $data['include_house'] : $sellerIds === [];
         }
 
-        $asset->storeLibraries()->delete();
+        MediaAssetStoreLibrary::withTrashed()->where('media_asset_id', $asset->id)->forceDelete();
         $rows = collect($sellerIds)->map(fn (int $id) => ['seller_id' => $id, 'library_key' => "seller:{$id}"]);
         if ($includeHouse) {
             $rows->push(['seller_id' => null, 'library_key' => 'house']);

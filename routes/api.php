@@ -563,8 +563,12 @@ Route::prefix('seller')->middleware(['sanctum.type:seller', 'store.scope'])->gro
     Route::post('/return-requests/{returnRequest}', [ReturnRequestController::class, 'update'])->middleware('perm:returns.manage');
     Route::post('/return-requests/{returnRequest}/restock', [ReturnRequestController::class, 'restock'])->middleware('perm:returns.manage');
     Route::get('/media', [MediaAssetController::class, 'index'])->middleware('perm:media.manage');
+    Route::get('/media/trash', [MediaAssetController::class, 'sellerTrash'])->middleware('perm:media.manage');
+    Route::post('/media/trash/empty', [MediaAssetController::class, 'emptySellerTrash'])->middleware('perm:media.manage');
     Route::post('/media', [MediaAssetController::class, 'store'])->middleware('perm:media.manage');
     Route::post('/media/link', [MediaAssetController::class, 'link'])->middleware('perm:media.manage');
+    Route::post('/media/{asset}/restore', [MediaAssetController::class, 'restoreSellerLibrary'])->middleware('perm:media.manage');
+    Route::post('/media/{asset}/purge', [MediaAssetController::class, 'purgeSellerLibrary'])->middleware('perm:media.manage');
     Route::post('/media/{asset}', [MediaAssetController::class, 'update'])->middleware('perm:media.manage');
     // Media is intentionally the one library resource a store staff member may remove.
     Route::post('/media/{asset}/delete', [MediaAssetController::class, 'destroy'])->middleware('perm:media.manage');

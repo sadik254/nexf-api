@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Admin;
 use App\Models\MediaAsset;
+use App\Models\MediaAssetStoreLibrary;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Seller;
@@ -118,13 +119,53 @@ class MediaAssetTest extends TestCase
         $this->withToken($staffToken)->postJson("/api/seller/media/{$asset['id']}", ['file_name' => 'renamed-shared.jpg'])
             ->assertOk()->assertJsonPath('file_name', 'renamed-shared.jpg');
         $this->withToken($staffToken)->postJson("/api/seller/media/{$asset['id']}/delete")
-            ->assertOk()->assertJsonPath('message', 'Removed from this store media library. The original file remains available for other stores.');
+            ->assertOk()->assertJsonPath('message', "Moved to this store's trash. It will be removed from the store library in 30 days.");
 
         $this->withToken($firstToken)->getJson('/api/seller/media')->assertOk()->assertJsonPath('total', 0);
         $this->withToken($secondToken)->getJson('/api/seller/media')->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.file_name', 'renamed-shared.jpg');
         $this->assertDatabaseHas('media_assets', ['id' => $asset['id']]);
-        $this->assertDatabaseMissing('media_asset_store_libraries', ['media_asset_id' => $asset['id'], 'seller_id' => $first->id]);
+        $this->assertSoftDeleted('media_asset_store_libraries', ['media_asset_id' => $asset['id'], 'seller_id' => $first->id]);
         $this->assertDatabaseHas('media_asset_store_libraries', ['media_asset_id' => $asset['id'], 'seller_id' => $second->id]);
+    }
+
+    public function test_store_media_can_be_restored_or_permanently_removed_from_its_own_trash(): void
+    {
+        $seller = Seller::create(['seller_name' => 'Trash owner', 'email' => 'store-trash@example.test', 'store_name' => 'Trash Store', 'store_slug' => 'store-trash', 'kyc_type' => 'nid', 'kyc_number' => '111', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
+        $token = $seller->createToken('test', ['seller'])->plainTextToken;
+        $asset = MediaAsset::create(['owner_type' => 'seller', 'owner_id' => $seller->id, 'source' => 'url', 'url' => 'https://media.example.test/store-trash.jpg', 'file_name' => 'store-trash.jpg', 'mime_type' => 'image/jpeg']);
+        $asset->storeLibraries()->create(['seller_id' => $seller->id, 'library_key' => "seller:{$seller->id}"]);
+
+        $this->withToken($token)->postJson("/api/seller/media/{$asset->id}/delete")
+            ->assertOk()->assertJsonPath('message', "Moved to this store's trash. It will be removed from the store library in 30 days.");
+        $this->withToken($token)->getJson('/api/seller/media')->assertOk()->assertJsonPath('total', 0);
+        $this->withToken($token)->getJson('/api/seller/media/trash')->assertOk()
+            ->assertJsonPath('total', 1)->assertJsonPath('data.0.id', $asset->id)
+            ->assertJsonPath('data.0.deleted_by_name', 'Trash owner');
+
+        $this->withToken($token)->postJson("/api/seller/media/{$asset->id}/restore")->assertOk()->assertJsonPath('id', $asset->id);
+        $this->withToken($token)->getJson('/api/seller/media')->assertOk()->assertJsonPath('total', 1);
+
+        $this->withToken($token)->postJson("/api/seller/media/{$asset->id}/delete")->assertOk();
+        $this->withToken($token)->postJson("/api/seller/media/{$asset->id}/purge")->assertOk();
+        $this->assertDatabaseMissing('media_asset_store_libraries', ['media_asset_id' => $asset->id]);
+        $this->assertSoftDeleted('media_assets', ['id' => $asset->id, 'deleted_by_name' => 'Trash owner']);
+    }
+
+    public function test_last_store_library_link_keeps_an_asset_that_is_still_in_use(): void
+    {
+        $seller = Seller::create(['seller_name' => 'Referenced owner', 'email' => 'referenced-trash@example.test', 'store_name' => 'Referenced Store', 'store_slug' => 'referenced-trash', 'kyc_type' => 'nid', 'kyc_number' => '112', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);
+        $token = $seller->createToken('test', ['seller'])->plainTextToken;
+        $url = 'https://media.example.test/still-in-use.jpg';
+        $asset = MediaAsset::create(['owner_type' => 'seller', 'owner_id' => $seller->id, 'source' => 'url', 'url' => $url, 'file_name' => 'still-in-use.jpg', 'mime_type' => 'image/jpeg']);
+        $asset->storeLibraries()->create(['seller_id' => $seller->id, 'library_key' => "seller:{$seller->id}"]);
+        $category = ProductCategory::create(['name' => 'Referenced media', 'slug' => 'referenced-media']);
+        DB::table('products')->insert(['category_id' => $category->id, 'seller_id' => $seller->id, 'name' => 'Uses the file', 'slug' => 'uses-the-file', 'thumbnail' => $url, 'created_at' => now(), 'updated_at' => now()]);
+
+        $this->withToken($token)->postJson("/api/seller/media/{$asset->id}/delete")->assertOk();
+        $this->withToken($token)->postJson("/api/seller/media/{$asset->id}/purge")->assertOk();
+
+        $this->assertDatabaseHas('media_assets', ['id' => $asset->id, 'deleted_at' => null]);
+        $this->assertSame(0, MediaAssetStoreLibrary::withTrashed()->where('media_asset_id', $asset->id)->count());
     }
 
     public function test_account_and_store_forms_can_use_existing_library_images_without_a_browser_reupload(): void

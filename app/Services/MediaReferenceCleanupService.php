@@ -10,6 +10,27 @@ use Illuminate\Support\Facades\DB;
  */
 class MediaReferenceCleanupService
 {
+    /** Whether this URL is still used by a live editable record. */
+    public function isReferenced(string $url): bool
+    {
+        foreach ($this->scalarColumns() as [$table, $column]) {
+            if (DB::table($table)->where($column, $url)->exists()) return true;
+        }
+        foreach ($this->jsonColumns() as [$table, $column]) {
+            foreach (DB::table($table)->orderBy('id')->cursor() as $row) {
+                if ($this->containsUrl(json_decode((string) $row->{$column}, true), $url)) return true;
+            }
+        }
+        foreach ($this->richTextColumns() as [$table, $column]) {
+            if (DB::table($table)->where($column, 'like', '%'.$url.'%')->exists()) return true;
+        }
+        foreach (DB::table('site_settings')->orderBy('key')->cursor() as $row) {
+            if ($this->containsUrl(json_decode((string) $row->payload, true), $url)) return true;
+        }
+
+        return false;
+    }
+
     public function clear(string $url): void
     {
         DB::transaction(function () use ($url): void {
@@ -22,7 +43,14 @@ class MediaReferenceCleanupService
 
     private function clearScalars(string $url): void
     {
-        foreach ([
+        foreach ($this->scalarColumns() as [$table, $column]) {
+            DB::table($table)->where($column, $url)->update([$column => null]);
+        }
+    }
+
+    private function scalarColumns(): array
+    {
+        return [
             ['products', 'thumbnail'],
             ['product_variations', 'image_url'],
             ['homepage_banners', 'image'],
@@ -42,31 +70,39 @@ class MediaReferenceCleanupService
             ['seller_staff', 'image'],
             ['resellers', 'image'],
             ['stores', 'logo'],
-        ] as [$table, $column]) {
-            DB::table($table)->where($column, $url)->update([$column => null]);
-        }
+        ];
     }
 
     private function clearJsonArrays(string $url): void
     {
-        foreach ([
+        foreach ($this->jsonColumns() as [$table, $column]) {
+            $this->rewriteJsonColumn($table, $column, $url);
+        }
+    }
+
+    private function jsonColumns(): array
+    {
+        return [
             ['products', 'gallery'], ['products', 'videos'],
             ['reviews', 'images'], ['reviews', 'videos'],
             ['support_messages', 'attachments'],
             ['store_chat_messages', 'attachments'], ['return_requests', 'attachments'],
             ['seller_promotions', 'blocks'],
-        ] as [$table, $column]) {
-            $this->rewriteJsonColumn($table, $column, $url);
-        }
+        ];
     }
 
     private function clearRichText(string $url): void
     {
-        foreach ([['products', 'description'], ['product_categories', 'description'], ['product_collections', 'description']] as [$table, $column]) {
+        foreach ($this->richTextColumns() as [$table, $column]) {
             DB::table($table)->where($column, 'like', '%'.$url.'%')->orderBy('id')->each(function ($row) use ($table, $column, $url): void {
                 DB::table($table)->where('id', $row->id)->update([$column => str_replace($url, '', (string) $row->{$column})]);
             });
         }
+    }
+
+    private function richTextColumns(): array
+    {
+        return [['products', 'description'], ['product_categories', 'description'], ['product_collections', 'description']];
     }
 
     private function clearSettings(string $url): void
@@ -112,5 +148,16 @@ class MediaReferenceCleanupService
         }
 
         return array_is_list($value) ? array_values(array_filter($value, fn ($item) => $item !== null)) : $value;
+    }
+
+    private function containsUrl(mixed $value, string $url): bool
+    {
+        if ($value === $url) return true;
+        if (! is_array($value)) return false;
+        foreach ($value as $item) {
+            if ($this->containsUrl($item, $url)) return true;
+        }
+
+        return false;
     }
 }

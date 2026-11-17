@@ -18,16 +18,22 @@ class MediaAsset extends Model
         return $this->hasMany(MediaAssetStoreLibrary::class);
     }
 
+    /** Includes a store's removed-library links for compatibility checks. */
+    public function allStoreLibraries(): HasMany
+    {
+        return $this->hasMany(MediaAssetStoreLibrary::class)->withTrashed();
+    }
+
     public function isInSellerLibrary(int $sellerId): bool
     {
         if ($this->storeLibraries()->where('seller_id', $sellerId)->exists()) return true;
         // Compatibility for assets created before the migration has run.
-        return ! $this->storeLibraries()->exists() && $this->owner_type === 'seller' && (int) $this->owner_id === $sellerId;
+        return ! $this->allStoreLibraries()->exists() && $this->owner_type === 'seller' && (int) $this->owner_id === $sellerId;
     }
 
     public function isInHouseLibrary(): bool
     {
         if ($this->storeLibraries()->where('library_key', 'house')->exists()) return true;
-        return ! $this->storeLibraries()->exists() && $this->owner_type === 'admin';
+        return ! $this->allStoreLibraries()->exists() && $this->owner_type === 'admin';
     }
 }

@@ -4,10 +4,18 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class MediaAssetStoreLibrary extends Model
 {
-    protected $fillable = ['media_asset_id', 'seller_id', 'library_key'];
+    use SoftDeletes;
+
+    protected $fillable = ['media_asset_id', 'seller_id', 'library_key', 'deleted_by_name'];
+
+    protected function casts(): array
+    {
+        return ['deleted_at' => 'datetime'];
+    }
 
     public function asset(): BelongsTo
     {
