@@ -74,4 +74,12 @@ class MediaUploadService
 
         return ! str_starts_with($path, 'cdn-cgi/image/');
     }
+
+    /** Returns the R2 object key only for a direct public R2 original. */
+    public function r2Key(?string $url): ?string
+    {
+        if (! $this->isR2Original($url)) return null;
+
+        return ltrim((string) parse_url((string) $url, PHP_URL_PATH), '/');
+    }
 }

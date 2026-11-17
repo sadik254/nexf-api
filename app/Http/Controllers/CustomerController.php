@@ -67,9 +67,17 @@ class CustomerController extends Controller
             'district' => ['nullable', 'string', 'max:100'],
             'crm_status' => ['required', Rule::in(['new', 'active', 'vip', 'suspended'])],
             'is_risky' => ['sometimes', 'boolean'],
+            'profile_picture' => ['sometimes', 'file', 'image', 'max:5120'],
+            'remove_profile_picture' => ['sometimes', 'boolean'],
         ]);
+        $oldProfileUrl = $customer?->profile_picture;
+        $profileUrl = $request->boolean('remove_profile_picture') ? null : $oldProfileUrl;
+        if ($request->hasFile('profile_picture')) {
+            $profileUrl = app(\App\Services\MediaUploadService::class)->upload($request->file('profile_picture'), 'customers');
+        }
+        unset($data['profile_picture'], $data['remove_profile_picture']);
         $created = $customer === null;
-        $result = DB::transaction(function () use ($customer, $data) {
+        $result = DB::transaction(function () use ($customer, $data, $profileUrl) {
             $record = $customer ? Customer::whereKey($customer->id)->lockForUpdate()->firstOrFail() : new Customer();
             abort_if($record->roster_archived_at !== null, 404);
             $email = $data['email'] ?? null;
@@ -80,13 +88,15 @@ class CustomerController extends Controller
             $record->fill(['name' => trim($data['name']), 'phone' => $data['phone'], 'email' => $email,
                 'contact_street' => $data['street'] ?? null, 'contact_area' => $data['area'] ?? null,
                 'contact_district' => $data['district'] ?? null, 'crm_status' => $data['crm_status'],
-                'is_risky' => $data['is_risky'] ?? $record->is_risky ?? false]);
+                'is_risky' => $data['is_risky'] ?? $record->is_risky ?? false,
+                'profile_picture' => $profileUrl]);
             // A contact record grants no verified account or known login password.
             if (!$record->exists) $record->password = Str::random(64);
             $record->save();
             if ($record->crm_status === 'suspended') $record->tokens()->delete();
             return $record;
         });
+        app(\App\Services\ProfilePhotoCleanupService::class)->deleteIfOrphaned($oldProfileUrl, $profileUrl);
         return response()->json($this->appendDefaultAddress($result->load('defaultAddress:customer_id,line,area,district')), $created ? 201 : 200);
     }
 
@@ -405,6 +415,7 @@ class CustomerController extends Controller
         }
 
         $profileUrl = $request->boolean('remove_profile_picture') ? null : $customer->profile_picture;
+        $oldProfileUrl = $customer->profile_picture;
         if ($request->hasFile('profile_picture')) {
             $profileUrl = app(\App\Services\MediaUploadService::class)->upload($request->file('profile_picture'), 'customers');
         }
@@ -415,6 +426,7 @@ class CustomerController extends Controller
             'phone' => $data['phone'] ?? $customer->phone,
             'profile_picture' => $profileUrl,
         ])->save();
+        app(\App\Services\ProfilePhotoCleanupService::class)->deleteIfOrphaned($oldProfileUrl, $profileUrl);
 
         return response()->json([
             'message' => 'Profile updated successfully.',

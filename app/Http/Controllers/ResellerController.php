@@ -131,6 +131,7 @@ class ResellerController extends Controller
             'image_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
             'clear_image' => ['sometimes', 'boolean'],
         ]);
+        $oldImage = $reseller->image;
         if (array_key_exists('email', $data) && strcasecmp((string) $data['email'], (string) $reseller->email) !== 0) throw ValidationException::withMessages(['email' => ['Verify the new email to change it.']]);
         unset($data['email']);
         if (!empty($data['clear_image'])) $data['image'] = null;
@@ -138,6 +139,7 @@ class ResellerController extends Controller
         elseif (!empty($data['image_media_id']) || !empty($data['image_url'])) $data['image'] = app(\App\Services\LibraryMediaService::class)->image($data['image_media_id'] ?? null, $data['image_url'] ?? null);
         unset($data['image_media_id'], $data['image_url'], $data['clear_image']);
         $reseller->fill($data)->save();
+        app(\App\Services\ProfilePhotoCleanupService::class)->deleteIfOrphaned($oldImage, $reseller->image);
         return response()->json($reseller->fresh());
     }
 
@@ -160,7 +162,7 @@ class ResellerController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        $reseller = Reseller::create($this->validated($request));
+        $reseller = Reseller::create($this->adminProfileImageData($request, $this->validated($request)));
         $this->passwordResets->send($reseller, 'reseller');
         $reseller->setAttribute('invite_sent', true);
         return response()->json($this->withMonth($reseller, now()->startOfMonth(), now()->endOfMonth()), 201);
@@ -168,7 +170,9 @@ class ResellerController extends Controller
 
     public function update(Request $request, Reseller $reseller): JsonResponse
     {
-        $reseller->update($this->validated($request, false));
+        $oldImage = $reseller->image;
+        $reseller->update($this->adminProfileImageData($request, $this->validated($request, false)));
+        app(\App\Services\ProfilePhotoCleanupService::class)->deleteIfOrphaned($oldImage, $reseller->image);
         return response()->json($this->withMonth($reseller->refresh(), now()->startOfMonth(), now()->endOfMonth()));
     }
 
@@ -194,7 +198,17 @@ class ResellerController extends Controller
             'name' => [($creating ? 'required' : 'sometimes'), 'string', 'max:255'], 'email' => $email,
             'phone' => ['nullable', 'string', 'max:32'], 'location' => ['nullable', 'string', 'max:255'], 'address_line' => ['nullable', 'string', 'max:255'], 'address_area' => ['nullable', 'string', 'max:255'], 'address_district' => ['nullable', 'string', 'max:255'],
             'commission_rate' => ['sometimes', 'numeric', 'min:0', 'max:100'], 'monthly_target' => ['sometimes', 'integer', 'min:0', 'max:1000000'], 'is_active' => ['sometimes', 'boolean'],
+            'image' => ['sometimes', 'file', 'image', 'max:5120'], 'clear_image' => ['sometimes', 'boolean'],
         ]);
+    }
+
+    private function adminProfileImageData(Request $request, array $data): array
+    {
+        if (! empty($data['clear_image'])) $data['image'] = null;
+        if ($request->hasFile('image')) $data['image'] = app(\App\Services\MediaUploadService::class)->upload($request->file('image'));
+        unset($data['clear_image']);
+
+        return $data;
     }
 
     private function withMonth(Reseller $reseller, $from, $to): Reseller

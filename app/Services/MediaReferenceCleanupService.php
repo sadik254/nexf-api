@@ -69,6 +69,7 @@ class MediaReferenceCleanupService
             ['admins', 'image'],
             ['seller_staff', 'image'],
             ['resellers', 'image'],
+            ['customers', 'profile_picture'],
             ['stores', 'logo'],
         ];
     }
