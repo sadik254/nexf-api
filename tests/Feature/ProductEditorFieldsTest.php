@@ -70,6 +70,49 @@ class ProductEditorFieldsTest extends TestCase
             ->assertJsonPath('option_groups.0.size_kind', 'clothing');
     }
 
+    public function test_products_can_be_placed_in_another_subcategory_with_its_own_photos(): void
+    {
+        $admin = Admin::create(['name' => 'Placement editor', 'email' => 'placement-editor@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $token = $admin->createToken('test', ['admin:basic'])->plainTextToken;
+        $men = ProductCategory::create(['name' => 'Men', 'slug' => 'placement-men']);
+        $menHoodies = ProductCategory::create(['parent_id' => $men->id, 'name' => 'Hoodies', 'slug' => 'placement-men-hoodies']);
+        $women = ProductCategory::create(['name' => 'Women', 'slug' => 'placement-women']);
+        $womenHoodies = ProductCategory::create(['parent_id' => $women->id, 'name' => 'Hoodies', 'slug' => 'placement-women-hoodies']);
+        $product = Product::create([
+            'category_id' => $menHoodies->id,
+            'name' => 'Shared hoodie',
+            'slug' => 'shared-hoodie',
+            'product_type' => 'simple',
+            'status' => 'active',
+            'thumbnail' => 'https://example.test/hoodie-cover.jpg',
+            'gallery' => ['https://example.test/hoodie-men.jpg', 'https://example.test/hoodie-women.jpg'],
+        ]);
+
+        $this->withToken($token)->postJson("/api/admin/products/{$product->id}", [
+            'main_photos' => [0, 1],
+            'category_placements' => [[
+                'category_id' => $womenHoodies->id,
+                'photos' => [2],
+            ]],
+        ])->assertOk()
+            ->assertJsonPath('product.main_photos.1', 1)
+            ->assertJsonPath('product.category_placements.0.category.slug', 'placement-women-hoodies')
+            ->assertJsonPath('product.category_placements.0.photos.0', 2);
+
+        $this->getJson('/api/store/categories/placement-women-hoodies/products')
+            ->assertOk()
+            ->assertJsonPath('data.0.slug', 'shared-hoodie')
+            ->assertJsonPath('data.0.category_placements.0.photos.0', 2)
+            ->assertJsonPath('data.0.main_photos.0', 0);
+
+        $this->withToken($token)->postJson("/api/admin/products/{$product->id}", [
+            'clear_category_placements' => true,
+            'clear_main_photos' => true,
+        ])->assertOk()
+            ->assertJsonPath('product.main_photos', [])
+            ->assertJsonPath('product.category_placements', []);
+    }
+
     public function test_super_admin_seller_product_editor_saves_media_videos_and_variations(): void
     {
         $seller = Seller::create(['seller_name' => 'Seller', 'email' => 'editor-seller@example.test', 'store_name' => 'Editor Store', 'store_slug' => 'editor-store', 'kyc_type' => 'nid', 'kyc_number' => '99', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Clothing', 'status' => 'approved', 'is_active' => true, 'password' => 'password123']);

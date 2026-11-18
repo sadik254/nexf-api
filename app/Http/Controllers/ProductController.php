@@ -35,7 +35,7 @@ class ProductController extends Controller
         }
 
         $query = Product::query()
-            ->with(['category', 'brand', 'tags', 'seller', 'variations', 'bundles.items'])
+            ->with(['category', 'brand', 'tags', 'seller', 'variations', 'bundles.items', 'categoryPlacements.category.parent'])
             ->latest();
 
         // The product list can show the whole marketplace. Other callers keep
@@ -62,7 +62,7 @@ class ProductController extends Controller
         }
 
         $query = Product::query()
-            ->with(['category', 'brand', 'tags', 'seller', 'variations', 'bundles.items'])
+            ->with(['category', 'brand', 'tags', 'seller', 'variations', 'bundles.items', 'categoryPlacements.category.parent'])
             ->where('seller_id', $seller->id)
             ->latest();
         $this->withListMetrics($query);
@@ -81,7 +81,7 @@ class ProductController extends Controller
         }
 
         $query = Product::query()
-            ->with(['category', 'brand', 'tags', 'seller', 'variations', 'bundles.items'])
+            ->with(['category', 'brand', 'tags', 'seller', 'variations', 'bundles.items', 'categoryPlacements.category.parent'])
             ->where('seller_id', $actor->id)
             ->latest();
         $this->withListMetrics($query);
@@ -112,7 +112,7 @@ class ProductController extends Controller
 
     private function productForEditor(Product $product): array
     {
-        $product->load(['category', 'brand', 'tags', 'seller', 'variations', 'bundles.items']);
+        $product->load(['category', 'brand', 'tags', 'seller', 'variations', 'bundles.items', 'categoryPlacements.category.parent']);
         $costLot = ProductLot::query()
             ->when($product->product_type === 'variable',
                 fn ($query) => $query->whereIn('variation_id', $product->variations->pluck('id')),
@@ -194,6 +194,14 @@ class ProductController extends Controller
             'gallery_media_ids.*' => ['integer', 'distinct', 'exists:media_assets,id'],
             'gallery_order' => ['sometimes', 'array', 'max:30'],
             'gallery_order.*.media_id' => ['nullable', 'integer', 'exists:media_assets,id'],
+            'main_photos' => ['sometimes', 'array', 'max:31'],
+            'main_photos.*' => ['required', 'integer', 'min:0', 'distinct'],
+            'clear_main_photos' => ['sometimes', 'boolean'],
+            'category_placements' => ['sometimes', 'array', 'max:30'],
+            'category_placements.*.category_id' => ['required', 'integer', 'distinct', 'exists:product_categories,id'],
+            'category_placements.*.photos' => ['sometimes', 'array', 'max:31'],
+            'category_placements.*.photos.*' => ['required', 'integer', 'min:0', 'distinct'],
+            'clear_category_placements' => ['sometimes', 'boolean'],
             'videos' => ['nullable', 'array', 'max:20'],
             'videos.*' => ['required', 'url', 'starts_with:https://'],
             'default_buying_price' => ['nullable', 'numeric', 'min:0'],
@@ -271,7 +279,10 @@ class ProductController extends Controller
         $this->authorizeSizeChart($data['size_chart_id'] ?? null, $actor, $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null));
 
         $auditActor = $request->attributes->get('seller_staff') ?? $actor;
-        $product = DB::transaction(function () use ($actor, $auditActor, $data, $slug, $thumbnailUrl, $galleryUrls): Product {
+        $mainPhotos = $this->photoPositions(!empty($data['clear_main_photos']) ? [] : ($data['main_photos'] ?? []), $thumbnailUrl, $galleryUrls);
+        $placements = $this->normalizeCategoryPlacements(!empty($data['clear_category_placements']) ? [] : ($data['category_placements'] ?? []), (int) $data['category_id'], $thumbnailUrl, $galleryUrls);
+
+        $product = DB::transaction(function () use ($actor, $auditActor, $data, $slug, $thumbnailUrl, $galleryUrls, $mainPhotos, $placements): Product {
             $product = Product::create([
                 'seller_id' => $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null),
                 'created_by_admin_id' => $actor instanceof Admin ? $actor->id : null,
@@ -290,6 +301,7 @@ class ProductController extends Controller
                 'status' => $data['status'] ?? 'draft',
                 'thumbnail' => $thumbnailUrl,
                 'gallery' => $galleryUrls,
+                'main_photos' => $mainPhotos,
                 'videos' => $data['videos'] ?? null,
                 'default_buying_price' => $data['default_buying_price'] ?? null,
                 'default_selling_price' => $data['default_selling_price'] ?? null,
@@ -331,6 +343,7 @@ class ProductController extends Controller
             if (array_key_exists('bundles', $data) || !empty($data['clear_bundles'])) {
                 app(ProductBundleService::class)->replace($product, !empty($data['clear_bundles']) ? [] : ($data['bundles'] ?? []));
             }
+            $this->replaceCategoryPlacements($product, $placements);
             return $product;
         });
 
@@ -338,7 +351,7 @@ class ProductController extends Controller
 
         return response()->json([
             'message' => 'Product created successfully.',
-            'product' => $product->load('bundles.items'),
+            'product' => $product->load(['bundles.items', 'categoryPlacements.category.parent']),
         ], 201);
     }
 
@@ -394,6 +407,14 @@ class ProductController extends Controller
             'gallery_order.*.url' => ['nullable', 'url', 'starts_with:https://'],
             'gallery_order.*.media_id' => ['nullable', 'integer', 'exists:media_assets,id'],
             'clear_gallery' => ['sometimes', 'boolean'],
+            'main_photos' => ['sometimes', 'array', 'max:31'],
+            'main_photos.*' => ['required', 'integer', 'min:0', 'distinct'],
+            'clear_main_photos' => ['sometimes', 'boolean'],
+            'category_placements' => ['sometimes', 'array', 'max:30'],
+            'category_placements.*.category_id' => ['required', 'integer', 'distinct', 'exists:product_categories,id'],
+            'category_placements.*.photos' => ['sometimes', 'array', 'max:31'],
+            'category_placements.*.photos.*' => ['required', 'integer', 'min:0', 'distinct'],
+            'clear_category_placements' => ['sometimes', 'boolean'],
             'thumbnail_url' => ['sometimes', 'url', 'starts_with:https://'],
             'clear_thumbnail' => ['sometimes', 'boolean'],
             'videos' => ['sometimes', 'array', 'max:20'],
@@ -455,6 +476,11 @@ class ProductController extends Controller
         unset($data['clear_shipping_options']);
         $bundleRows = array_key_exists('bundles', $data) || !empty($data['clear_bundles']) ? (!empty($data['clear_bundles']) ? [] : $data['bundles']) : null;
         unset($data['bundles'], $data['clear_bundles']);
+        $mainPhotosProvided = array_key_exists('main_photos', $data) || !empty($data['clear_main_photos']);
+        $placementRowsProvided = array_key_exists('category_placements', $data) || !empty($data['clear_category_placements']);
+        $requestedMainPhotos = !empty($data['clear_main_photos']) ? [] : ($data['main_photos'] ?? null);
+        $requestedPlacementRows = !empty($data['clear_category_placements']) ? [] : ($data['category_placements'] ?? null);
+        unset($data['main_photos'], $data['clear_main_photos'], $data['category_placements'], $data['clear_category_placements']);
 
         if (array_key_exists('slug', $data)) {
             $product->slug = $data['slug'];
@@ -497,9 +523,16 @@ class ProductController extends Controller
         if (array_key_exists('gallery_order', $data)) $galleryUrls = $this->galleryOrderUrls($data['gallery_order'], $product, $product->seller_id, $request->user() instanceof Admin);
         if (!empty($data['clear_gallery'])) $galleryUrls = [];
 
+        $finalCategoryId = (int) ($data['category_id'] ?? $product->category_id);
+        $mainPhotos = $this->photoPositions($mainPhotosProvided ? ($requestedMainPhotos ?? []) : ($product->main_photos ?? []), $thumbnailUrl, $galleryUrls);
+        $placements = $placementRowsProvided
+            ? $this->normalizeCategoryPlacements($requestedPlacementRows ?? [], $finalCategoryId, $thumbnailUrl, $galleryUrls)
+            : null;
+
+        DB::transaction(function () use ($product, $data, $thumbnailUrl, $galleryUrls, $mainPhotos, $tagIds, $bundleRows, $placements, $finalCategoryId): void {
         $product->fill([
             'seller_id' => array_key_exists('seller_id', $data) ? $data['seller_id'] : $product->seller_id,
-            'category_id' => $data['category_id'] ?? $product->category_id,
+            'category_id' => $finalCategoryId,
             'brand_id' => array_key_exists('brand_id', $data) ? $data['brand_id'] : $product->brand_id,
             'name' => $data['name'] ?? $product->name,
             'sku' => array_key_exists('sku', $data) ? (filled($data['sku']) ? trim($data['sku']) : null) : $product->sku,
@@ -513,6 +546,7 @@ class ProductController extends Controller
             'status' => $data['status'] ?? $product->status,
             'thumbnail' => $thumbnailUrl,
             'gallery' => $galleryUrls,
+            'main_photos' => $mainPhotos,
             'videos' => array_key_exists('videos', $data) ? $data['videos'] : $product->videos,
             'default_buying_price' => array_key_exists('default_buying_price', $data) ? $data['default_buying_price'] : $product->default_buying_price,
             'default_selling_price' => $data['default_selling_price'] ?? $product->default_selling_price,
@@ -531,10 +565,12 @@ class ProductController extends Controller
 
         if ($tagIds !== null) $product->tags()->sync($tagIds);
         if ($bundleRows !== null) app(ProductBundleService::class)->replace($product, $bundleRows);
+        $this->syncCategoryPlacements($product, $placements, $finalCategoryId, $thumbnailUrl, $galleryUrls);
+        });
 
         return response()->json([
             'message' => 'Product updated successfully.',
-            'product' => $product->load(['brand', 'tags', 'bundles.items']),
+            'product' => $product->load(['brand', 'tags', 'bundles.items', 'categoryPlacements.category.parent']),
         ]);
     }
 
@@ -595,6 +631,76 @@ class ProductController extends Controller
             abort(403, 'Forbidden.');
         }
 
+    }
+
+    /**
+     * Photo positions are deliberately snapshots of the product's current
+     * thumbnail/gallery order. When the gallery changes, stale positions are
+     * harmlessly removed instead of pointing at another image.
+     */
+    private function photoPositions(array $positions, ?string $thumbnail, ?array $gallery): array
+    {
+        $imageCount = count(array_values(array_filter([$thumbnail, ...($gallery ?? [])])));
+
+        return collect($positions)
+            ->map(fn ($position) => (int) $position)
+            ->filter(fn (int $position) => $position >= 0 && $position < $imageCount)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /** @return array<int, array{category_id:int, photos:array}> */
+    private function normalizeCategoryPlacements(array $placements, int $primaryCategoryId, ?string $thumbnail, ?array $gallery): array
+    {
+        if (!$placements) return [];
+
+        $categories = ProductCategory::query()->whereIn('id', collect($placements)->pluck('category_id')->all())
+            ->get(['id', 'parent_id'])->keyBy('id');
+
+        return collect($placements)->values()->map(function (array $placement, int $index) use ($categories, $primaryCategoryId, $thumbnail, $gallery) {
+            $categoryId = (int) $placement['category_id'];
+            $category = $categories->get($categoryId);
+
+            if (!$category || $category->parent_id === null) {
+                throw ValidationException::withMessages(["category_placements.{$index}.category_id" => ['Choose a sub-category.']]);
+            }
+            if ($categoryId === $primaryCategoryId) {
+                throw ValidationException::withMessages(["category_placements.{$index}.category_id" => ['The main category is already shown.']]);
+            }
+
+            return [
+                'category_id' => $categoryId,
+                'photos' => $this->photoPositions($placement['photos'] ?? [], $thumbnail, $gallery),
+            ];
+        })->all();
+    }
+
+    private function replaceCategoryPlacements(Product $product, array $placements): void
+    {
+        $product->categoryPlacements()->delete();
+        if ($placements) $product->categoryPlacements()->createMany($placements);
+    }
+
+    /**
+     * Older clients do not send placement fields. Preserve those placements
+     * on their unrelated edits, while still pruning photos removed from the
+     * gallery and dropping a placement that became the primary category.
+     */
+    private function syncCategoryPlacements(Product $product, ?array $placements, int $primaryCategoryId, ?string $thumbnail, ?array $gallery): void
+    {
+        if ($placements !== null) {
+            $this->replaceCategoryPlacements($product, $placements);
+            return;
+        }
+
+        $product->categoryPlacements()->get()->each(function ($placement) use ($primaryCategoryId, $thumbnail, $gallery) {
+            if ((int) $placement->category_id === $primaryCategoryId) {
+                $placement->delete();
+                return;
+            }
+            $placement->update(['photos' => $this->photoPositions($placement->photos ?? [], $thumbnail, $gallery)]);
+        });
     }
 
     private function paginateProductList($query, Request $request, int $perPage): array

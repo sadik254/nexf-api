@@ -32,6 +32,7 @@ class Product extends Model
         'status',
         'thumbnail',
         'gallery',
+        'main_photos',
         'videos',
         'default_buying_price',
         'default_selling_price',
@@ -52,6 +53,7 @@ class Product extends Model
         return [
             'owner_unassigned' => 'boolean',
             'gallery' => 'array',
+            'main_photos' => 'array',
             'specifications' => 'array',
             'specification_tables' => 'array',
             'videos' => 'array',
@@ -114,6 +116,11 @@ class Product extends Model
     public function variations(): HasMany
     {
         return $this->hasMany(ProductVariation::class);
+    }
+
+    public function categoryPlacements(): HasMany
+    {
+        return $this->hasMany(ProductCategoryPlacement::class)->orderBy('id');
     }
 
     public function bundles(): HasMany

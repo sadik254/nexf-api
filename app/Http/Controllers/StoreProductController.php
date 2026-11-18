@@ -238,7 +238,10 @@ class StoreProductController extends Controller
     {
         $categoryIds = $category->children()->pluck('id')->prepend($category->id);
         $query = $this->baseStoreQuery()
-            ->whereIn('category_id', $categoryIds);
+            ->where(function (Builder $products) use ($categoryIds) {
+                $products->whereIn('products.category_id', $categoryIds)
+                    ->orWhereHas('categoryPlacements', fn (Builder $placements) => $placements->whereIn('category_id', $categoryIds));
+            });
 
         return $this->paginateProducts($query, $request);
     }
@@ -386,6 +389,18 @@ class StoreProductController extends Controller
             'status' => $product->status,
             'thumbnail' => $product->thumbnail,
             'gallery' => $product->gallery,
+            'main_photos' => $product->main_photos ?? [],
+            'category_placements' => $product->categoryPlacements->map(fn ($placement) => [
+                'category_id' => $placement->category_id,
+                'category' => $placement->category ? [
+                    'id' => $placement->category->id,
+                    'name' => $placement->category->name,
+                    'slug' => $placement->category->slug,
+                    'parent_id' => $placement->category->parent_id,
+                    'parent' => $placement->category->parent ? ['slug' => $placement->category->parent->slug] : null,
+                ] : null,
+                'photos' => $placement->photos ?? [],
+            ])->values()->all(),
             'videos' => $product->videos ?? [],
             'weight_kg' => $product->weight_kg,
             'image_variants' => $product->image_variants,
@@ -439,6 +454,7 @@ class StoreProductController extends Controller
     {
         $query->with([
             'category:id,name,slug',
+            'categoryPlacements.category.parent:id,slug',
             'brand:id,name,slug',
             'tags:id,name,slug',
             'seller:id,store_name,store_slug,store_logo,store_image,city,country,created_at,positive_rating_percentage,on_time_shipping_percentage,chat_response_percentage',
@@ -502,6 +518,7 @@ class StoreProductController extends Controller
             'status',
             'thumbnail',
             'gallery',
+            'main_photos',
             'compare_at_price', 'option_groups', 'size_chart_id', 'audience', 'videos', 'weight_kg',
             'default_selling_price',
             'homepage_trending', 'homepage_new_arrival', 'homepage_featured', 'homepage_sort_order',
