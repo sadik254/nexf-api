@@ -667,7 +667,7 @@ class OrderController extends Controller
 
             $fulfillmentStates = $nexfItems->pluck('fulfillment_status')->unique()->values();
             if (! in_array($locked->status, ['pending', 'confirmed'], true) || $fulfillmentStates->count() > 1 || ($fulfillmentStates->isNotEmpty() && ! in_array($fulfillmentStates->first(), ['pending', 'confirmed'], true))) {
-                throw ValidationException::withMessages(['order' => ['Only a pending or fully confirmed NEXF parcel can be edited before shipping.']]);
+                throw ValidationException::withMessages(['order' => ["Only a pending or fully confirmed NEXF parcel can be edited before it's shipped."]]);
             }
             $itemFulfillmentState = $fulfillmentStates->first() ?? 'pending';
             if ($nexfItems->contains(fn (OrderItem $item) => $item->review()->exists()) || DB::table('return_requests')->whereIn('order_item_id', $nexfItems->pluck('id'))->exists()) {
@@ -1094,7 +1094,7 @@ class OrderController extends Controller
             $states = $items->pluck('fulfillment_status')->unique();
             if (! in_array($locked->status, ['pending', 'confirmed'], true) || $parcel->courier_consignment_id !== null || $parcel->shipped_at !== null
                 || $states->count() > 1 || ($states->isNotEmpty() && ! in_array($states->first(), ['pending', 'confirmed'], true))) {
-                throw ValidationException::withMessages(['order' => ['Only a pending or confirmed parcel can be edited before shipping.']]);
+                throw ValidationException::withMessages(['order' => ["Only a pending or confirmed parcel can be edited before it's shipped."]]);
             }
             if ($items->contains(fn (OrderItem $item) => $item->review()->exists()) || DB::table('return_requests')->whereIn('order_item_id', $items->pluck('id'))->exists()) {
                 throw ValidationException::withMessages(['order' => ['This parcel has review or return history and cannot have its lines replaced.']]);

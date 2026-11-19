@@ -27,7 +27,7 @@ class CheckoutService
         $paymentMethod = PaymentMethod::query()->active()->find($data['payment_method_id']);
         $shippingMethod = $this->shippingMethodForAddress($data);
         if (!$paymentMethod || !$shippingMethod) {
-            throw ValidationException::withMessages(['checkout' => ['Selected payment or shipping method is unavailable.']]);
+            throw ValidationException::withMessages(['checkout' => ['Selected payment or delivery method is unavailable.']]);
         }
 
         $items = [];

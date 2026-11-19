@@ -39,11 +39,11 @@ class ShippingMethodController extends Controller
 
         $code = Str::slug($data['code'], '_');
         if ($code === '') {
-            return response()->json(['message' => 'Shipping method code is invalid.'], 422);
+            return response()->json(['message' => 'Delivery method code is invalid.'], 422);
         }
 
         if (ShippingMethod::where('code', $code)->exists()) {
-            return response()->json(['message' => 'Shipping method code already taken.'], 422);
+            return response()->json(['message' => 'Delivery method code already taken.'], 422);
         }
 
         $shippingMethod = ShippingMethod::create([
@@ -57,7 +57,7 @@ class ShippingMethodController extends Controller
         ]);
 
         return response()->json([
-            'message' => 'Shipping method created successfully.',
+            'message' => 'Delivery method created successfully.',
             'shipping_method' => $shippingMethod,
         ], 201);
     }
@@ -83,7 +83,7 @@ class ShippingMethodController extends Controller
         if (array_key_exists('code', $data)) {
             $code = Str::slug($data['code'], '_');
             if ($code === '') {
-                return response()->json(['message' => 'Shipping method code is invalid.'], 422);
+                return response()->json(['message' => 'Delivery method code is invalid.'], 422);
             }
 
             $exists = ShippingMethod::where('code', $code)
@@ -91,7 +91,7 @@ class ShippingMethodController extends Controller
                 ->exists();
 
             if ($exists) {
-                return response()->json(['message' => 'Shipping method code already taken.'], 422);
+                return response()->json(['message' => 'Delivery method code already taken.'], 422);
             }
         }
 
@@ -106,7 +106,7 @@ class ShippingMethodController extends Controller
         ])->save();
 
         return response()->json([
-            'message' => 'Shipping method updated successfully.',
+            'message' => 'Delivery method updated successfully.',
             'shipping_method' => $shippingMethod,
         ]);
     }
@@ -120,7 +120,7 @@ class ShippingMethodController extends Controller
         abort_unless($shippingMethod->seller_id === null && !$shippingMethod->is_store_option, 404);
         $shippingMethod->delete();
 
-        return response()->json(['message' => 'Shipping method deleted successfully.']);
+        return response()->json(['message' => 'Delivery method deleted successfully.']);
     }
 
     private function isSuperAdmin($actor): bool

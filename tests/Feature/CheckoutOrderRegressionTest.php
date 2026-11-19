@@ -36,6 +36,22 @@ class CheckoutOrderRegressionTest extends TestCase
             ->assertJsonPath('shipping_charge', 80);
     }
 
+    public function test_checkout_delivery_messages_keep_the_api_fields_but_use_delivery_words(): void
+    {
+        [, $product, $payment, $inside] = $this->fixtures();
+        $payload = $this->payload($product, $payment, $inside) + [
+            'shipping_name' => 'Guest', 'shipping_address' => 'Dhaka',
+        ];
+        $this->postJson('/api/guest/orders/preview', $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['shipping_phone' => 'The delivery phone field is required.']);
+
+        $inside->update(['is_active' => false]);
+        $this->postJson('/api/guest/orders/preview', $payload + ['shipping_phone' => '01712345678'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['checkout' => 'Selected payment or delivery method is unavailable.']);
+    }
+
     public function test_guest_preview_uses_suburb_dhaka_for_configured_districts_and_thanas(): void
     {
         config(['services.turnstile.secret_key' => 'configured']);
