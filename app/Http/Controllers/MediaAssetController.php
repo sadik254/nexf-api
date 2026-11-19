@@ -14,6 +14,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -129,6 +131,49 @@ class MediaAssetController extends Controller
         if ($actor instanceof Admin && $request->hasAny(['seller_id', 'seller_ids', 'include_house'])) {
             $this->syncLibraries($asset, $data, $actor);
         }
+
+        return response()->json($this->resource($asset->fresh()->load('storeLibraries.seller')));
+    }
+
+    public function replace(Request $request, MediaAsset $asset): JsonResponse
+    {
+        $actor = $this->actor($request);
+        $this->authorizeAsset($actor, $asset);
+        if ($asset->source === 'url') {
+            throw ValidationException::withMessages(['file' => ['A linked file cannot be replaced. Upload a file instead.']]);
+        }
+
+        $data = $request->validate(['file' => UploadFileRules::media(allowSvg: true)]);
+        $file = $data['file'];
+        $mimeType = $this->sanitizeSvgIfNeeded($file);
+        $oldIsImage = str_starts_with((string) $asset->mime_type, 'image/');
+        $newIsImage = str_starts_with($mimeType, 'image/');
+        if ($oldIsImage !== $newIsImage) {
+            $kind = $oldIsImage ? 'photo' : 'video';
+            throw ValidationException::withMessages(['file' => ["Pick a {$kind} to replace a {$kind}."]]);
+        }
+
+        $oldUrl = $asset->url;
+        $newUrl = $this->uploads->upload($file, 'media', $mimeType);
+        try {
+            DB::transaction(function () use ($asset, $oldUrl, $newUrl, $file, $mimeType): void {
+                $locked = MediaAsset::query()->lockForUpdate()->findOrFail($asset->id);
+                abort_if($locked->source === 'url', 422, 'A linked file cannot be replaced. Upload a file instead.');
+                $locked->update([
+                    'url' => $newUrl,
+                    'file_name' => $this->nextAvailableFileName($file->getClientOriginalName(), $locked->id),
+                    'mime_type' => $mimeType,
+                    'size_bytes' => $file->getSize(),
+                    ...$this->metadata($file),
+                ]);
+                $this->references->replace($oldUrl, $newUrl);
+            });
+        } catch (\Throwable $exception) {
+            $this->deleteReplacementObject($newUrl);
+            throw $exception;
+        }
+
+        $this->deleteReplacementObject($oldUrl);
 
         return response()->json($this->resource($asset->fresh()->load('storeLibraries.seller')));
     }
@@ -300,6 +345,20 @@ class MediaAssetController extends Controller
         return ltrim((string) parse_url($url, PHP_URL_PATH), '/');
     }
 
+    /** R2 cleanup must never make a completed database replacement fail. */
+    private function deleteReplacementObject(string $url): void
+    {
+        $key = $this->uploads->r2Key($url);
+        if ($key === null) return;
+        try {
+            if (! Storage::disk('r2')->delete($key)) {
+                Log::warning('Could not delete replaced media object from R2.', ['url' => $url]);
+            }
+        } catch (\Throwable $exception) {
+            Log::warning('Could not delete replaced media object from R2.', ['url' => $url, 'exception' => $exception->getMessage()]);
+        }
+    }
+
     private function metadata(UploadedFile $file): array
     {
         $meta = ['width' => null, 'height' => null, 'duration_seconds' => null];
@@ -321,11 +380,11 @@ class MediaAssetController extends Controller
     }
 
     /** Console-library names are global labels; customer review uploads are excluded. */
-    private function nextAvailableFileName(string $fileName): string
+    private function nextAvailableFileName(string $fileName, ?int $exceptId = null): string
     {
         $fileName = trim($fileName);
         $candidate = $fileName;
-        for ($number = 2; $this->fileNameTaken($candidate); $number++) {
+        for ($number = 2; $this->fileNameTaken($candidate, $exceptId); $number++) {
             $extension = pathinfo($fileName, PATHINFO_EXTENSION);
             $suffix = '-'.$number;
             $extensionSuffix = $extension === '' ? '' : '.'.$extension;

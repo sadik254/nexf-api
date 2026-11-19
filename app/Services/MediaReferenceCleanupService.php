@@ -41,6 +41,36 @@ class MediaReferenceCleanupService
         });
     }
 
+    /**
+     * Repoint every known media reference to a replacement URL. Unlike clear(),
+     * this deliberately includes historical order image snapshots: replacing a
+     * library asset is an explicit owner action to update that asset everywhere.
+     */
+    public function replace(string $oldUrl, string $newUrl): void
+    {
+        DB::transaction(function () use ($oldUrl, $newUrl): void {
+            foreach ($this->replacementScalarColumns() as [$table, $column]) {
+                DB::table($table)->where($column, $oldUrl)->update([$column => $newUrl]);
+            }
+            foreach ($this->replacementJsonColumns() as [$table, $column]) {
+                $this->replaceJsonColumn($table, $column, $oldUrl, $newUrl);
+            }
+            foreach ($this->richTextColumns() as [$table, $column]) {
+                DB::table($table)->where($column, 'like', '%'.$oldUrl.'%')->orderBy('id')->each(function ($row) use ($table, $column, $oldUrl, $newUrl): void {
+                    DB::table($table)->where('id', $row->id)->update([$column => str_replace($oldUrl, $newUrl, (string) $row->{$column})]);
+                });
+            }
+            DB::table('site_settings')->orderBy('key')->each(function ($row) use ($oldUrl, $newUrl): void {
+                $payload = json_decode((string) $row->payload, true);
+                $changed = false;
+                $payload = $this->replaceUrl($payload, $oldUrl, $newUrl, $changed);
+                if ($changed) {
+                    DB::table('site_settings')->where('key', $row->key)->update(['payload' => json_encode($payload), 'updated_at' => now()]);
+                }
+            });
+        });
+    }
+
     private function clearScalars(string $url): void
     {
         foreach ($this->scalarColumns() as [$table, $column]) {
@@ -74,6 +104,17 @@ class MediaReferenceCleanupService
         ];
     }
 
+    /** @return array<int, array{string, string}> */
+    private function replacementScalarColumns(): array
+    {
+        return [
+            ...$this->scalarColumns(),
+            ['order_items', 'product_thumbnail'],
+            ['order_items', 'variation_image'],
+            ['order_items', 'line_image'],
+        ];
+    }
+
     private function clearJsonArrays(string $url): void
     {
         foreach ($this->jsonColumns() as [$table, $column]) {
@@ -89,6 +130,18 @@ class MediaReferenceCleanupService
             ['support_messages', 'attachments'],
             ['store_chat_messages', 'attachments'], ['return_requests', 'attachments'],
             ['seller_promotions', 'blocks'],
+        ];
+    }
+
+    /** @return array<int, array{string, string}> */
+    private function replacementJsonColumns(): array
+    {
+        return [
+            ...$this->jsonColumns(),
+            ['products', 'main_photos'],
+            ['product_category_placements', 'photos'],
+            ['order_items', 'product_gallery'],
+            ['order_items', 'product_image_variants'],
         ];
     }
 
@@ -134,6 +187,18 @@ class MediaReferenceCleanupService
         });
     }
 
+    private function replaceJsonColumn(string $table, string $column, string $oldUrl, string $newUrl): void
+    {
+        DB::table($table)->orderBy('id')->each(function ($row) use ($table, $column, $oldUrl, $newUrl): void {
+            $value = json_decode((string) $row->{$column}, true);
+            $changed = false;
+            $value = $this->replaceUrl($value, $oldUrl, $newUrl, $changed);
+            if ($changed) {
+                DB::table($table)->where('id', $row->id)->update([$column => json_encode($value), 'updated_at' => now()]);
+            }
+        });
+    }
+
     /** Replaces exact scalar URL values only; text containing a URL is not modified here. */
     private function removeUrl(mixed $value, string $url, bool &$changed): mixed
     {
@@ -149,6 +214,20 @@ class MediaReferenceCleanupService
         }
 
         return array_is_list($value) ? array_values(array_filter($value, fn ($item) => $item !== null)) : $value;
+    }
+
+    private function replaceUrl(mixed $value, string $oldUrl, string $newUrl, bool &$changed): mixed
+    {
+        if ($value === $oldUrl) {
+            $changed = true;
+            return $newUrl;
+        }
+        if (! is_array($value)) return $value;
+        foreach ($value as $key => $item) {
+            $value[$key] = $this->replaceUrl($item, $oldUrl, $newUrl, $changed);
+        }
+
+        return $value;
     }
 
     private function containsUrl(mixed $value, string $url): bool

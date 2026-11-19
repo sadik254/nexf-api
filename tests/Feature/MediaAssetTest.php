@@ -5,8 +5,11 @@ namespace Tests\Feature;
 use App\Models\Admin;
 use App\Models\MediaAsset;
 use App\Models\MediaAssetStoreLibrary;
+use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Models\ProductVariation;
 use App\Models\Seller;
 use App\Models\SellerStaff;
 use App\Models\SupportTicket;
@@ -268,5 +271,54 @@ class MediaAssetTest extends TestCase
         $this->withToken($token)->postJson("/api/admin/media/{$asset->id}/purge")->assertOk();
         Storage::disk('r2')->assertMissing('media/2026/11/trash-me.png');
         $this->assertDatabaseMissing('media_assets', ['id' => $asset->id]);
+    }
+
+    public function test_uploaded_media_replacement_repoints_live_and_order_snapshot_references(): void
+    {
+        $admin = Admin::create(['name' => 'Replace admin', 'email' => 'replace-media@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $token = $admin->createToken('test', ['admin'])->plainTextToken;
+        $old = 'https://media.example.test/media/old-banner.png';
+        $new = 'https://media.example.test/media/new-banner.png';
+        $asset = MediaAsset::create(['owner_type' => 'admin', 'owner_id' => $admin->id, 'source' => 'upload', 'url' => $old, 'file_name' => 'banner.png', 'mime_type' => 'image/png']);
+        $category = ProductCategory::create(['name' => 'Replacement category', 'slug' => 'replacement-category', 'promo_image' => $old]);
+        $product = Product::create(['category_id' => $category->id, 'name' => 'Replacement product', 'slug' => 'replacement-product', 'product_type' => 'simple', 'status' => 'active', 'thumbnail' => $old, 'gallery' => [$old], 'description' => '<img src="'.$old.'">']);
+        $product->categoryPlacements()->create(['category_id' => $category->id, 'photos' => [$old]]);
+        ProductVariation::create(['product_id' => $product->id, 'image_url' => $old, 'attributes' => ['Color' => 'Blue']]);
+        $order = Order::create(['order_number' => 'MEDIA-REPLACE', 'status' => 'pending', 'subtotal' => 1, 'total' => 1, 'shipping_name' => 'Buyer', 'shipping_phone' => '01700000000', 'shipping_address' => 'Dhaka']);
+        $item = OrderItem::create(['order_id' => $order->id, 'product_id' => $product->id, 'product_name' => 'Replacement product', 'product_thumbnail' => $old, 'product_gallery' => [$old], 'product_image_variants' => ['thumbnail' => $old], 'variation_image' => $old, 'line_image' => $old, 'quantity' => 1, 'unit_selling_price' => 1, 'unit_buying_price' => 0, 'line_subtotal' => 1, 'line_cost' => 0, 'line_profit' => 1]);
+        DB::table('site_settings')->insert(['key' => 'replacement_media_setting', 'payload' => json_encode([['image' => $old]]), 'created_at' => now(), 'updated_at' => now()]);
+
+        $this->mock(MediaUploadService::class, function ($mock) use ($new): void {
+            $mock->shouldReceive('upload')->once()->andReturn($new);
+            $mock->shouldReceive('r2Key')->once()->andReturn(null);
+        });
+        $this->withToken($token)->post("/api/admin/media/{$asset->id}/replace", ['file' => UploadedFile::fake()->image('banner.png')])
+            ->assertOk()->assertJsonPath('id', $asset->id)->assertJsonPath('url', $new)->assertJsonPath('file_name', 'banner.png');
+
+        $this->assertDatabaseHas('products', ['id' => $product->id, 'thumbnail' => $new, 'gallery' => json_encode([$new])]);
+        $this->assertSame('<img src="'.$new.'">', Product::findOrFail($product->id)->description);
+        $this->assertDatabaseHas('product_variations', ['product_id' => $product->id, 'image_url' => $new]);
+        $this->assertDatabaseHas('product_categories', ['id' => $category->id, 'promo_image' => $new]);
+        $this->assertSame([$new], $product->fresh()->categoryPlacements->first()->photos);
+        $item = $item->fresh();
+        $this->assertSame($new, $item->product_thumbnail);
+        $this->assertSame([$new], $item->product_gallery);
+        $this->assertSame(['thumbnail' => $new], $item->product_image_variants);
+        $this->assertSame($new, $item->variation_image);
+        $this->assertSame($new, $item->line_image);
+        $this->assertSame([['image' => $new]], json_decode((string) DB::table('site_settings')->where('key', 'replacement_media_setting')->value('payload'), true));
+    }
+
+    public function test_media_replacement_rejects_links_and_mixed_file_kinds(): void
+    {
+        $admin = Admin::create(['name' => 'Replace admin', 'email' => 'replace-guard@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $token = $admin->createToken('test', ['admin'])->plainTextToken;
+        $linked = MediaAsset::create(['owner_type' => 'admin', 'owner_id' => $admin->id, 'source' => 'url', 'url' => 'https://example.test/logo.png', 'file_name' => 'replace-link.png', 'mime_type' => 'image/png']);
+        $photo = MediaAsset::create(['owner_type' => 'admin', 'owner_id' => $admin->id, 'source' => 'upload', 'url' => 'https://example.test/photo.png', 'file_name' => 'replace-photo.png', 'mime_type' => 'image/png']);
+
+        $this->withToken($token)->withHeader('Accept', 'application/json')->post("/api/admin/media/{$linked->id}/replace", ['file' => UploadedFile::fake()->image('new.png')])
+            ->assertUnprocessable()->assertJsonValidationErrors('file');
+        $this->withToken($token)->withHeader('Accept', 'application/json')->post("/api/admin/media/{$photo->id}/replace", ['file' => UploadedFile::fake()->create('new.mp4', 10, 'video/mp4')])
+            ->assertUnprocessable()->assertJsonValidationErrors(['file' => 'Pick a photo to replace a photo.']);
     }
 }

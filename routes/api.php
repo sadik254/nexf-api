@@ -394,6 +394,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {
     Route::post('/media/link', [MediaAssetController::class, 'link'])->middleware('perm:media.manage');
     Route::post('/media/{asset}/restore', [MediaAssetController::class, 'restore'])->middleware('perm:media.manage')->withTrashed();
     Route::post('/media/{asset}/purge', [MediaAssetController::class, 'purge'])->middleware('perm:media.manage')->withTrashed();
+    Route::post('/media/{asset}/replace', [MediaAssetController::class, 'replace'])->middleware('perm:media.manage');
     Route::post('/media/{asset}', [MediaAssetController::class, 'update'])->middleware('perm:media.manage');
     Route::post('/media/{asset}/delete', [MediaAssetController::class, 'destroy'])->middleware('perm:media.manage');
     Route::get('/collection-products', [ProductCollectionController::class, 'candidates'])->middleware('perm:collections.manage');
@@ -569,6 +570,7 @@ Route::prefix('seller')->middleware(['sanctum.type:seller', 'store.scope'])->gro
     Route::post('/media/link', [MediaAssetController::class, 'link'])->middleware('perm:media.manage');
     Route::post('/media/{asset}/restore', [MediaAssetController::class, 'restoreSellerLibrary'])->middleware('perm:media.manage');
     Route::post('/media/{asset}/purge', [MediaAssetController::class, 'purgeSellerLibrary'])->middleware('perm:media.manage');
+    Route::post('/media/{asset}/replace', [MediaAssetController::class, 'replace'])->middleware('perm:media.manage');
     Route::post('/media/{asset}', [MediaAssetController::class, 'update'])->middleware('perm:media.manage');
     // Media is intentionally the one library resource a store staff member may remove.
     Route::post('/media/{asset}/delete', [MediaAssetController::class, 'destroy'])->middleware('perm:media.manage');
