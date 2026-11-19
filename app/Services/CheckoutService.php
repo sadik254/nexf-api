@@ -33,7 +33,7 @@ class CheckoutService
         $items = [];
         $subtotal = 0.0;
         foreach ($data['items'] as $index => $itemData) {
-            $product = Product::query()->with(['seller', 'collections:id'])->availableForSale()->find($itemData['product_id']);
+            $product = Product::query()->with(['seller', 'collections:id', 'categoryPlacements:id,product_id,category_id'])->availableForSale()->find($itemData['product_id']);
             if (!$product || ($product->seller_id && (!$product->seller || $product->seller->status !== 'approved' || !$product->seller->is_active))) {
                 throw ValidationException::withMessages(['items' => ['One or more products are unavailable.']]);
             }
@@ -158,7 +158,7 @@ class CheckoutService
         $items = [];
         $subtotal = 0.0;
         foreach ($cartItems as $index => $item) {
-            $product = Product::query()->with(['seller', 'collections:id'])->availableForSale()->find($item['product_id']);
+            $product = Product::query()->with(['seller', 'collections:id', 'categoryPlacements:id,product_id,category_id'])->availableForSale()->find($item['product_id']);
             if (!$product || ($product->seller_id && (!$product->seller || !$product->seller->is_active || $product->seller->status !== 'approved'))) {
                 throw ValidationException::withMessages(['items' => ['One or more products are unavailable.']]);
             }
@@ -276,7 +276,8 @@ class CheckoutService
         $categoryIds = $this->categoryAndDescendantIds($categoryIds);
         return array_values(array_filter($items, function ($item) use ($productIds, $categoryIds, $collectionIds) {
             $product = $item['product'];
-            return ($productIds && in_array($product->id, $productIds, true)) || ($categoryIds && in_array($product->category_id, $categoryIds, true)) || ($collectionIds && $product->collections->contains(fn ($collection) => in_array($collection->id, $collectionIds, true)));
+            $productCategoryIds = [(int) $product->category_id, ...$product->categoryPlacements->pluck('category_id')->map(fn ($id) => (int) $id)->all()];
+            return ($productIds && in_array($product->id, $productIds, true)) || ($categoryIds && array_intersect($productCategoryIds, $categoryIds) !== []) || ($collectionIds && $product->collections->contains(fn ($collection) => in_array($collection->id, $collectionIds, true)));
         }));
     }
 

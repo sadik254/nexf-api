@@ -239,6 +239,29 @@ class OrderLifecycleTest extends TestCase
             ->assertOk()->assertJsonPath('discount_total', 10)->assertJsonPath('total', 110);
     }
 
+    public function test_category_discounts_match_a_products_extra_category_placement(): void
+    {
+        [$customer] = $this->checkoutFixtures(1);
+        $men = ProductCategory::create(['name' => 'Placement Men', 'slug' => 'placement-men']);
+        $menHoodies = ProductCategory::create(['name' => 'Placement Men Hoodies', 'slug' => 'placement-men-hoodies', 'parent_id' => $men->id]);
+        $menTees = ProductCategory::create(['name' => 'Placement Men Tees', 'slug' => 'placement-men-tees', 'parent_id' => $men->id]);
+        $women = ProductCategory::create(['name' => 'Placement Women', 'slug' => 'placement-women']);
+        $womenHoodies = ProductCategory::create(['name' => 'Placement Women Hoodies', 'slug' => 'placement-women-hoodies', 'parent_id' => $women->id]);
+        $placed = Product::create(['category_id' => $menHoodies->id, 'name' => 'Placed hoodie', 'slug' => 'placed-hoodie', 'product_type' => 'simple', 'status' => 'active', 'default_selling_price' => 100]);
+        $placed->categoryPlacements()->create(['category_id' => $womenHoodies->id, 'photos' => []]);
+        ProductLot::create(['product_id' => $placed->id, 'lot_number' => 'PLACED-HOODIE', 'buying_price' => 50, 'selling_price' => 100, 'quantity' => 1, 'quantity_remaining' => 1]);
+        $notPlaced = Product::create(['category_id' => $menTees->id, 'name' => 'Unplaced tee', 'slug' => 'unplaced-tee', 'product_type' => 'simple', 'status' => 'active', 'default_selling_price' => 80]);
+        ProductLot::create(['product_id' => $notPlaced->id, 'lot_number' => 'UNPLACED-TEE', 'buying_price' => 40, 'selling_price' => 80, 'quantity' => 1, 'quantity_remaining' => 1]);
+        Coupon::create(['code' => 'WOMENHOODIE10', 'discount_kind' => 'products', 'discount_type' => 'fixed', 'discount_value' => 10, 'eligible_category_ids' => [$womenHoodies->id], 'is_active' => true]);
+        $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+        $base = ['payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'WOMENHOODIE10', 'shipping_phone' => '01700000000'];
+
+        $this->withToken($token)->postJson('/api/customers/orders/preview', $base + ['items' => [['product_id' => $placed->id, 'quantity' => 1]]])
+            ->assertOk()->assertJsonPath('discount_total', 10);
+        $this->withToken($token)->postJson('/api/customers/orders/preview', $base + ['items' => [['product_id' => $notPlaced->id, 'quantity' => 1]]])
+            ->assertUnprocessable()->assertJsonValidationErrors('coupon_code');
+    }
+
     public function test_device_block_stops_checkout_preview(): void
     {
         [$customer, $product] = $this->checkoutFixtures(1);
