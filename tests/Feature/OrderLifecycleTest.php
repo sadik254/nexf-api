@@ -177,7 +177,8 @@ class OrderLifecycleTest extends TestCase
         Coupon::create(['code' => 'FREESHIP', 'discount_kind' => 'shipping', 'discount_type' => 'percentage', 'discount_value' => 0, 'is_active' => true]);
         $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
         $this->withToken($token)->postJson('/api/customers/orders/preview', ['items' => [['product_id' => $product->id, 'quantity' => 1]], 'payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'FREESHIP', 'shipping_phone' => '01700000000'])
-            ->assertOk()->assertJsonPath('shipping_charge', 0)->assertJsonPath('discount_total', 0)->assertJsonPath('total', 100);
+            ->assertOk()->assertJsonPath('shipping_charge', 0)->assertJsonPath('discount_total', 0)->assertJsonPath('total', 100)
+            ->assertJsonPath('applied_discounts.0.shipping', true);
     }
 
     public function test_targeted_free_shipping_waives_only_parcels_where_every_line_qualifies(): void

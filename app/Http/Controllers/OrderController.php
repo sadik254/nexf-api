@@ -146,6 +146,7 @@ class OrderController extends Controller
                 'code' => $discount['coupon']->code,
                 'kind' => $discount['coupon']->is_automatic ? 'automatic' : 'coupon',
                 'amount' => $discount['amount'],
+                'shipping' => (bool) ($discount['shipping'] ?? false),
             ])->values(),
             'shipping_groups' => collect($preview['shipping_groups'])->map(function (array $group) {
                 unset($group['_item_indexes']);
