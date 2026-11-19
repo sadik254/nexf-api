@@ -239,7 +239,7 @@ class CheckoutService
         if (app(CouponUsageLimitService::class)->reached($coupon, $customer, $shippingPhone, $excludeOrderId)) throw ValidationException::withMessages([$field => ['Coupon usage limit reached for this customer.']]);
         if ($this->isShippingCoupon($coupon)) {
             if ($shippingGroups === null || $this->shippingCouponGroupIndexes($coupon, $items, $shippingGroups) === []) {
-                throw ValidationException::withMessages([$field => ['Free delivery needs every item from a store to qualify.']]);
+                throw ValidationException::withMessages([$field => ['Nothing in your cart qualifies for free delivery.']]);
             }
             return;
         }
@@ -287,27 +287,31 @@ class CheckoutService
     }
 
     /**
-     * Return indexes of parcels that can ship free. A targeted coupon applies
-     * only where every line belongs to its selected products/categories/
-     * collections. A seller coupon cannot make another store's parcel free.
+     * Return indexes of parcels that can ship free. One eligible line waives
+     * its whole parcel; a seller coupon considers only its store's own lines.
      *
      * @return array<int, int>
      */
     private function shippingCouponGroupIndexes(Coupon $coupon, array $items, array $groups): array
     {
         $qualified = [];
+        $qualifyingItems = [];
         foreach ($groups as $groupIndex => $group) {
             $indexes = $group['_item_indexes'] ?? [];
             $groupItems = array_values(array_filter($items, fn ($item, $index) => in_array($index, $indexes, true), ARRAY_FILTER_USE_BOTH));
             if (!$groupItems) continue;
-            if ($coupon->seller_id && collect($groupItems)->contains(fn ($item) => (int) $item['product']->seller_id !== (int) $coupon->seller_id)) continue;
-            $selected = $this->selectedItems($groupItems, $coupon->eligible_product_ids, $coupon->eligible_category_ids, $coupon->eligible_collection_ids);
-            if (count($selected) === count($groupItems)) $qualified[] = $groupIndex;
+            $candidateItems = $coupon->seller_id
+                ? array_values(array_filter($groupItems, fn ($item) => (int) $item['product']->seller_id === (int) $coupon->seller_id))
+                : $groupItems;
+            $selected = $this->selectedItems($candidateItems, $coupon->eligible_product_ids, $coupon->eligible_category_ids, $coupon->eligible_collection_ids);
+            if ($selected !== []) {
+                $qualified[] = $groupIndex;
+                array_push($qualifyingItems, ...$selected);
+            }
         }
 
-        $qualifiedItems = collect($qualified)->flatMap(fn (int $index) => array_values(array_filter($items, fn ($item, $itemIndex) => in_array($itemIndex, $groups[$index]['_item_indexes'] ?? [], true), ARRAY_FILTER_USE_BOTH)))->all();
-        $qualifiedSubtotal = array_sum(array_map(fn ($item) => (float) $item['quote']['subtotal'], $qualifiedItems));
-        $qualifiedQuantity = array_sum(array_map(fn ($item) => (int) $item['quantity'], $qualifiedItems));
+        $qualifiedSubtotal = array_sum(array_map(fn ($item) => (float) $item['quote']['subtotal'], $qualifyingItems));
+        $qualifiedQuantity = array_sum(array_map(fn ($item) => (int) $item['quantity'], $qualifyingItems));
         if ($coupon->minimum_order_amount !== null && $qualifiedSubtotal < (float) $coupon->minimum_order_amount) return [];
         if ($coupon->minimum_quantity !== null && $qualifiedQuantity < (int) $coupon->minimum_quantity) return [];
 

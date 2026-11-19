@@ -181,7 +181,7 @@ class OrderLifecycleTest extends TestCase
             ->assertJsonPath('applied_discounts.0.shipping', true);
     }
 
-    public function test_targeted_free_shipping_waives_only_parcels_where_every_line_qualifies(): void
+    public function test_targeted_free_shipping_waives_only_parcels_with_a_qualifying_line(): void
     {
         [$customer, $firstProduct] = $this->checkoutFixtures(1, true);
         $collection = ProductCollection::create(['seller_id' => $firstProduct->seller_id, 'name' => 'Eid', 'description' => 'Eid products']);
@@ -202,13 +202,27 @@ class OrderLifecycleTest extends TestCase
             ->assertJsonPath('shipping_groups.0.shipping_charge', 0)->assertJsonPath('shipping_groups.1.shipping_charge', 20);
 
         $this->postJson('/api/coupons/validate', ['code' => 'EIDSHIP', 'items' => [['product_id' => $secondProduct->id, 'quantity' => 1]]])
-            ->assertUnprocessable()->assertJsonPath('message', 'Free delivery needs every item from a store to qualify.')
-            ->assertJsonValidationErrors(['coupon_code' => 'Free delivery needs every item from a store to qualify.']);
+            ->assertUnprocessable()->assertJsonPath('message', 'Nothing in your cart qualifies for free delivery.')
+            ->assertJsonValidationErrors(['coupon_code' => 'Nothing in your cart qualifies for free delivery.']);
 
         $order = $this->withToken($token)->postJson('/api/customers/orders', $payload + ['shipping_name' => 'Customer', 'shipping_address' => 'Dhaka'])
             ->assertCreated()->assertJsonPath('order.shipping_charge', '20.00')->assertJsonPath('order.total', '180.00')->json('order');
         $this->assertDatabaseHas('order_store_groups', ['order_id' => $order['id'], 'seller_id' => $firstProduct->seller_id, 'shipping_charge' => 0]);
         $this->assertDatabaseHas('order_store_groups', ['order_id' => $order['id'], 'seller_id' => $secondSeller->id, 'shipping_charge' => 20]);
+    }
+
+    public function test_one_qualifying_line_makes_its_mixed_store_parcel_free(): void
+    {
+        [$customer, $qualifying] = $this->checkoutFixtures(1, true);
+        $other = Product::create(['seller_id' => $qualifying->seller_id, 'category_id' => $qualifying->category_id, 'name' => 'Mixed parcel item', 'slug' => 'mixed-parcel-item', 'product_type' => 'simple', 'status' => 'active', 'default_selling_price' => 60]);
+        ProductLot::create(['product_id' => $other->id, 'lot_number' => 'MIXED-PARCEL', 'buying_price' => 30, 'selling_price' => 60, 'quantity' => 1, 'quantity_remaining' => 1]);
+        Coupon::create(['code' => 'ONE-LINE-SHIPS-FREE', 'discount_kind' => 'shipping', 'discount_type' => 'fixed', 'discount_value' => 0, 'eligible_product_ids' => [$qualifying->id], 'is_active' => true]);
+
+        $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+        $payload = ['items' => [['product_id' => $qualifying->id, 'quantity' => 1], ['product_id' => $other->id, 'quantity' => 1]], 'payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'ONE-LINE-SHIPS-FREE', 'shipping_phone' => '01700000000'];
+        $this->withToken($token)->postJson('/api/customers/orders/preview', $payload)
+            ->assertOk()->assertJsonCount(1, 'shipping_groups')->assertJsonPath('shipping_groups.0.shipping_charge', 0)
+            ->assertJsonPath('shipping_charge', 0)->assertJsonPath('total', 160);
     }
 
     public function test_buy_x_get_y_discount_only_rewards_the_configured_quantity(): void
