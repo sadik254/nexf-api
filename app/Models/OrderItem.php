@@ -23,6 +23,7 @@ class OrderItem extends Model
         'variation_attributes',
         'variation_labels',
         'variation_image',
+        'line_image',
         'bundle_label',
         'bundle_source_id',
         'bundle_source_label',

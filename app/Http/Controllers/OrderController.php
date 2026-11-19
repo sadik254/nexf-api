@@ -1633,6 +1633,7 @@ class OrderController extends Controller
                     'variation_attributes' => $variation?->attributes,
                     'variation_labels' => $this->variationLabels($product, $variation),
                     'variation_image' => $variation?->image_url,
+                    'line_image' => $this->lineImage($product, $itemData['image_url'] ?? null),
                     'bundle_label' => $bundleLabel,
                     'bundle_source_id' => $bundle?->id,
                     'bundle_source_label' => $bundle?->label,
@@ -1804,6 +1805,7 @@ class OrderController extends Controller
             'items.*.bundle_items.*.variation_id' => ['nullable', 'integer', 'exists:product_variations,id'],
             'items.*.bundle_items.*.quantity' => ['required_with:items.*.bundle_items', 'integer', 'min:1'],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'items.*.image_url' => ['nullable', 'url', 'starts_with:https://', 'max:2048'],
             'payment_method_id' => ['required', 'integer', 'exists:payment_methods,id'],
             'shipping_method_id' => ['required', 'integer', 'exists:shipping_methods,id'],
             'coupon_code' => ['nullable', 'string', 'max:64'],
@@ -1844,6 +1846,18 @@ class OrderController extends Controller
         }
 
         return $labels;
+    }
+
+    /** Keep a shopper-selected image only when it is actually this product's media. */
+    private function lineImage(Product $product, ?string $imageUrl): ?string
+    {
+        if (!$imageUrl) return null;
+
+        if (in_array($imageUrl, array_filter([$product->thumbnail, ...($product->gallery ?? [])]), true)) {
+            return $imageUrl;
+        }
+
+        return $product->variations()->where('image_url', $imageUrl)->exists() ? $imageUrl : null;
     }
 
     private function bundleSnapshot(Product $product, array $components): array
@@ -1940,6 +1954,7 @@ class OrderController extends Controller
             'product_gallery' => $product->gallery, 'product_image_variants' => $product->image_variants,
             'sku' => $variation?->sku, 'variation_attributes' => $variation?->attributes, 'quantity' => $quantity,
             'variation_labels' => $this->variationLabels($product, $variation), 'variation_image' => $variation?->image_url,
+            'line_image' => $this->lineImage($product, $itemData['image_url'] ?? null),
             'bundle_label' => $bundleLabel, 'bundle_source_id' => $bundle?->id, 'bundle_source_label' => $bundle?->label,
             'bundle_source_size' => $bundle?->size, 'bundle_source_price' => $bundle?->price,
             'bundle_items' => $bundle ? $this->bundleSnapshot($product, $bundleComponents) : null,

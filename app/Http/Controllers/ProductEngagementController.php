@@ -32,7 +32,7 @@ class ProductEngagementController extends Controller
         return response()->json(Review::query()
             ->where('customer_id', $customer->id)
             ->when($request->filled('product_id'), fn ($q) => $q->where('product_id', (int) $request->query('product_id')))
-            ->with(['product:id,name,slug,thumbnail,gallery,seller_id,owner_unassigned', 'product.seller:id,store_name', 'orderItem:id,variation_attributes,variation_labels,variation_image,bundle_label,bundle_source_label,bundle_source_size,bundle_items,product_name,product_thumbnail,seller_id,order_id', 'orderItem.seller:id,store_name', 'orderItem.order:id', 'orderItem.order.items:id,order_id,product_id,variation_attributes,variation_labels,variation_image,bundle_label,bundle_source_label,bundle_source_size,bundle_items,quantity', 'orderItem.order.storeGroups:id,order_id,seller_id,store_name'])->withCount('likes')
+            ->with(['product:id,name,slug,thumbnail,gallery,seller_id,owner_unassigned', 'product.seller:id,store_name', 'orderItem:id,variation_attributes,variation_labels,variation_image,line_image,bundle_label,bundle_source_label,bundle_source_size,bundle_items,product_name,product_thumbnail,seller_id,order_id', 'orderItem.seller:id,store_name', 'orderItem.order:id', 'orderItem.order.items:id,order_id,product_id,variation_attributes,variation_labels,variation_image,line_image,bundle_label,bundle_source_label,bundle_source_size,bundle_items,quantity', 'orderItem.order.storeGroups:id,order_id,seller_id,store_name'])->withCount('likes')
             ->latest()->paginate($perPage)->through(function ($review) {
                 $item = $review->orderItem;
                 $group = $item?->order?->storeGroups?->first(fn ($group) => $group->seller_id === $item->seller_id);
@@ -63,7 +63,7 @@ class ProductEngagementController extends Controller
                 /** @var Collection<int, OrderItem> $lines */
                 $first = $lines->sortBy('id')->first();
                 $first->setAttribute('order_item_ids', $lines->pluck('id')->sort()->values()->all());
-                $first->setAttribute('variants', $lines->sortBy('id')->map(fn (OrderItem $item) => ['order_item_id' => $item->id, 'variation_attributes' => $item->variation_attributes, 'variation_labels' => $item->variation_labels, 'variation_image' => $item->variation_image, 'quantity' => $item->quantity])->values()->all());
+                $first->setAttribute('variants', $lines->sortBy('id')->map(fn (OrderItem $item) => ['order_item_id' => $item->id, 'variation_attributes' => $item->variation_attributes, 'variation_labels' => $item->variation_labels, 'variation_image' => $item->variation_image, 'line_image' => $item->line_image, 'quantity' => $item->quantity])->values()->all());
                 $first->quantity = (int) $lines->sum('quantity');
                 $first->setAttribute('seller_store_name', $first->seller_id === null ? (Store::primary()?->name ?? config('app.name')) : $first->seller?->store_name);
 
@@ -257,7 +257,7 @@ class ProductEngagementController extends Controller
         $status = $request->validate(['status' => ['sometimes', 'in:pending,approved,rejected,all']])['status'] ?? 'pending';
         $perPage = max(1, min((int) $request->query('per_page', 25), 100));
         $reviews = Review::query()->withCount('likes')
-            ->with(['customer:id,name,profile_picture', 'product:id,name,slug,thumbnail,seller_id', 'product.seller:id,store_name,store_slug', 'orderItem:id,variation_attributes,variation_labels,variation_image,bundle_label,bundle_source_label,bundle_source_size,bundle_items,product_name,product_thumbnail,order_id', 'orderItem.order:id', 'orderItem.order.items:id,order_id,product_id,variation_attributes,variation_labels,variation_image,bundle_label,bundle_source_label,bundle_source_size,bundle_items,quantity'])
+            ->with(['customer:id,name,profile_picture', 'product:id,name,slug,thumbnail,seller_id', 'product.seller:id,store_name,store_slug', 'orderItem:id,variation_attributes,variation_labels,variation_image,line_image,bundle_label,bundle_source_label,bundle_source_size,bundle_items,product_name,product_thumbnail,order_id', 'orderItem.order:id', 'orderItem.order.items:id,order_id,product_id,variation_attributes,variation_labels,variation_image,line_image,bundle_label,bundle_source_label,bundle_source_size,bundle_items,quantity'])
             ->when($status !== 'all', fn ($query) => $query->where('status', $status))
             ->whereHas('product', fn ($query) => $sellerId === -1
                 ? $query
@@ -440,7 +440,7 @@ class ProductEngagementController extends Controller
 
         return response()->json([
             'message' => "Review {$data['status']} successfully.",
-            'review' => $review->fresh(['customer:id,name,profile_picture', 'product:id,name,slug,thumbnail,seller_id', 'product.seller:id,store_name,store_slug', 'orderItem:id,order_id,variation_attributes,variation_labels,variation_image,bundle_label,bundle_source_label,bundle_source_size,bundle_items,product_name,product_thumbnail', 'orderItem.order:id', 'orderItem.order.items:id,order_id,product_id,variation_attributes,variation_labels,variation_image,bundle_label,bundle_source_label,bundle_source_size,bundle_items,quantity']),
+            'review' => $review->fresh(['customer:id,name,profile_picture', 'product:id,name,slug,thumbnail,seller_id', 'product.seller:id,store_name,store_slug', 'orderItem:id,order_id,variation_attributes,variation_labels,variation_image,line_image,bundle_label,bundle_source_label,bundle_source_size,bundle_items,product_name,product_thumbnail', 'orderItem.order:id', 'orderItem.order.items:id,order_id,product_id,variation_attributes,variation_labels,variation_image,line_image,bundle_label,bundle_source_label,bundle_source_size,bundle_items,quantity']),
         ]);
     }
 
@@ -451,6 +451,7 @@ class ProductEngagementController extends Controller
             'variation_attributes' => $line->variation_attributes,
             'variation_labels' => $line->variation_labels,
             'variation_image' => $line->variation_image,
+            'line_image' => $line->line_image,
             'bundle_label' => $line->bundle_label,
             'bundle_source_label' => $line->bundle_source_label,
             'bundle_source_size' => $line->bundle_source_size,
