@@ -65,20 +65,27 @@ class CheckoutService
             $items[] = ['product' => $product, 'variation' => $variation, 'quantity' => $quantity, 'quote' => $quote, 'bundle' => $resolvedBundle['bundle'] ?? null, 'bundle_components' => $resolvedBundle['components'] ?? [], 'bundle_label' => $resolvedBundle['label'] ?? null, 'bundle_unit_price' => $resolvedBundle['unitPrice'] ?? null];
         }
 
-        $shipping = $this->storeShipping->quote(array_map(fn ($item) => [
+        $shipping = $this->storeShipping->quote(array_map(fn ($item, $index) => [
             'product' => $item['product'],
             'subtotal' => $item['quote']['subtotal'],
-        ], $items), $shippingMethod, $data['store_shipping_methods'] ?? [], $data['store_delivery_options'] ?? []);
-        $coupons = $this->resolveCoupons($data['coupon_code'] ?? null, $subtotal, $customer, $items, isset($data['exclude_order_id']) ? (int) $data['exclude_order_id'] : null, $data['shipping_phone'] ?? null);
+            'index' => $index,
+        ], $items, array_keys($items)), $shippingMethod, $data['store_shipping_methods'] ?? [], $data['store_delivery_options'] ?? []);
+        $coupons = $this->resolveCoupons($data['coupon_code'] ?? null, $subtotal, $customer, $items, isset($data['exclude_order_id']) ? (int) $data['exclude_order_id'] : null, $data['shipping_phone'] ?? null, $shipping['groups']);
+        $shippingDiscounts = $this->applyShippingDiscounts($coupons->all(), $items, $shipping);
         $appliedDiscounts = [];
         $remaining = $subtotal + (float) $shipping['total'];
         foreach ($coupons as $coupon) {
+            if ($this->isShippingCoupon($coupon)) {
+                $amount = $shippingDiscounts[$coupon->id] ?? 0.0;
+                if ($amount > 0) $appliedDiscounts[] = ['coupon' => $coupon, 'amount' => $amount, 'shipping' => true];
+                continue;
+            }
             $amount = min($remaining, $this->discountForCart($coupon, $items, $subtotal, (float) $shipping['total']));
             if ($amount <= 0) continue;
-            $appliedDiscounts[] = ['coupon' => $coupon, 'amount' => $amount];
+            $appliedDiscounts[] = ['coupon' => $coupon, 'amount' => $amount, 'shipping' => false];
             $remaining = round($remaining - $amount, 2);
         }
-        $discount = round(array_sum(array_column($appliedDiscounts, 'amount')), 2);
+        $discount = round(array_sum(array_map(fn (array $discount) => !empty($discount['shipping']) ? 0.0 : $discount['amount'], $appliedDiscounts)), 2);
         $total = round($subtotal + $shipping['total'] - $discount, 2);
         $walletAmount = 0.0;
         $walletRewardAmount = 0.0;
@@ -178,8 +185,16 @@ class CheckoutService
             $subtotal = round($subtotal + $quote['subtotal'], 2);
             $items[] = compact('product', 'variation', 'quantity', 'quote') + ['bundle' => $resolvedBundle['bundle'] ?? null, 'bundle_components' => $resolvedBundle['components'] ?? [], 'bundle_label' => $resolvedBundle['label'] ?? null, 'bundle_unit_price' => $resolvedBundle['unitPrice'] ?? null];
         }
-        $coupon = $this->resolveCoupon($code, $subtotal, $customer, $items);
-        $discount = $this->discountForCart($coupon, $items, $subtotal, $shippingAmount);
+        // Coupon validation may be called before checkout has an address. It
+        // still derives the true parcel membership, so a targeted free-shipping
+        // code is rejected only if it cannot waive any parcel at all. The exact
+        // waived delivery amount comes from checkout preview's chosen rates.
+        $parcelIndexes = $this->storeShipping->parcelLineIndexes(array_map(fn ($item, $index) => ['product' => $item['product'], 'index' => $index], $items, array_keys($items)));
+        $shippingGroups = array_map(fn (array $indexes) => ['_item_indexes' => $indexes], $parcelIndexes);
+        $coupon = $this->resolveCoupon($code, $subtotal, $customer, $items, null, null, $shippingGroups);
+        $discount = $this->isShippingCoupon($coupon)
+            ? $shippingAmount
+            : $this->discountForCart($coupon, $items, $subtotal, $shippingAmount);
         return [
             'coupon' => $coupon,
             'subtotal' => $subtotal,
@@ -188,46 +203,56 @@ class CheckoutService
         ];
     }
 
-    private function resolveCoupon(?string $couponCode, float $subtotal, ?Customer $customer, array $items, ?int $excludeOrderId = null, ?string $shippingPhone = null): ?Coupon
+    private function resolveCoupon(?string $couponCode, float $subtotal, ?Customer $customer, array $items, ?int $excludeOrderId = null, ?string $shippingPhone = null, ?array $shippingGroups = null): ?Coupon
     {
-        return $this->resolveCoupons($couponCode, $subtotal, $customer, $items, $excludeOrderId, $shippingPhone)->first();
+        return $this->resolveCoupons($couponCode, $subtotal, $customer, $items, $excludeOrderId, $shippingPhone, $shippingGroups)->first();
     }
 
     /** @return \Illuminate\Support\Collection<int, Coupon> */
-    private function resolveCoupons(?string $couponCode, float $subtotal, ?Customer $customer, array $items, ?int $excludeOrderId = null, ?string $shippingPhone = null): \Illuminate\Support\Collection
+    private function resolveCoupons(?string $couponCode, float $subtotal, ?Customer $customer, array $items, ?int $excludeOrderId = null, ?string $shippingPhone = null, ?array $shippingGroups = null): \Illuminate\Support\Collection
     {
         $coupons = collect();
         if ($couponCode) {
             $coupon = Coupon::where('code', preg_replace('/[^A-Z0-9_-]/', '', Str::upper($couponCode)))->first();
             if (!$coupon) throw ValidationException::withMessages(['coupon_code' => ['Coupon code was not found.']]);
-            $this->assertCouponApplies($coupon, $subtotal, $customer, $items, $excludeOrderId, 'coupon_code', $shippingPhone);
+            $this->assertCouponApplies($coupon, $subtotal, $customer, $items, $excludeOrderId, 'coupon_code', $shippingPhone, $shippingGroups);
             $coupons->push($coupon);
         }
 
         // Every eligible automatic discount is shown and included in the quote.
-        Coupon::query()->where('is_automatic', true)->orderBy('id')->get()->each(function (Coupon $coupon) use ($subtotal, $customer, $items, $excludeOrderId, $shippingPhone, $coupons): void {
-            if ($coupon->unusableReason() || ($coupon->minimum_order_amount !== null && $subtotal < (float) $coupon->minimum_order_amount)) return;
+        Coupon::query()->where('is_automatic', true)->orderBy('id')->get()->each(function (Coupon $coupon) use ($subtotal, $customer, $items, $excludeOrderId, $shippingPhone, $shippingGroups, $coupons): void {
+            if ($coupon->unusableReason() || (!$this->isShippingCoupon($coupon) && $coupon->minimum_order_amount !== null && $subtotal < (float) $coupon->minimum_order_amount)) return;
             if (app(CouponUsageLimitService::class)->reached($coupon, $customer, $shippingPhone, $excludeOrderId)) return;
-            if ($this->couponMatches($coupon, $items) && !$coupons->contains('id', $coupon->id)) $coupons->push($coupon);
+            $matches = $this->isShippingCoupon($coupon)
+                ? $shippingGroups !== null && $this->shippingCouponGroupIndexes($coupon, $items, $shippingGroups) !== []
+                : $this->couponMatches($coupon, $items);
+            if ($matches && !$coupons->contains('id', $coupon->id)) $coupons->push($coupon);
         });
 
         return $coupons;
     }
 
-    private function assertCouponApplies(Coupon $coupon, float $subtotal, ?Customer $customer, array $items, ?int $excludeOrderId, string $field, ?string $shippingPhone = null): void
+    private function assertCouponApplies(Coupon $coupon, float $subtotal, ?Customer $customer, array $items, ?int $excludeOrderId, string $field, ?string $shippingPhone = null, ?array $shippingGroups = null): void
     {
         if ($reason = $coupon->unusableReason()) throw ValidationException::withMessages([$field => [$reason]]);
-        if ($coupon->minimum_order_amount !== null && $subtotal < (float) $coupon->minimum_order_amount) throw ValidationException::withMessages([$field => ['Minimum order amount not reached for this coupon.']]);
+        if (!$this->isShippingCoupon($coupon) && $coupon->minimum_order_amount !== null && $subtotal < (float) $coupon->minimum_order_amount) throw ValidationException::withMessages([$field => ['Minimum order amount not reached for this coupon.']]);
         if (app(CouponUsageLimitService::class)->reached($coupon, $customer, $shippingPhone, $excludeOrderId)) throw ValidationException::withMessages([$field => ['Coupon usage limit reached for this customer.']]);
+        if ($this->isShippingCoupon($coupon)) {
+            if ($shippingGroups === null || $this->shippingCouponGroupIndexes($coupon, $items, $shippingGroups) === []) {
+                throw ValidationException::withMessages([$field => ['Free delivery needs every item from a store to qualify.']]);
+            }
+            return;
+        }
         if (!$this->couponMatches($coupon, $items)) throw ValidationException::withMessages([$field => ['This discount does not apply to the items in your cart.']]);
     }
 
     private function couponMatches(Coupon $coupon, array $items): bool
     {
         $quantity = array_sum(array_map(fn ($item) => $item['quantity'], $items));
-        if ($coupon->minimum_quantity !== null && $quantity < $coupon->minimum_quantity) return false;
+        if (!$this->isShippingCoupon($coupon) && $coupon->minimum_quantity !== null && $quantity < $coupon->minimum_quantity) return false;
         $products = array_map(fn ($item) => $item['product'], $items);
         if ($coupon->seller_id && !collect($products)->contains(fn ($product) => (int) $product->seller_id === (int) $coupon->seller_id)) return false;
+        if ($this->isShippingCoupon($coupon)) return true;
         if ($coupon->discount_kind === 'bxgy') {
             return $this->bxgyDiscount($coupon, $items) > 0;
         }
@@ -237,7 +262,7 @@ class CheckoutService
 
     private function discountForCart(Coupon $coupon, array $items, float $subtotal, float $shipping): float
     {
-        if ($coupon->discount_kind === 'shipping' || $coupon->applies_to === 'shipping') return min($shipping, $coupon->discountForSubtotal($shipping));
+        if ($this->isShippingCoupon($coupon)) return 0.0;
         if ($coupon->discount_kind === 'bxgy') {
             return min($subtotal, $this->bxgyDiscount($coupon, $items));
         }
@@ -253,6 +278,57 @@ class CheckoutService
             $product = $item['product'];
             return ($productIds && in_array($product->id, $productIds, true)) || ($categoryIds && in_array($product->category_id, $categoryIds, true)) || ($collectionIds && $product->collections->contains(fn ($collection) => in_array($collection->id, $collectionIds, true)));
         }));
+    }
+
+    private function isShippingCoupon(Coupon $coupon): bool
+    {
+        return $coupon->discount_kind === 'shipping' || $coupon->applies_to === 'shipping';
+    }
+
+    /**
+     * Return indexes of parcels that can ship free. A targeted coupon applies
+     * only where every line belongs to its selected products/categories/
+     * collections. A seller coupon cannot make another store's parcel free.
+     *
+     * @return array<int, int>
+     */
+    private function shippingCouponGroupIndexes(Coupon $coupon, array $items, array $groups): array
+    {
+        $qualified = [];
+        foreach ($groups as $groupIndex => $group) {
+            $indexes = $group['_item_indexes'] ?? [];
+            $groupItems = array_values(array_filter($items, fn ($item, $index) => in_array($index, $indexes, true), ARRAY_FILTER_USE_BOTH));
+            if (!$groupItems) continue;
+            if ($coupon->seller_id && collect($groupItems)->contains(fn ($item) => (int) $item['product']->seller_id !== (int) $coupon->seller_id)) continue;
+            $selected = $this->selectedItems($groupItems, $coupon->eligible_product_ids, $coupon->eligible_category_ids, $coupon->eligible_collection_ids);
+            if (count($selected) === count($groupItems)) $qualified[] = $groupIndex;
+        }
+
+        $qualifiedItems = collect($qualified)->flatMap(fn (int $index) => array_values(array_filter($items, fn ($item, $itemIndex) => in_array($itemIndex, $groups[$index]['_item_indexes'] ?? [], true), ARRAY_FILTER_USE_BOTH)))->all();
+        $qualifiedSubtotal = array_sum(array_map(fn ($item) => (float) $item['quote']['subtotal'], $qualifiedItems));
+        $qualifiedQuantity = array_sum(array_map(fn ($item) => (int) $item['quantity'], $qualifiedItems));
+        if ($coupon->minimum_order_amount !== null && $qualifiedSubtotal < (float) $coupon->minimum_order_amount) return [];
+        if ($coupon->minimum_quantity !== null && $qualifiedQuantity < (int) $coupon->minimum_quantity) return [];
+
+        return $qualified;
+    }
+
+    /** Apply each shipping coupon to its eligible parcels and return its waiver. */
+    public function applyShippingDiscounts(array $coupons, array $items, array &$shipping): array
+    {
+        $amounts = [];
+        foreach ($coupons as $coupon) {
+            if (!$coupon instanceof Coupon || !$this->isShippingCoupon($coupon)) continue;
+            $amount = 0.0;
+            foreach ($this->shippingCouponGroupIndexes($coupon, $items, $shipping['groups']) as $index) {
+                $amount = round($amount + (float) $shipping['groups'][$index]['shipping_charge'], 2);
+                $shipping['groups'][$index]['shipping_charge'] = 0.0;
+            }
+            if ($amount > 0) $amounts[$coupon->id] = $amount;
+        }
+        $shipping['total'] = round(array_sum(array_map(fn (array $group) => (float) $group['shipping_charge'], $shipping['groups'])), 2);
+
+        return $amounts;
     }
 
     /** A category discount includes every nested category beneath the chosen parent. */

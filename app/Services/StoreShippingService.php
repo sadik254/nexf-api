@@ -14,6 +14,32 @@ use Illuminate\Validation\ValidationException;
 class StoreShippingService
 {
     /**
+     * Parcel membership without calculating delivery prices. Coupon validation
+     * uses this before checkout has a complete delivery-method selection.
+     *
+     * @param array<int, array{product: Product, index?: int}> $lines
+     * @return array<int, array<int, int>>
+     */
+    public function parcelLineIndexes(array $lines, ?int $forceIndividualSellerId = null): array
+    {
+        $membership = [];
+        foreach (DeliveryGroup::query()->get() as $group) {
+            if ($group->includes_house) $membership['house'] = $group;
+            foreach ($group->seller_ids ?? [] as $id) $membership['seller:' . (int) $id] = $group;
+        }
+        $parcels = [];
+        foreach ($lines as $index => $line) {
+            $sellerId = $line['product']->seller_id === null ? null : (int) $line['product']->seller_id;
+            $memberKey = $sellerId === null ? 'house' : "seller:{$sellerId}";
+            $group = $forceIndividualSellerId !== null && $sellerId === $forceIndividualSellerId ? null : ($membership[$memberKey] ?? null);
+            $key = $group ? "delivery-group:{$group->id}" : $memberKey;
+            $parcels[$key][] = $line['index'] ?? $index;
+        }
+
+        return array_values($parcels);
+    }
+
+    /**
      * Produces one delivery charge for each shipping store. Stores in a shared
      * delivery group are represented by their group's main store and share one
      * charge, including when a linked store is the only store in the basket.
@@ -36,7 +62,7 @@ class StoreShippingService
         $methods = ShippingMethod::query()->active()->orderBy('sort_order')->orderBy('id')->get()->keyBy('id');
         $groups = [];
 
-        foreach ($lines as $line) {
+        foreach ($lines as $index => $line) {
             $product = $line['product'];
             $productSellerId = $product->seller_id === null ? null : (int) $product->seller_id;
             $memberKey = $productSellerId === null ? 'house' : "seller:{$productSellerId}";
@@ -93,6 +119,9 @@ class StoreShippingService
                 }
             }
             $groups[$key]['subtotal'] = round($groups[$key]['subtotal'] + (float) $line['subtotal'], 2);
+            // Internal only: checkout uses this to decide whether every line in
+            // a parcel qualifies for a targeted free-shipping discount.
+            $groups[$key]['_item_indexes'][] = $line['index'] ?? $index;
         }
 
         $groups = array_values($groups);
@@ -111,7 +140,7 @@ class StoreShippingService
 
     private function groupRow(?int $sellerId, array $memberNames, ?int $methodId, array $selected, array $options): array
     {
-        return ['seller_id'=>$sellerId,'shipping_method_id'=>$methodId,'store_name'=>implode(', ', $memberNames),'store_names'=>$memberNames,'subtotal'=>0.0,'shipping_method_code'=>$selected['code'],'shipping_method_name'=>$selected['name'],'shipping_charge'=>$selected['charge'],'shipping_currency'=>$selected['currency'],'shipping_options'=>$options];
+        return ['seller_id'=>$sellerId,'shipping_method_id'=>$methodId,'store_name'=>implode(', ', $memberNames),'store_names'=>$memberNames,'subtotal'=>0.0,'shipping_method_code'=>$selected['code'],'shipping_method_name'=>$selected['name'],'shipping_charge'=>$selected['charge'],'shipping_currency'=>$selected['currency'],'shipping_options'=>$options, '_item_indexes'=>[]];
     }
     private function memberNames(DeliveryGroup $group, $sellers): array {
         $names=[]; if($group->includes_house)$names[]=Store::primary()?->name??config('app.name');foreach($group->seller_ids??[] as $id)if($seller=$sellers->get((int)$id))$names[]=$seller->store_name;return $names;

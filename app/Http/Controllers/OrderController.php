@@ -147,7 +147,10 @@ class OrderController extends Controller
                 'kind' => $discount['coupon']->is_automatic ? 'automatic' : 'coupon',
                 'amount' => $discount['amount'],
             ])->values(),
-            'shipping_groups' => $preview['shipping_groups'],
+            'shipping_groups' => collect($preview['shipping_groups'])->map(function (array $group) {
+                unset($group['_item_indexes']);
+                return $group;
+            })->values(),
             'shipping_charge' => $preview['shipping_charge'], 'total' => $preview['total'],
             'wallet_amount' => $preview['wallet_amount'] ?? 0,
             'wallet_reward_amount' => $preview['wallet_reward_amount'] ?? 0,
@@ -704,17 +707,24 @@ class OrderController extends Controller
             $shippingLines = [];
             foreach ($nexfData as $lineIndex => $itemData) {
                 [$product, $lineSubtotal] = $this->addEditedLine($locked, $itemData, $actor, $itemFulfillmentState, $keepRequest, field: "items.{$lineIndex}");
-                $shippingLines[] = ['product' => $product, 'subtotal' => $lineSubtotal];
+                $shippingLines[] = ['product' => $product, 'subtotal' => $lineSubtotal, 'index' => $lineIndex];
             }
 
             $paymentMethod = PaymentMethod::query()->active()->findOrFail($data['payment_method_id']);
             $shippingMethod = $preview['shippingMethod'];
             $shipping = $this->storeShipping->quote($shippingLines, $shippingMethod, $data['store_shipping_methods'] ?? [], $data['store_delivery_options'] ?? []);
             $appliedDiscounts = $this->lockAppliedDiscounts($preview, $customer, $data['shipping_phone']);
+            $shippingDiscounts = $this->checkout->applyShippingDiscounts(array_column($appliedDiscounts, 'coupon'), $preview['items'] ?? [], $shipping);
+            $appliedDiscounts = array_values(array_filter(array_map(function (array $discount) use ($shippingDiscounts) {
+                if ($discount['coupon']->discount_kind !== 'shipping' && $discount['coupon']->applies_to !== 'shipping') return $discount;
+                $discount['amount'] = $shippingDiscounts[$discount['coupon']->id] ?? 0.0;
+                $discount['shipping'] = true;
+                return $discount['amount'] > 0 ? $discount : null;
+            }, $appliedDiscounts)));
             $coupon = $appliedDiscounts[0]['coupon'] ?? null;
-            $couponDiscount = round(array_sum(array_column($appliedDiscounts, 'amount')) + $keptRedemptions->sum(fn (CouponRedemption $r) => (float) $r->discount_amount), 2);
+            $couponDiscount = round(array_sum(array_map(fn (array $discount) => !empty($discount['shipping']) ? 0.0 : $discount['amount'], $appliedDiscounts)) + $keptRedemptions->sum(fn (CouponRedemption $r) => (float) $r->discount_amount), 2);
             $locked->storeGroups()->createMany(collect($shipping['groups'])->map(function (array $group) {
-                unset($group['shipping_options']);
+                unset($group['shipping_options'], $group['_item_indexes']);
 
                 return $group;
             })->all());
@@ -1657,8 +1667,15 @@ class OrderController extends Controller
 
             $shipping = $this->storeShipping->quote($shippingLines, $shippingMethod, $data['store_shipping_methods'] ?? [], $data['store_delivery_options'] ?? [], $forceIndividualSellerId ? (int) $forceIndividualSellerId : null);
             $appliedDiscounts = $this->lockAppliedDiscounts($preview, $customer, $data['shipping_phone']);
+            $shippingDiscounts = $this->checkout->applyShippingDiscounts(array_column($appliedDiscounts, 'coupon'), $preview['items'], $shipping);
+            $appliedDiscounts = array_values(array_filter(array_map(function (array $discount) use ($shippingDiscounts) {
+                if ($discount['coupon']->discount_kind !== 'shipping' && $discount['coupon']->applies_to !== 'shipping') return $discount;
+                $discount['amount'] = $shippingDiscounts[$discount['coupon']->id] ?? 0.0;
+                $discount['shipping'] = true;
+                return $discount['amount'] > 0 ? $discount : null;
+            }, $appliedDiscounts)));
             $coupon = $appliedDiscounts[0]['coupon'] ?? null;
-            $couponDiscount = round(array_sum(array_column($appliedDiscounts, 'amount')), 2);
+            $couponDiscount = round(array_sum(array_map(fn (array $discount) => !empty($discount['shipping']) ? 0.0 : $discount['amount'], $appliedDiscounts)), 2);
             $manualDiscount = $exchangeReturn ? $subtotal : ($coupon ? 0.0 : $this->manualDiscountAmount($subtotal, $data['manual_discount_kind'] ?? null, (float) ($data['manual_discount_value'] ?? 0)));
             if ($exchangeReturn) {
                 $shipping['total'] = 0;
@@ -1675,7 +1692,7 @@ class OrderController extends Controller
             $total = round($subtotal + $shipping['total'] - $discountTotal, 2);
 
             $order->storeGroups()->createMany(collect($shipping['groups'])->map(function (array $group) {
-                unset($group['shipping_options']);
+                unset($group['shipping_options'], $group['_item_indexes']);
 
                 return $group;
             })->all());

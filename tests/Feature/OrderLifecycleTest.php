@@ -177,7 +177,37 @@ class OrderLifecycleTest extends TestCase
         Coupon::create(['code' => 'FREESHIP', 'discount_kind' => 'shipping', 'discount_type' => 'percentage', 'discount_value' => 0, 'is_active' => true]);
         $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
         $this->withToken($token)->postJson('/api/customers/orders/preview', ['items' => [['product_id' => $product->id, 'quantity' => 1]], 'payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'FREESHIP', 'shipping_phone' => '01700000000'])
-            ->assertOk()->assertJsonPath('shipping_charge', 20)->assertJsonPath('discount_total', 20)->assertJsonPath('total', 100);
+            ->assertOk()->assertJsonPath('shipping_charge', 0)->assertJsonPath('discount_total', 0)->assertJsonPath('total', 100);
+    }
+
+    public function test_targeted_free_shipping_waives_only_parcels_where_every_line_qualifies(): void
+    {
+        [$customer, $firstProduct] = $this->checkoutFixtures(1, true);
+        $collection = ProductCollection::create(['seller_id' => $firstProduct->seller_id, 'name' => 'Eid', 'description' => 'Eid products']);
+        $collection->products()->attach($firstProduct->id, ['sort_order' => 0]);
+        $secondSeller = Seller::create([
+            'seller_name' => 'Second seller', 'email' => 'shipping-second@example.test', 'store_name' => 'Second Store', 'store_slug' => 'shipping-second',
+            'kyc_type' => 'nid', 'kyc_number' => 'shipping-second-kyc', 'kyc_document_url' => 'https://example.test/kyc', 'product_category' => 'Category',
+            'status' => 'approved', 'is_active' => true, 'password' => 'password123',
+        ]);
+        $secondProduct = Product::create(['seller_id' => $secondSeller->id, 'category_id' => $firstProduct->category_id, 'name' => 'Not Eid', 'slug' => 'not-eid', 'product_type' => 'simple', 'status' => 'active', 'default_selling_price' => 60]);
+        ProductLot::create(['product_id' => $secondProduct->id, 'lot_number' => 'SHIPPING-SECOND', 'buying_price' => 30, 'selling_price' => 60, 'quantity' => 1, 'quantity_remaining' => 1]);
+        Coupon::create(['code' => 'EIDSHIP', 'discount_kind' => 'shipping', 'applies_to' => 'shipping', 'discount_type' => 'fixed', 'discount_value' => 0, 'eligible_collection_ids' => [$collection->id], 'is_active' => true]);
+
+        $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+        $payload = ['items' => [['product_id' => $firstProduct->id, 'quantity' => 1], ['product_id' => $secondProduct->id, 'quantity' => 1]], 'payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'EIDSHIP', 'shipping_phone' => '01700000000'];
+        $this->withToken($token)->postJson('/api/customers/orders/preview', $payload)
+            ->assertOk()->assertJsonCount(2, 'shipping_groups')->assertJsonPath('shipping_charge', 20)->assertJsonPath('total', 180)
+            ->assertJsonPath('shipping_groups.0.shipping_charge', 0)->assertJsonPath('shipping_groups.1.shipping_charge', 20);
+
+        $this->postJson('/api/coupons/validate', ['code' => 'EIDSHIP', 'items' => [['product_id' => $secondProduct->id, 'quantity' => 1]]])
+            ->assertUnprocessable()->assertJsonPath('message', 'Free delivery needs every item from a store to qualify.')
+            ->assertJsonValidationErrors(['coupon_code' => 'Free delivery needs every item from a store to qualify.']);
+
+        $order = $this->withToken($token)->postJson('/api/customers/orders', $payload + ['shipping_name' => 'Customer', 'shipping_address' => 'Dhaka'])
+            ->assertCreated()->assertJsonPath('order.shipping_charge', '20.00')->assertJsonPath('order.total', '180.00')->json('order');
+        $this->assertDatabaseHas('order_store_groups', ['order_id' => $order['id'], 'seller_id' => $firstProduct->seller_id, 'shipping_charge' => 0]);
+        $this->assertDatabaseHas('order_store_groups', ['order_id' => $order['id'], 'seller_id' => $secondSeller->id, 'shipping_charge' => 20]);
     }
 
     public function test_buy_x_get_y_discount_only_rewards_the_configured_quantity(): void

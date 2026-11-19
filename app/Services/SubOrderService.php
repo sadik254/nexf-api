@@ -107,9 +107,14 @@ class SubOrderService
         $sellerFunded = $groups->mapWithKeys(fn (OrderStoreGroup $g) => [$g->id => (float) $g->manual_discount])->all();
         $storeFundedTotal = (float) array_sum($sellerFunded);
         $redemptions = $order->couponRedemptions()->get();
-        $coupons = Coupon::query()->whereIn('id', $redemptions->pluck('coupon_id')->filter())->get(['id', 'seller_id'])->keyBy('id');
+        $coupons = Coupon::query()->whereIn('id', $redemptions->pluck('coupon_id')->filter())->get(['id', 'seller_id', 'discount_kind', 'applies_to'])->keyBy('id');
         foreach ($redemptions as $redemption) {
-            $sellerId = $coupons->get($redemption->coupon_id)?->seller_id;
+            $coupon = $coupons->get($redemption->coupon_id);
+            // A free-shipping redemption has already reduced this parcel's
+            // shipping charge. It must never also reduce the store's item
+            // earnings as though it were a product discount.
+            if ($coupon && ($coupon->discount_kind === 'shipping' || $coupon->applies_to === 'shipping')) continue;
+            $sellerId = $coupon?->seller_id;
             if (!$sellerId) continue;
             // Spread over the groups carrying that store's lines, by their value.
             $weights = $groups->mapWithKeys(fn (OrderStoreGroup $g) => [$g->id => (float) $g->items->where('seller_id', $sellerId)->sum(fn (OrderItem $i) => (float) $i->line_subtotal)])->filter(fn ($w) => $w > 0);
