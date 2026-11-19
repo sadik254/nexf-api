@@ -70,6 +70,29 @@ class ProductEditorFieldsTest extends TestCase
             ->assertJsonPath('option_groups.0.size_kind', 'clothing');
     }
 
+    public function test_a_third_duplicate_category_or_product_name_gets_the_next_slug(): void
+    {
+        $admin = Admin::create(['name' => 'Slug editor', 'email' => 'slug-editor@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $token = $admin->createToken('test', ['admin:basic'])->plainTextToken;
+        $category = ProductCategory::create(['name' => 'Catalogue', 'slug' => 'catalogue']);
+        ProductCategory::create(['name' => 'Jacket', 'slug' => 'jacket']);
+        ProductCategory::create(['name' => 'Jacket duplicate', 'slug' => 'jacket-1']);
+
+        $this->withToken($token)->postJson('/api/admin/product-categories/taxonomy', [
+            'name' => 'Jacket',
+            'subcategories' => [],
+        ])->assertOk()->assertJsonPath('category.slug', 'jacket-2');
+
+        Product::create(['category_id' => $category->id, 'name' => 'Coat', 'slug' => 'coat', 'product_type' => 'simple', 'status' => 'draft']);
+        Product::create(['category_id' => $category->id, 'name' => 'Coat two', 'slug' => 'coat-1', 'product_type' => 'simple', 'status' => 'draft']);
+
+        $this->withToken($token)->postJson('/api/admin/products', [
+            'category_id' => $category->id,
+            'name' => 'Coat',
+            'product_type' => 'simple',
+        ])->assertCreated()->assertJsonPath('product.slug', 'coat-2');
+    }
+
     public function test_products_can_be_placed_in_another_subcategory_with_its_own_photos(): void
     {
         $admin = Admin::create(['name' => 'Placement editor', 'email' => 'placement-editor@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);

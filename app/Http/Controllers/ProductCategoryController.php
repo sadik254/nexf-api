@@ -250,7 +250,7 @@ class ProductCategoryController extends Controller
             $query->where('id', '!=', $ignoreId);
         }
 
-        while ($query->where('slug', $slug)->exists()) {
+        while ((clone $query)->where('slug', $slug)->exists()) {
             $slug = $base . '-' . $counter;
             $counter++;
         }
