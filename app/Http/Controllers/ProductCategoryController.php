@@ -4,9 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Models\Seller;
+use App\Models\SiteSetting;
+use App\Models\SizeChart;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
 
 class ProductCategoryController extends Controller
 {
@@ -52,7 +56,7 @@ class ProductCategoryController extends Controller
         $existing = ProductCategory::where('parent_id', $parentId)->whereRaw('LOWER(name) = ?', [mb_strtolower($data['name'])])->first();
         if ($existing) return response()->json($existing->load('children')->loadCount('products'));
         $category = ProductCategory::create([
-            'name' => $data['name'], 'slug' => $this->uniqueSlug($data['name']),
+            'name' => $data['name'], 'slug' => $this->uniqueSlugForCategory($data['name'], $parentId),
             'parent_id' => $parentId, 'is_active' => true, 'sort_order' => ProductCategory::nextSortOrder($parentId),
         ]);
         return response()->json($category->load('children')->loadCount('products'), 201);
@@ -74,12 +78,13 @@ class ProductCategoryController extends Controller
 
         $this->validateParent($data['parent_id'] ?? null);
 
-        $slug = $this->uniqueSlug($data['name']);
+        $parentId = $data['parent_id'] ?? null;
+        $slug = $this->uniqueSlugForCategory($data['name'], $parentId);
 
         $category = ProductCategory::create([
             'name' => $data['name'],
-            'parent_id' => $data['parent_id'] ?? null,
-            'sort_order' => ProductCategory::nextSortOrder($data['parent_id'] ?? null),
+            'parent_id' => $parentId,
+            'sort_order' => ProductCategory::nextSortOrder($parentId),
             'slug' => $slug,
             'description' => $data['description'] ?? null,
             'image' => $data['image'] ?? null,
@@ -124,21 +129,33 @@ class ProductCategoryController extends Controller
             }
         }
 
-        if (array_key_exists('name', $data)) {
-            $category->slug = $this->uniqueSlug($data['name'], $category->id);
-        }
+        DB::transaction(function () use ($category, $data): void {
+            $category = ProductCategory::whereKey($category->id)->lockForUpdate()->firstOrFail();
+            $oldSlug = $category->slug;
+            $value = fn (string $field) => array_key_exists($field, $data) ? $data[$field] : $category->{$field};
+            $nextParentId = array_key_exists('parent_id', $data) ? $data['parent_id'] : $category->parent_id;
+            $category->fill([
+                'name' => $value('name'),
+                'parent_id' => $nextParentId,
+                'slug' => $this->uniqueSlugForCategory($value('name'), $nextParentId, $category->id),
+                'description' => $value('description'),
+                'image' => $value('image'),
+                'menu_heading' => $value('menu_heading'),
+                'promo_image' => $value('promo_image'),
+                'promo_href' => $value('promo_href'), 'promo_title' => $value('promo_title'), 'promo_caption' => $value('promo_caption'),
+                'is_active' => array_key_exists('is_active', $data) ? (bool) $data['is_active'] : $category->is_active,
+            ])->save();
+            $this->rewriteSlugReferences($oldSlug, $category->slug);
 
-        $value = fn (string $field) => array_key_exists($field, $data) ? $data[$field] : $category->{$field};
-        $category->fill([
-            'name' => $value('name'),
-            'parent_id' => array_key_exists('parent_id', $data) ? $data['parent_id'] : $category->parent_id,
-            'description' => $value('description'),
-            'image' => $value('image'),
-            'menu_heading' => $value('menu_heading'),
-            'promo_image' => $value('promo_image'),
-            'promo_href' => $value('promo_href'), 'promo_title' => $value('promo_title'), 'promo_caption' => $value('promo_caption'),
-            'is_active' => array_key_exists('is_active', $data) ? (bool) $data['is_active'] : $category->is_active,
-        ])->save();
+            // A top-level rename changes every child's parent-name prefix.
+            if ($category->parent_id === null) {
+                foreach ($category->children()->lockForUpdate()->get() as $child) {
+                    $oldChildSlug = $child->slug;
+                    $child->update(['slug' => $this->uniqueSlug($child->name, $child->id, $category->name)]);
+                    $this->rewriteSlugReferences($oldChildSlug, $child->slug);
+                }
+            }
+        });
 
         return response()->json([
             'message' => 'Category updated successfully.',
@@ -184,12 +201,14 @@ class ProductCategoryController extends Controller
             'subcategories.*.id' => ['nullable', 'integer', 'distinct'], 'subcategories.*.name' => ['required', 'string', 'max:255']]);
         $names = collect($data['subcategories'])->map(fn ($sub) => mb_strtolower(trim($sub['name'])));
         if ($names->contains('') || $names->unique()->count() !== $names->count()) throw \Illuminate\Validation\ValidationException::withMessages(['subcategories' => 'Sub-category names must be non-empty and unique.']);
-        $saved = \Illuminate\Support\Facades\DB::transaction(function () use ($data, $category) {
+        $saved = DB::transaction(function () use ($data, $category) {
             if ($category) {
                 $category = ProductCategory::whereKey($category->id)->lockForUpdate()->firstOrFail();
                 abort_unless($category->parent_id === null, 422, 'Edit sub-categories through their parent.');
             } else $category = new ProductCategory(['is_active' => true, 'sort_order' => ProductCategory::nextSortOrder(null)]);
-            $category->fill(['name' => $data['name'], 'slug' => $this->uniqueSlug($data['name'], $category->id)])->save();
+            $oldSlug = $category->slug;
+            $category->fill(['name' => $data['name'], 'slug' => $this->uniqueSlugForCategory($data['name'], null, $category->id)])->save();
+            if ($oldSlug !== null) $this->rewriteSlugReferences($oldSlug, $category->slug);
             $children = $category->children()->lockForUpdate()->get();
             $kept = [];
             foreach (array_values($data['subcategories']) as $position => $sub) {
@@ -198,7 +217,9 @@ class ProductCategoryController extends Controller
                     if (!$child) throw \Illuminate\Validation\ValidationException::withMessages(['subcategories' => 'A sub-category does not belong to this category. Reload and try again.']);
                 } else $child = new ProductCategory(['parent_id' => $category->id, 'is_active' => true]);
                 $name = trim($sub['name']);
-                $child->fill(['name' => $name, 'slug' => $this->uniqueSlug($name, $child->id), 'sort_order' => $position])->save();
+                $oldChildSlug = $child->slug;
+                $child->fill(['name' => $name, 'slug' => $this->uniqueSlug($name, $child->id, $category->name), 'sort_order' => $position])->save();
+                $this->rewriteSlugReferences($oldChildSlug, $child->slug);
                 $kept[] = $child->id;
             }
             foreach ($children->whereNotIn('id', $kept) as $removed) {
@@ -239,9 +260,16 @@ class ProductCategoryController extends Controller
         abort_if($parent->parent_id !== null, 422, 'Only one subcategory level is supported.');
     }
 
-    private function uniqueSlug(string $name, ?int $ignoreId = null): string
+    private function uniqueSlugForCategory(string $name, ?int $parentId, ?int $ignoreId = null): string
     {
-        $base = Str::slug($name);
+        $parentName = $parentId === null ? null : ProductCategory::findOrFail($parentId)->name;
+
+        return $this->uniqueSlug($name, $ignoreId, $parentName);
+    }
+
+    private function uniqueSlug(string $name, ?int $ignoreId = null, ?string $parentName = null): string
+    {
+        $base = Str::slug($parentName === null ? $name : "{$parentName} {$name}");
         $slug = $base !== '' ? $base : Str::random(8);
         $counter = 1;
 
@@ -256,5 +284,36 @@ class ProductCategoryController extends Controller
         }
 
         return $slug;
+    }
+
+    /** Keep slug copies in charts and layout JSON in step with a renamed category. */
+    private function rewriteSlugReferences(?string $oldSlug, string $newSlug): void
+    {
+        if ($oldSlug === null || $oldSlug === $newSlug) return;
+
+        SizeChart::query()->where('category_slug', $oldSlug)->update(['category_slug' => $newSlug]);
+        SizeChart::query()->where('subcategory_slug', $oldSlug)->update(['subcategory_slug' => $newSlug]);
+
+        $layout = SiteSetting::query()->lockForUpdate()->find('home_layout');
+        if ($layout) {
+            $sections = $this->replaceLayoutCategorySlug($layout->payload ?? [], $oldSlug, $newSlug);
+            if ($sections !== $layout->payload) $layout->update(['payload' => $sections]);
+        }
+
+        Seller::query()->whereNotNull('store_layout')->lockForUpdate()->eachById(function (Seller $seller) use ($oldSlug, $newSlug): void {
+            $sections = $this->replaceLayoutCategorySlug($seller->store_layout ?? [], $oldSlug, $newSlug);
+            if ($sections !== $seller->store_layout) $seller->forceFill(['store_layout' => $sections])->save();
+        });
+    }
+
+    private function replaceLayoutCategorySlug(array $sections, string $oldSlug, string $newSlug): array
+    {
+        return array_map(function ($section) use ($oldSlug, $newSlug) {
+            if (($section['source'] ?? null) === 'category' && ($section['sourceValue'] ?? null) === $oldSlug) {
+                $section['sourceValue'] = $newSlug;
+            }
+
+            return $section;
+        }, $sections);
     }
 }
