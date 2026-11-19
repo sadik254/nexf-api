@@ -12,6 +12,7 @@ use App\Models\Review;
 use App\Models\Seller;
 use App\Models\SiteSetting;
 use App\Models\Store;
+use App\Services\FreeDeliveryProductService;
 use App\Services\ProductHtmlSanitizer;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
@@ -22,6 +23,10 @@ use Illuminate\Support\Str;
 
 class StoreProductController extends Controller
 {
+    public function __construct(private readonly FreeDeliveryProductService $freeDelivery)
+    {
+    }
+
     public function indexAll(Request $request): JsonResponse
     {
         $query = $this->baseStoreQuery();
@@ -414,6 +419,7 @@ class StoreProductController extends Controller
             'store' => $store,
             'compare_at_price' => $compareAt,
             'discount' => $discount,
+            'free_delivery' => $this->freeDelivery->appliesTo($product),
             'rating_summary' => ['average' => $averageRating, 'review_count' => $ratingCount, 'sold_count' => $soldCount],
             'option_groups' => $this->optionGroups($product),
             'size_chart' => $product->sizeChart ? $product->sizeChart->only(['id', 'name', 'url', 'unit', 'audience', 'category_slug', 'subcategory_slug', 'columns', 'rows', 'note']) : null,
@@ -455,6 +461,7 @@ class StoreProductController extends Controller
         $query->with([
             'category:id,name,slug',
             'categoryPlacements.category.parent:id,slug',
+            'collections:id',
             'brand:id,name,slug',
             'tags:id,name,slug',
             'seller:id,store_name,store_slug,store_logo,store_image,city,country,created_at,positive_rating_percentage,on_time_shipping_percentage,chat_response_percentage',
