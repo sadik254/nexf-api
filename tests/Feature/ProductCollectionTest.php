@@ -13,6 +13,47 @@ class ProductCollectionTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_collections_keep_ordered_top_level_photo_categories_and_expose_public_metadata(): void
+    {
+        $women = ProductCategory::create(['name' => 'Photo Women', 'slug' => 'photo-women']);
+        $men = ProductCategory::create(['name' => 'Photo Men', 'slug' => 'photo-men']);
+        $hoodies = ProductCategory::create(['name' => 'Photo Hoodies', 'slug' => 'photo-women-hoodies', 'parent_id' => $women->id]);
+        $product = Product::create(['category_id' => $hoodies->id, 'name' => 'Classic Hoodie', 'slug' => 'classic-hoodie', 'status' => 'active', 'base_selling_price' => 1200]);
+        $admin = Admin::create(['name' => 'Super', 'email' => 'collection-photos@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $token = $admin->createToken('test', ['admin:basic'])->plainTextToken;
+
+        $id = $this->withToken($token)->postJson('/api/admin/collections', [
+            'name' => 'Winter favourites',
+            'product_ids' => [$product->id],
+            'photo_category_ids' => [$women->id, $men->id],
+        ])->assertCreated()
+            ->assertJsonPath('photo_category_ids', [$women->id, $men->id])
+            ->assertJsonPath('photo_categories.0.slug', 'photo-women')
+            ->assertJsonPath('photo_categories.1.slug', 'photo-men')
+            ->json('id');
+
+        $this->getJson("/api/store/collections/{$id}")
+            ->assertOk()
+            ->assertJsonPath('id', $id)
+            ->assertJsonPath('photo_categories.0', ['id' => $women->id, 'slug' => 'photo-women'])
+            ->assertJsonPath('photo_categories.1', ['id' => $men->id, 'slug' => 'photo-men']);
+
+        $this->withToken($token)->postJson("/api/admin/collections/{$id}", [
+            'name' => 'Winter favourites',
+            'product_ids' => [$product->id],
+            'photo_category_ids' => [],
+        ])->assertOk()
+            ->assertJsonPath('photo_category_ids', [])
+            ->assertJsonPath('photo_categories', []);
+
+        $this->withToken($token)->postJson('/api/admin/collections', [
+            'name' => 'Invalid photos',
+            'product_ids' => [$product->id],
+            'photo_category_ids' => [$hoodies->id],
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('photo_category_ids');
+    }
+
     public function test_seller_collections_are_scoped_and_cannot_include_another_stores_products(): void
     {
         $category = ProductCategory::create(['name' => 'Clothing', 'slug' => 'clothing']);

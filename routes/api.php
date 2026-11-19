@@ -634,6 +634,7 @@ Route::prefix('admin')->middleware('sanctum.type:admin')->group(function () {
 });
 
 Route::prefix('store')->group(function () {
+    Route::get('/collections/{collection}', [ProductCollectionController::class, 'publicShow']);
     Route::get('/stores', [StoreProductController::class, 'stores']);
     Route::get('/stores/{slug}', [StoreProductController::class, 'storeProfile']);
     Route::get('/stores/{slug}/layout', [StoreLayoutController::class, 'publicShow']);
