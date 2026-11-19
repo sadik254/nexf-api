@@ -132,9 +132,17 @@ class CouponController extends Controller
             return response()->json(['message' => 'Coupon expiry must be after start date.'], 422);
         }
 
+        $automatic = array_key_exists('is_automatic', $data) ? (bool) $data['is_automatic'] : $coupon->is_automatic;
         $code = $coupon->code;
         if (array_key_exists('code', $data)) {
-            $code = $this->normalizeCode($data['code']);
+            if ($data['code'] === null && $automatic) {
+                // Automatic rules retain their internal AUTO- code when a
+                // browser submits an empty hidden code input.
+            } elseif ($data['code'] === null) {
+                return response()->json(['message' => 'Coupon code is invalid.'], 422);
+            } else {
+                $code = $this->normalizeCode($data['code']);
+            }
             if ($code === '') {
                 return response()->json(['message' => 'Coupon code is invalid.'], 422);
             }
@@ -151,7 +159,7 @@ class CouponController extends Controller
         $coupon->fill([
             'code' => $code,
             'seller_id' => array_key_exists('seller_id', $data) ? $data['seller_id'] : $coupon->seller_id,
-            'is_automatic' => array_key_exists('is_automatic', $data) ? (bool) $data['is_automatic'] : $coupon->is_automatic,
+            'is_automatic' => $automatic,
             'discount_kind' => $data['discount_kind'] ?? $coupon->discount_kind, 'combines' => array_key_exists('combines', $data) ? (bool) $data['combines'] : $coupon->combines,
             'name' => array_key_exists('name', $data) ? $data['name'] : $coupon->name,
             'description' => array_key_exists('description', $data) ? $data['description'] : $coupon->description,
@@ -237,9 +245,17 @@ class CouponController extends Controller
         $startsAt = array_key_exists('starts_at', $data) ? $data['starts_at'] : $coupon->starts_at?->toDateTimeString();
         $expiresAt = array_key_exists('expires_at', $data) ? $data['expires_at'] : $coupon->expires_at?->toDateTimeString();
         if (!$this->dateWindowIsValid($startsAt, $expiresAt)) return response()->json(['message' => 'Coupon expiry must be after start date.'], 422);
+        $automatic = array_key_exists('is_automatic', $data) ? (bool) $data['is_automatic'] : $coupon->is_automatic;
         if (array_key_exists('code', $data)) {
-            $data['code'] = $this->normalizeCode((string) $data['code']);
-            if ($data['code'] === '' || Coupon::where('code', $data['code'])->where('id', '!=', $coupon->id)->exists()) return response()->json(['message' => 'Coupon code is invalid or already taken.'], 422);
+            if ($data['code'] === null && $automatic) {
+                unset($data['code']);
+            } elseif ($data['code'] === null) {
+                return response()->json(['message' => 'Coupon code is invalid.'], 422);
+            } else {
+                $data['code'] = $this->normalizeCode($data['code']);
+                if ($data['code'] === '') return response()->json(['message' => 'Coupon code is invalid.'], 422);
+                if (Coupon::where('code', $data['code'])->where('id', '!=', $coupon->id)->exists()) return response()->json(['message' => 'Coupon code already taken.'], 422);
+            }
         }
         $data['seller_id'] = $seller->id;
         $coupon->fill($data)->save();
@@ -290,7 +306,7 @@ class CouponController extends Controller
             'shipping_amount' => ['sometimes', 'numeric', 'min:0'],
         ]);
 
-        $code = $this->normalizeCode($data['code']);
+        $code = $this->normalizeCode($data['code'] ?? null);
         $coupon = Coupon::where('code', $code)->first();
 
         if (!$coupon) {
@@ -356,9 +372,9 @@ class CouponController extends Controller
         ]);
     }
 
-    private function normalizeCode(string $code): string
+    private function normalizeCode(?string $code): string
     {
-        return (string) preg_replace('/[^A-Z0-9_-]/', '', Str::upper($code));
+        return (string) preg_replace('/[^A-Z0-9_-]/', '', Str::upper($code ?? ''));
     }
 
     private function dateWindowIsValid(?string $startsAt, ?string $expiresAt): bool
