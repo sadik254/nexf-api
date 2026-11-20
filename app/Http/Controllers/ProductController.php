@@ -197,10 +197,15 @@ class ProductController extends Controller
             'main_photos' => ['sometimes', 'array', 'max:31'],
             'main_photos.*' => ['required', 'integer', 'min:0', 'distinct'],
             'clear_main_photos' => ['sometimes', 'boolean'],
+            'main_videos' => ['sometimes', 'array', 'max:20'],
+            'main_videos.*' => ['required', 'integer', 'min:0', 'distinct'],
+            'clear_main_videos' => ['sometimes', 'boolean'],
             'category_placements' => ['sometimes', 'array', 'max:30'],
             'category_placements.*.category_id' => ['required', 'integer', 'distinct', 'exists:product_categories,id'],
             'category_placements.*.photos' => ['sometimes', 'array', 'max:31'],
             'category_placements.*.photos.*' => ['required', 'integer', 'min:0', 'distinct'],
+            'category_placements.*.videos' => ['sometimes', 'array', 'max:20'],
+            'category_placements.*.videos.*' => ['required', 'integer', 'min:0', 'distinct'],
             'clear_category_placements' => ['sometimes', 'boolean'],
             'videos' => ['nullable', 'array', 'max:20'],
             'videos.*' => ['required', 'url', 'starts_with:https://'],
@@ -280,9 +285,11 @@ class ProductController extends Controller
 
         $auditActor = $request->attributes->get('seller_staff') ?? $actor;
         $mainPhotos = $this->photoPositions(!empty($data['clear_main_photos']) ? [] : ($data['main_photos'] ?? []), $thumbnailUrl, $galleryUrls);
-        $placements = $this->normalizeCategoryPlacements(!empty($data['clear_category_placements']) ? [] : ($data['category_placements'] ?? []), (int) $data['category_id'], $thumbnailUrl, $galleryUrls);
+        $videoUrls = $data['videos'] ?? [];
+        $mainVideos = $this->videoPositions(!empty($data['clear_main_videos']) ? [] : ($data['main_videos'] ?? []), $videoUrls);
+        $placements = $this->normalizeCategoryPlacements(!empty($data['clear_category_placements']) ? [] : ($data['category_placements'] ?? []), (int) $data['category_id'], $thumbnailUrl, $galleryUrls, $videoUrls);
 
-        $product = DB::transaction(function () use ($actor, $auditActor, $data, $slug, $thumbnailUrl, $galleryUrls, $mainPhotos, $placements): Product {
+        $product = DB::transaction(function () use ($actor, $auditActor, $data, $slug, $thumbnailUrl, $galleryUrls, $mainPhotos, $mainVideos, $placements): Product {
             $product = Product::create([
                 'seller_id' => $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null),
                 'created_by_admin_id' => $actor instanceof Admin ? $actor->id : null,
@@ -302,6 +309,7 @@ class ProductController extends Controller
                 'thumbnail' => $thumbnailUrl,
                 'gallery' => $galleryUrls,
                 'main_photos' => $mainPhotos,
+                'main_videos' => $mainVideos,
                 'videos' => $data['videos'] ?? null,
                 'default_buying_price' => $data['default_buying_price'] ?? null,
                 'default_selling_price' => $data['default_selling_price'] ?? null,
@@ -410,10 +418,15 @@ class ProductController extends Controller
             'main_photos' => ['sometimes', 'array', 'max:31'],
             'main_photos.*' => ['required', 'integer', 'min:0', 'distinct'],
             'clear_main_photos' => ['sometimes', 'boolean'],
+            'main_videos' => ['sometimes', 'array', 'max:20'],
+            'main_videos.*' => ['required', 'integer', 'min:0', 'distinct'],
+            'clear_main_videos' => ['sometimes', 'boolean'],
             'category_placements' => ['sometimes', 'array', 'max:30'],
             'category_placements.*.category_id' => ['required', 'integer', 'distinct', 'exists:product_categories,id'],
             'category_placements.*.photos' => ['sometimes', 'array', 'max:31'],
             'category_placements.*.photos.*' => ['required', 'integer', 'min:0', 'distinct'],
+            'category_placements.*.videos' => ['sometimes', 'array', 'max:20'],
+            'category_placements.*.videos.*' => ['required', 'integer', 'min:0', 'distinct'],
             'clear_category_placements' => ['sometimes', 'boolean'],
             'thumbnail_url' => ['sometimes', 'url', 'starts_with:https://'],
             'clear_thumbnail' => ['sometimes', 'boolean'],
@@ -477,10 +490,12 @@ class ProductController extends Controller
         $bundleRows = array_key_exists('bundles', $data) || !empty($data['clear_bundles']) ? (!empty($data['clear_bundles']) ? [] : $data['bundles']) : null;
         unset($data['bundles'], $data['clear_bundles']);
         $mainPhotosProvided = array_key_exists('main_photos', $data) || !empty($data['clear_main_photos']);
+        $mainVideosProvided = array_key_exists('main_videos', $data) || !empty($data['clear_main_videos']);
         $placementRowsProvided = array_key_exists('category_placements', $data) || !empty($data['clear_category_placements']);
         $requestedMainPhotos = !empty($data['clear_main_photos']) ? [] : ($data['main_photos'] ?? null);
+        $requestedMainVideos = !empty($data['clear_main_videos']) ? [] : ($data['main_videos'] ?? null);
         $requestedPlacementRows = !empty($data['clear_category_placements']) ? [] : ($data['category_placements'] ?? null);
-        unset($data['main_photos'], $data['clear_main_photos'], $data['category_placements'], $data['clear_category_placements']);
+        unset($data['main_photos'], $data['clear_main_photos'], $data['main_videos'], $data['clear_main_videos'], $data['category_placements'], $data['clear_category_placements']);
 
         if (array_key_exists('slug', $data)) {
             $product->slug = $data['slug'];
@@ -525,11 +540,16 @@ class ProductController extends Controller
 
         $finalCategoryId = (int) ($data['category_id'] ?? $product->category_id);
         $mainPhotos = $this->photoPositions($mainPhotosProvided ? ($requestedMainPhotos ?? []) : ($product->main_photos ?? []), $thumbnailUrl, $galleryUrls);
+        $oldVideos = $product->videos ?? [];
+        $videoUrls = array_key_exists('videos', $data) ? ($data['videos'] ?? []) : $oldVideos;
+        $mainVideos = $mainVideosProvided
+            ? $this->videoPositions($requestedMainVideos ?? [], $videoUrls)
+            : $this->remapVideoPositions($product->main_videos ?? [], $oldVideos, $videoUrls);
         $placements = $placementRowsProvided
-            ? $this->normalizeCategoryPlacements($requestedPlacementRows ?? [], $finalCategoryId, $thumbnailUrl, $galleryUrls)
+            ? $this->normalizeCategoryPlacements($requestedPlacementRows ?? [], $finalCategoryId, $thumbnailUrl, $galleryUrls, $videoUrls)
             : null;
 
-        DB::transaction(function () use ($product, $data, $thumbnailUrl, $galleryUrls, $mainPhotos, $tagIds, $bundleRows, $placements, $finalCategoryId): void {
+        DB::transaction(function () use ($product, $data, $thumbnailUrl, $galleryUrls, $mainPhotos, $mainVideos, $tagIds, $bundleRows, $placements, $finalCategoryId, $oldVideos, $videoUrls): void {
         $product->fill([
             'seller_id' => array_key_exists('seller_id', $data) ? $data['seller_id'] : $product->seller_id,
             'category_id' => $finalCategoryId,
@@ -547,6 +567,7 @@ class ProductController extends Controller
             'thumbnail' => $thumbnailUrl,
             'gallery' => $galleryUrls,
             'main_photos' => $mainPhotos,
+            'main_videos' => $mainVideos,
             'videos' => array_key_exists('videos', $data) ? $data['videos'] : $product->videos,
             'default_buying_price' => array_key_exists('default_buying_price', $data) ? $data['default_buying_price'] : $product->default_buying_price,
             'default_selling_price' => $data['default_selling_price'] ?? $product->default_selling_price,
@@ -565,7 +586,7 @@ class ProductController extends Controller
 
         if ($tagIds !== null) $product->tags()->sync($tagIds);
         if ($bundleRows !== null) app(ProductBundleService::class)->replace($product, $bundleRows);
-        $this->syncCategoryPlacements($product, $placements, $finalCategoryId, $thumbnailUrl, $galleryUrls);
+        $this->syncCategoryPlacements($product, $placements, $finalCategoryId, $thumbnailUrl, $galleryUrls, $oldVideos, $videoUrls);
         });
 
         return response()->json([
@@ -650,15 +671,39 @@ class ProductController extends Controller
             ->all();
     }
 
-    /** @return array<int, array{category_id:int, photos:array}> */
-    private function normalizeCategoryPlacements(array $placements, int $primaryCategoryId, ?string $thumbnail, ?array $gallery): array
+    private function videoPositions(array $positions, ?array $videos): array
+    {
+        $videoCount = count($videos ?? []);
+
+        return collect($positions)
+            ->map(fn ($position) => (int) $position)
+            ->filter(fn (int $position) => $position >= 0 && $position < $videoCount)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function remapVideoPositions(array $positions, array $oldVideos, array $newVideos): array
+    {
+        $selectedUrls = collect($positions)->map(fn ($position) => $oldVideos[(int) $position] ?? null)->filter()->all();
+
+        return collect($selectedUrls)->map(fn (string $url) => array_search($url, $newVideos, true))
+            ->filter(fn ($position) => $position !== false)
+            ->map(fn ($position) => (int) $position)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /** @return array<int, array{category_id:int, photos:array, videos:array}> */
+    private function normalizeCategoryPlacements(array $placements, int $primaryCategoryId, ?string $thumbnail, ?array $gallery, ?array $videos): array
     {
         if (!$placements) return [];
 
         $categories = ProductCategory::query()->whereIn('id', collect($placements)->pluck('category_id')->all())
             ->get(['id', 'parent_id'])->keyBy('id');
 
-        return collect($placements)->values()->map(function (array $placement, int $index) use ($categories, $primaryCategoryId, $thumbnail, $gallery) {
+        return collect($placements)->values()->map(function (array $placement, int $index) use ($categories, $primaryCategoryId, $thumbnail, $gallery, $videos) {
             $categoryId = (int) $placement['category_id'];
             $category = $categories->get($categoryId);
 
@@ -672,6 +717,7 @@ class ProductController extends Controller
             return [
                 'category_id' => $categoryId,
                 'photos' => $this->photoPositions($placement['photos'] ?? [], $thumbnail, $gallery),
+                'videos' => $this->videoPositions($placement['videos'] ?? [], $videos),
             ];
         })->all();
     }
@@ -687,19 +733,22 @@ class ProductController extends Controller
      * on their unrelated edits, while still pruning photos removed from the
      * gallery and dropping a placement that became the primary category.
      */
-    private function syncCategoryPlacements(Product $product, ?array $placements, int $primaryCategoryId, ?string $thumbnail, ?array $gallery): void
+    private function syncCategoryPlacements(Product $product, ?array $placements, int $primaryCategoryId, ?string $thumbnail, ?array $gallery, array $oldVideos, array $newVideos): void
     {
         if ($placements !== null) {
             $this->replaceCategoryPlacements($product, $placements);
             return;
         }
 
-        $product->categoryPlacements()->get()->each(function ($placement) use ($primaryCategoryId, $thumbnail, $gallery) {
+        $product->categoryPlacements()->get()->each(function ($placement) use ($primaryCategoryId, $thumbnail, $gallery, $oldVideos, $newVideos) {
             if ((int) $placement->category_id === $primaryCategoryId) {
                 $placement->delete();
                 return;
             }
-            $placement->update(['photos' => $this->photoPositions($placement->photos ?? [], $thumbnail, $gallery)]);
+            $placement->update([
+                'photos' => $this->photoPositions($placement->photos ?? [], $thumbnail, $gallery),
+                'videos' => $this->remapVideoPositions($placement->videos ?? [], $oldVideos, $newVideos),
+            ]);
         });
     }
 

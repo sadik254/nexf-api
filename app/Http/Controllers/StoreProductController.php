@@ -393,6 +393,7 @@ class StoreProductController extends Controller
             'thumbnail' => $product->thumbnail,
             'gallery' => $product->gallery,
             'main_photos' => $product->main_photos ?? [],
+            'main_videos' => $product->main_videos ?? [],
             'category_placements' => $product->categoryPlacements->map(fn ($placement) => [
                 'category_id' => $placement->category_id,
                 'category' => $placement->category ? [
@@ -403,6 +404,7 @@ class StoreProductController extends Controller
                     'parent' => $placement->category->parent ? ['slug' => $placement->category->parent->slug] : null,
                 ] : null,
                 'photos' => $placement->photos ?? [],
+                'videos' => $placement->videos ?? [],
             ])->values()->all(),
             'videos' => $product->videos ?? [],
             'weight_kg' => $product->weight_kg,
@@ -524,6 +526,7 @@ class StoreProductController extends Controller
             'thumbnail',
             'gallery',
             'main_photos',
+            'main_videos',
             'compare_at_price', 'option_groups', 'size_chart_id', 'audience', 'videos', 'weight_kg',
             'default_selling_price',
             'homepage_trending', 'homepage_new_arrival', 'homepage_featured', 'homepage_sort_order',

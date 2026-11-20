@@ -7,11 +7,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ProductCategoryPlacement extends Model
 {
-    protected $fillable = ['category_id', 'photos'];
+    protected $fillable = ['category_id', 'photos', 'videos'];
 
     protected function casts(): array
     {
-        return ['photos' => 'array'];
+        return ['photos' => 'array', 'videos' => 'array'];
     }
 
     public function product(): BelongsTo

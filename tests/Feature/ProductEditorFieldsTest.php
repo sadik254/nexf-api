@@ -109,30 +109,46 @@ class ProductEditorFieldsTest extends TestCase
             'status' => 'active',
             'thumbnail' => 'https://example.test/hoodie-cover.jpg',
             'gallery' => ['https://example.test/hoodie-men.jpg', 'https://example.test/hoodie-women.jpg'],
+            'videos' => ['https://example.test/hoodie-men.mp4', 'https://example.test/hoodie-women.mp4'],
         ]);
 
         $this->withToken($token)->postJson("/api/admin/products/{$product->id}", [
             'main_photos' => [0, 1],
+            'main_videos' => [0],
             'category_placements' => [[
                 'category_id' => $womenHoodies->id,
                 'photos' => [2],
+                'videos' => [1],
             ]],
         ])->assertOk()
             ->assertJsonPath('product.main_photos.1', 1)
+            ->assertJsonPath('product.main_videos.0', 0)
             ->assertJsonPath('product.category_placements.0.category.slug', 'placement-women-hoodies')
             ->assertJsonPath('product.category_placements.0.photos.0', 2);
+
 
         $this->getJson('/api/store/categories/placement-women-hoodies/products')
             ->assertOk()
             ->assertJsonPath('data.0.slug', 'shared-hoodie')
             ->assertJsonPath('data.0.category_placements.0.photos.0', 2)
+            ->assertJsonPath('data.0.category_placements.0.videos.0', 1)
             ->assertJsonPath('data.0.main_photos.0', 0);
+
+        // Older clients may only send the changed video list. Selections
+        // follow their URLs instead of accidentally selecting a new index.
+        $this->withToken($token)->postJson("/api/admin/products/{$product->id}", [
+            'videos' => ['https://example.test/hoodie-women.mp4'],
+        ])->assertOk()
+            ->assertJsonPath('product.main_videos', [])
+            ->assertJsonPath('product.category_placements.0.videos.0', 0);
 
         $this->withToken($token)->postJson("/api/admin/products/{$product->id}", [
             'clear_category_placements' => true,
             'clear_main_photos' => true,
+            'clear_main_videos' => true,
         ])->assertOk()
             ->assertJsonPath('product.main_photos', [])
+            ->assertJsonPath('product.main_videos', [])
             ->assertJsonPath('product.category_placements', []);
     }
 
