@@ -10,6 +10,7 @@ use App\Models\Seller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class ProductCollectionController extends Controller
@@ -56,6 +57,7 @@ class ProductCollectionController extends Controller
             $collection = ProductCollection::create([
                 'seller_id' => $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null),
                 'name' => trim($data['name']),
+                'slug' => $this->uniqueSlug(trim($data['name'])),
                 'description' => $data['description'] ?? null,
                 'photo_category_ids' => $data['photo_category_ids'] ?? [],
             ]);
@@ -75,6 +77,7 @@ class ProductCollectionController extends Controller
             $collection->update([
                 'seller_id' => $actor instanceof Seller ? $actor->id : (array_key_exists('seller_id', $data) ? $data['seller_id'] : $collection->seller_id),
                 'name' => trim($data['name']),
+                'slug' => $this->uniqueSlug(trim($data['name']), $collection->id),
                 'description' => $data['description'] ?? null,
                 'photo_category_ids' => array_key_exists('photo_category_ids', $data) ? $data['photo_category_ids'] : $collection->photo_category_ids,
             ]);
@@ -107,13 +110,17 @@ class ProductCollectionController extends Controller
     }
 
     /** Public collection metadata for rails and the collection shop page. */
-    public function publicShow(ProductCollection $collection): JsonResponse
+    public function publicShow(string $collection): JsonResponse
     {
+        $collection = ctype_digit($collection)
+            ? ProductCollection::findOrFail((int) $collection)
+            : ProductCollection::where('slug', $collection)->firstOrFail();
         abort_unless($collection->products()->where('status', 'active')->availableForSale()->exists(), 404);
 
         return response()->json([
             'id' => $collection->id,
             'name' => $collection->name,
+            'slug' => $collection->slug,
             'photo_categories' => collect($this->photoCategories($collection->photo_category_ids ?? []))
                 ->map(fn (array $category) => ['id' => $category['id'], 'slug' => $category['slug']])
                 ->all(),
@@ -149,6 +156,21 @@ class ProductCollectionController extends Controller
     private function syncProducts(ProductCollection $collection, array $productIds): void
     {
         $collection->products()->sync(collect($productIds)->mapWithKeys(fn ($id, $order) => [$id => ['sort_order' => $order]])->all());
+    }
+
+    private function uniqueSlug(string $name, ?int $ignoreId = null): string
+    {
+        $base = Str::slug($name) ?: 'collection';
+        $slug = $base;
+        $suffix = 2;
+        $query = ProductCollection::query();
+        if ($ignoreId !== null) $query->whereKeyNot($ignoreId);
+        while ((clone $query)->where('slug', $slug)->exists()) {
+            $ending = '-'.$suffix++;
+            $slug = Str::substr($base, 0, 180 - Str::length($ending)).$ending;
+        }
+
+        return $slug;
     }
 
     private function collectionPayload(ProductCollection $collection): array

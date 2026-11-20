@@ -67,9 +67,11 @@ class ProductCollectionTest extends TestCase
 
         $this->withToken($firstToken)->postJson('/api/seller/collections', ['name' => 'Invalid', 'product_ids' => [$one->id, $two->id]])->assertUnprocessable();
         $this->withToken($firstToken)->postJson('/api/seller/collections', ['name' => 'Invalid', 'product_ids' => [$platform->id]])->assertUnprocessable();
-        $id = $this->withToken($firstToken)->postJson('/api/seller/collections', ['name' => 'Fall picks', 'product_ids' => [$one->id]])->assertCreated()->assertJsonPath('products.0.id', $one->id)->json('id');
+        $created = $this->withToken($firstToken)->postJson('/api/seller/collections', ['name' => 'Fall picks', 'product_ids' => [$one->id]])->assertCreated()->assertJsonPath('products.0.id', $one->id)->assertJsonPath('slug', 'fall-picks')->json();
+        $id = $created['id'];
         $this->getJson('/api/store/products?collection='.$id)->assertOk()->assertJsonPath('total', 1)->assertJsonPath('data.0.id', $one->id);
         $this->getJson('/api/store/products?collection=fall-picks')->assertOk()->assertJsonPath('total', 1);
+        $this->getJson('/api/store/collections/fall-picks')->assertOk()->assertJsonPath('id', $id)->assertJsonPath('slug', 'fall-picks');
         $this->withToken($secondToken)->getJson("/api/seller/collections/{$id}")->assertNotFound();
         $this->withToken($secondToken)->getJson('/api/seller/collections')->assertOk()->assertJsonPath('total', 0);
         $this->withToken($firstToken)->getJson('/api/seller/collection-products')->assertOk()->assertJsonPath('total', 1);
@@ -79,6 +81,17 @@ class ProductCollectionTest extends TestCase
         $this->withToken($superToken)->getJson('/api/admin/collections')->assertOk()->assertJsonPath('total', 1);
         $this->withToken($superToken)->getJson('/api/admin/collection-products?seller_id=platform')->assertOk()->assertJsonPath('total', 1);
         $this->withToken($superToken)->postJson('/api/admin/collections', ['name' => 'All stores', 'seller_id' => null, 'product_ids' => [$one->id, $two->id]])->assertCreated()->assertJsonCount(2, 'products');
-        $this->withToken($superToken)->postJson("/api/admin/collections/{$id}", ['name' => 'Updated', 'product_ids' => [$one->id]])->assertOk()->assertJsonPath('name', 'Updated');
+        $this->withToken($superToken)->postJson("/api/admin/collections/{$id}", ['name' => 'Updated', 'product_ids' => [$one->id]])->assertOk()->assertJsonPath('name', 'Updated')->assertJsonPath('slug', 'updated');
+    }
+
+    public function test_duplicate_collection_names_receive_numbered_unique_slugs(): void
+    {
+        $category = ProductCategory::create(['name' => 'Slugs', 'slug' => 'slugs']);
+        $product = Product::create(['category_id' => $category->id, 'name' => 'Product', 'slug' => 'collection-slug-product', 'status' => 'active']);
+        $admin = Admin::create(['name' => 'Super', 'email' => 'collection-slugs@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $token = $admin->createToken('test', ['admin:basic'])->plainTextToken;
+
+        $this->withToken($token)->postJson('/api/admin/collections', ['name' => 'Winter Collection', 'product_ids' => [$product->id]])->assertCreated()->assertJsonPath('slug', 'winter-collection');
+        $this->withToken($token)->postJson('/api/admin/collections', ['name' => 'Winter Collection', 'product_ids' => [$product->id]])->assertCreated()->assertJsonPath('slug', 'winter-collection-2');
     }
 }

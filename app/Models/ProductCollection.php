@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class ProductCollection extends Model
 {
-    protected $fillable = ['seller_id', 'name', 'description', 'photo_category_ids'];
+    protected $fillable = ['seller_id', 'name', 'slug', 'description', 'photo_category_ids'];
 
     protected function casts(): array
     {
