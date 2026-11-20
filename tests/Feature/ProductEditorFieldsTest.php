@@ -101,6 +101,8 @@ class ProductEditorFieldsTest extends TestCase
         $menHoodies = ProductCategory::create(['parent_id' => $men->id, 'name' => 'Hoodies', 'slug' => 'placement-men-hoodies']);
         $women = ProductCategory::create(['name' => 'Women', 'slug' => 'placement-women']);
         $womenHoodies = ProductCategory::create(['parent_id' => $women->id, 'name' => 'Hoodies', 'slug' => 'placement-women-hoodies']);
+        $kids = ProductCategory::create(['name' => 'Kids', 'slug' => 'placement-kids']);
+        $kidsHoodies = ProductCategory::create(['parent_id' => $kids->id, 'name' => 'Hoodies', 'slug' => 'placement-kids-hoodies']);
         $product = Product::create([
             'category_id' => $menHoodies->id,
             'name' => 'Shared hoodie',
@@ -117,6 +119,10 @@ class ProductEditorFieldsTest extends TestCase
             'main_videos' => [0],
             'category_placements' => [[
                 'category_id' => $womenHoodies->id,
+                'photos' => [2],
+                'videos' => [1],
+            ], [
+                'category_id' => $kidsHoodies->id,
                 'photos' => [2],
                 'videos' => [1],
             ]],
