@@ -27,6 +27,7 @@ class FreeDeliveryProductService
 
         foreach ($this->coupons() as $coupon) {
             if ($coupon->seller_id !== null && (int) $coupon->seller_id !== (int) $product->seller_id) continue;
+            if ($coupon->house_only && $product->seller_id !== null) continue;
             if ($coupon->minimum_quantity !== null && (int) $coupon->minimum_quantity > 1) continue;
             if ($coupon->minimum_order_amount !== null && $price < (float) $coupon->minimum_order_amount) continue;
             if ($this->matchesProduct($coupon, $product)) return true;

@@ -14,6 +14,7 @@ use App\Models\SiteSetting;
 use App\Models\Store;
 use App\Services\FreeDeliveryProductService;
 use App\Services\ProductHtmlSanitizer;
+use App\Services\ProductVideoThumbnailService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Http\JsonResponse;
@@ -22,7 +23,13 @@ use Illuminate\Support\Facades\DB;
 
 class StoreProductController extends Controller
 {
-    public function __construct(private readonly FreeDeliveryProductService $freeDelivery)
+    /** @var array<string, float> */
+    private array $videoThumbnails = [];
+
+    public function __construct(
+        private readonly FreeDeliveryProductService $freeDelivery,
+        private readonly ProductVideoThumbnailService $videoThumbnailService,
+    )
     {
     }
 
@@ -195,7 +202,10 @@ class StoreProductController extends Controller
             $query->latest('products.created_at');
         }
 
-        return response()->json($query->limit($settings['limit'] ?? ($settings['type'] === 'trending' ? 10 : 12))->get()->map(fn ($product) => $this->transformProduct($product)));
+        $products = $query->limit($settings['limit'] ?? ($settings['type'] === 'trending' ? 10 : 12))->get();
+        $this->primeVideoThumbnails($products);
+
+        return response()->json($products->map(fn ($product) => $this->transformProduct($product)));
     }
 
     public function testimonials(Request $request): JsonResponse
@@ -225,6 +235,7 @@ class StoreProductController extends Controller
         $product = $this->baseStoreQuery(true)
             ->where('slug', $product)
             ->firstOrFail();
+        $this->primeVideoThumbnails([$product]);
 
         return response()->json($this->transformProduct($product));
     }
@@ -316,6 +327,7 @@ class StoreProductController extends Controller
             ? $query->orderBy('homepage_sort_order')->latest()->paginate($perPage)
             : $query->latest()->paginate($perPage);
 
+        $this->primeVideoThumbnails($products->getCollection());
         $products->getCollection()->transform(function (Product $product) {
             return $this->transformProduct($product);
         });
@@ -407,6 +419,10 @@ class StoreProductController extends Controller
                 'videos' => $placement->videos ?? [],
             ])->values()->all(),
             'videos' => $product->videos ?? [],
+            'video_thumbnails' => collect($product->videos ?? [])
+                ->filter(fn ($url) => isset($this->videoThumbnails[$url]))
+                ->mapWithKeys(fn ($url) => [$url => $this->videoThumbnails[$url]])
+                ->all(),
             'weight_kg' => $product->weight_kg,
             'image_variants' => $product->image_variants,
             'category' => $product->category ? [
@@ -454,6 +470,12 @@ class StoreProductController extends Controller
         }
 
         return collect($values)->map(fn ($items, $key) => ['key' => $key, 'label' => ucwords(str_replace('_', ' ', $key)), 'display_type' => strtolower($key) === 'color' ? 'swatch' : 'button', 'values' => array_values($items)])->values()->all();
+    }
+
+    /** @param iterable<Product> $products */
+    private function primeVideoThumbnails(iterable $products): void
+    {
+        $this->videoThumbnails = $this->videoThumbnailService->forProducts($products);
     }
 
     private function applyCommonEagerLoads(Builder $query): void

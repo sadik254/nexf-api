@@ -7,6 +7,7 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\ProductCollection;
 use App\Models\ProductLot;
+use App\Models\Seller;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -35,5 +36,26 @@ class StorefrontFreeDeliveryTest extends TestCase
         $this->assertFalse($flags['low-hoodie']);
 
         $this->getJson('/api/store/products/free-hoodie')->assertOk()->assertJsonPath('free_delivery', true);
+    }
+
+    public function test_house_only_automatic_delivery_discount_does_not_mark_seller_products_free(): void
+    {
+        $category = ProductCategory::create(['name' => 'House free delivery', 'slug' => 'house-free-delivery']);
+        $house = Product::create(['category_id' => $category->id, 'name' => 'House product', 'slug' => 'house-free-product', 'product_type' => 'simple', 'status' => 'active', 'default_selling_price' => 100]);
+        $seller = Seller::create([
+            'seller_name' => 'Free delivery seller', 'email' => 'house-free-delivery-seller@example.test', 'store_name' => 'Free delivery store', 'store_slug' => 'house-free-delivery-store',
+            'kyc_type' => 'nid', 'kyc_number' => 'house-free-delivery', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'General',
+            'status' => 'approved', 'is_active' => true, 'password' => 'password123',
+        ]);
+        $sellerProduct = Product::create(['seller_id' => $seller->id, 'category_id' => $category->id, 'name' => 'Seller product', 'slug' => 'seller-free-product', 'product_type' => 'simple', 'status' => 'active', 'default_selling_price' => 100]);
+        foreach ([$house, $sellerProduct] as $product) {
+            ProductLot::create(['product_id' => $product->id, 'lot_number' => "HOUSE-FREE-{$product->id}", 'buying_price' => 10, 'selling_price' => 100, 'quantity' => 1, 'quantity_remaining' => 1]);
+        }
+        Coupon::create(['code' => 'AUTO-HOUSE-SHIPPING', 'house_only' => true, 'is_automatic' => true, 'discount_kind' => 'shipping', 'discount_type' => 'fixed', 'discount_value' => 0, 'is_active' => true]);
+
+        $products = $this->getJson('/api/store/products?per_page=100')->assertOk()->json('data');
+        $flags = collect($products)->mapWithKeys(fn (array $product) => [$product['slug'] => $product['free_delivery']]);
+        $this->assertTrue($flags['house-free-product']);
+        $this->assertFalse($flags['seller-free-product']);
     }
 }

@@ -120,6 +120,7 @@ class MediaAssetController extends Controller
         $data = $request->validate([
             'alt_text' => ['nullable', 'string', 'max:255'],
             'file_name' => ['sometimes', 'required', 'string', 'max:255'],
+            'thumbnail_time_seconds' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             ...$this->libraryRules(),
         ]);
         if (array_key_exists('file_name', $data) && $this->fileNameTaken($data['file_name'], $asset->id)) {
@@ -127,7 +128,10 @@ class MediaAssetController extends Controller
                 'file_name' => ['A file named “'.trim($data['file_name']).'” already exists.'],
             ]);
         }
-        $asset->update(collect($data)->only(['alt_text', 'file_name'])->all());
+        if (array_key_exists('thumbnail_time_seconds', $data) && ! $this->supportsCustomVideoThumbnail($asset)) {
+            unset($data['thumbnail_time_seconds']);
+        }
+        $asset->update(collect($data)->only(['alt_text', 'file_name', 'thumbnail_time_seconds'])->all());
         if ($actor instanceof Admin && $request->hasAny(['seller_id', 'seller_ids', 'include_house'])) {
             $this->syncLibraries($asset, $data, $actor);
         }
@@ -159,12 +163,18 @@ class MediaAssetController extends Controller
             DB::transaction(function () use ($asset, $oldUrl, $newUrl, $file, $mimeType): void {
                 $locked = MediaAsset::query()->lockForUpdate()->findOrFail($asset->id);
                 abort_if($locked->source === 'url', 422, 'A linked file cannot be replaced. Upload a file instead.');
+                $metadata = $this->metadata($file);
+                $thumbnailTime = $locked->thumbnail_time_seconds;
+                if ($thumbnailTime !== null && $metadata['duration_seconds'] !== null && (float) $thumbnailTime > $metadata['duration_seconds']) {
+                    $thumbnailTime = null;
+                }
                 $locked->update([
                     'url' => $newUrl,
                     'file_name' => $this->nextAvailableFileName($file->getClientOriginalName(), $locked->id),
                     'mime_type' => $mimeType,
                     'size_bytes' => $file->getSize(),
-                    ...$this->metadata($file),
+                    ...$metadata,
+                    'thumbnail_time_seconds' => $thumbnailTime,
                 ]);
                 $this->references->replace($oldUrl, $newUrl);
             });
@@ -512,9 +522,22 @@ class MediaAssetController extends Controller
         ])->values()->all();
 
         return array_merge($asset->toArray(), [
+            'thumbnail_time_seconds' => $asset->thumbnail_time_seconds === null ? null : (float) $asset->thumbnail_time_seconds,
             'seller_ids' => collect($libraries)->pluck('seller_id')->filter()->map(fn ($id) => (int) $id)->values()->all(),
             'include_house' => collect($libraries)->contains('type', 'house'),
             'libraries' => $libraries,
         ]);
+    }
+
+    private function supportsCustomVideoThumbnail(MediaAsset $asset): bool
+    {
+        if (! str_starts_with((string) $asset->mime_type, 'video/')) return false;
+        if ($asset->source !== 'url') return true;
+
+        $host = strtolower((string) parse_url($asset->url, PHP_URL_HOST));
+
+        return ! str_contains($host, 'youtube.com')
+            && ! str_contains($host, 'youtu.be')
+            && ! str_contains($host, 'vimeo.com');
     }
 }

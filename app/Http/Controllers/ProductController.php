@@ -15,6 +15,7 @@ use App\Models\MediaAsset;
 use App\Services\ProductHtmlSanitizer;
 use App\Services\MediaUploadService;
 use App\Services\ProductBundleService;
+use App\Services\ProductVideoThumbnailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -24,6 +25,10 @@ use Illuminate\Validation\ValidationException;
 
 class ProductController extends Controller
 {
+    public function __construct(private readonly ProductVideoThumbnailService $videoThumbnailService)
+    {
+    }
+
     public function indexAdminStore(Request $request): JsonResponse
     {
         $actor = $request->user();
@@ -113,12 +118,14 @@ class ProductController extends Controller
     private function productForEditor(Product $product): array
     {
         $product->load(['category', 'brand', 'tags', 'seller', 'variations', 'bundles.items', 'categoryPlacements.category.parent']);
+        $videoThumbnails = $this->videoThumbnailService->forProducts([$product]);
         $costLot = ProductLot::query()
             ->when($product->product_type === 'variable',
                 fn ($query) => $query->whereIn('variation_id', $product->variations->pluck('id')),
                 fn ($query) => $query->where('product_id', $product->id)->whereNull('variation_id'))
             ->where('quantity_remaining', '>', 0)->orderByRaw('received_at is null')->orderBy('received_at')->orderBy('id')->first();
         return array_merge($product->toArray(), [
+            'video_thumbnails' => $this->videoThumbnailsFor($product, $videoThumbnails),
             'current_buying_price' => $costLot?->buying_price,
             'available_quantity' => (int) ProductLot::query()
                 ->when($product->product_type === 'variable',
@@ -776,7 +783,18 @@ class ProductController extends Controller
         $page->getCollection()->each(fn (Product $product) => $product->setAttribute('available_quantity', $product->product_type === 'simple'
             ? (int) ($product->direct_stock ?? 0)
             : (int) $product->variations->sum('stock')));
+        $videoThumbnails = $this->videoThumbnailService->forProducts($page->getCollection());
+        $page->getCollection()->each(fn (Product $product) => $product->setAttribute('video_thumbnails', $this->videoThumbnailsFor($product, $videoThumbnails)));
         return array_merge($page->toArray(), ['status_counts' => $counts, 'stock_counts' => $stockCounts]);
+    }
+
+    /** @param array<string, float> $videoThumbnails */
+    private function videoThumbnailsFor(Product $product, array $videoThumbnails): array
+    {
+        return collect($product->videos ?? [])
+            ->filter(fn ($url) => isset($videoThumbnails[$url]))
+            ->mapWithKeys(fn ($url) => [$url => $videoThumbnails[$url]])
+            ->all();
     }
 
     private function stockFilterSql(string $level): string

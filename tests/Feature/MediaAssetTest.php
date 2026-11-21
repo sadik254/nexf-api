@@ -47,6 +47,41 @@ class MediaAssetTest extends TestCase
         $this->withToken($firstToken)->getJson('/api/seller/media')->assertOk()->assertJsonPath('total', 1);
     }
 
+    public function test_video_thumbnail_time_persists_on_media_and_reaches_product_payloads(): void
+    {
+        $admin = Admin::create(['name' => 'Video admin', 'email' => 'video-thumbnail-admin@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $token = $admin->createToken('test', ['admin'])->plainTextToken;
+        $videoUrl = 'https://media.example.test/media/showcase.mp4';
+        $video = MediaAsset::create([
+            'owner_type' => 'admin', 'owner_id' => $admin->id, 'source' => 'upload', 'url' => $videoUrl,
+            'file_name' => 'showcase.mp4', 'mime_type' => 'video/mp4', 'duration_seconds' => 20,
+        ]);
+        $image = MediaAsset::create([
+            'owner_type' => 'admin', 'owner_id' => $admin->id, 'source' => 'upload', 'url' => 'https://media.example.test/media/photo.jpg',
+            'file_name' => 'thumbnail-ignore.jpg', 'mime_type' => 'image/jpeg',
+        ]);
+
+        $this->withToken($token)->postJson("/api/admin/media/{$video->id}", ['thumbnail_time_seconds' => 8.5])
+            ->assertOk()->assertJsonPath('thumbnail_time_seconds', 8.5);
+        $this->withToken($token)->postJson("/api/admin/media/{$image->id}", ['thumbnail_time_seconds' => 8.5])
+            ->assertOk()->assertJsonPath('thumbnail_time_seconds', null);
+        $this->assertDatabaseHas('media_assets', ['id' => $video->id, 'thumbnail_time_seconds' => 8.5]);
+        $this->assertDatabaseHas('media_assets', ['id' => $image->id, 'thumbnail_time_seconds' => null]);
+
+        $category = ProductCategory::create(['name' => 'Video products', 'slug' => 'video-products']);
+        $product = Product::create([
+            'category_id' => $category->id, 'name' => 'Video product', 'slug' => 'video-product', 'product_type' => 'simple',
+            'status' => 'active', 'default_selling_price' => 100, 'videos' => [$videoUrl],
+        ]);
+
+        $this->getJson('/api/store/products/video-product')->assertOk()
+            ->assertJsonPath('video_thumbnails', [$videoUrl => 8.5]);
+        $this->getJson('/api/store/products')->assertOk()
+            ->assertJsonPath('data.0.video_thumbnails', [$videoUrl => 8.5]);
+        $this->withToken($token)->getJson("/api/admin/products/{$product->id}")->assertOk()
+            ->assertJsonPath('video_thumbnails', [$videoUrl => 8.5]);
+    }
+
     public function test_seller_can_select_own_library_image_for_product_but_not_another_sellers(): void
     {
         $category = ProductCategory::create(['name' => 'Clothing', 'slug' => 'media-clothing']);
