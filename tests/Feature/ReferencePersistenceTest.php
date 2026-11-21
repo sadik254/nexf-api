@@ -52,9 +52,9 @@ class ReferencePersistenceTest extends TestCase {
   $this->withToken($admin->createToken('test',['admin:basic'])->plainTextToken)->postJson('/api/admin/homepage/layout',['sections'=>[
    ['id'=>'picked','type'=>'trending','enabled'=>true,'topSource'=>'picked','topProductIds'=>[$two->id,$draft->id,$one->id],'showNewArrivals'=>false,'limit'=>4],
    ['id'=>'manual','type'=>'collection','enabled'=>true,'source'=>'products','productIds'=>[$one->id],'autoplay'=>true],
-   ['id'=>'disabled','type'=>'featured','enabled'=>false,'productIds'=>[$one->id]],
+   ['id'=>'disabled','type'=>'featured','enabled'=>false,'productIds'=>[$one->id],'cardKeys'=>[(string) $one->id, $one->id.':men-jacket']],
    ['id'=>'support','type'=>'support','enabled'=>true,'support'=>['title'=>'Need help','messenger'=>'https://example.test/help']],
-  ]])->assertOk()->assertJsonPath('1.autoplay',true)->assertJsonPath('3.support.title','Need help');
+  ]])->assertOk()->assertJsonPath('1.autoplay',true)->assertJsonPath('2.cardKeys',[(string) $one->id, $one->id.':men-jacket'])->assertJsonPath('3.support.title','Need help');
   $this->postJson('/api/admin/homepage/preview-products',['type'=>'collection','source'=>'products','productIds'=>[$two->id,$one->id],'limit'=>4])->assertOk()->assertJsonPath('0.id',$two->id)->assertJsonPath('1.id',$one->id);
   $this->getJson('/api/homepage/layout/manual/products')->assertOk()->assertJsonCount(1)->assertJsonPath('0.id',$one->id);
   $this->getJson('/api/homepage/layout/picked/products')->assertOk()->assertJsonCount(2)->assertJsonPath('0.id',$two->id)->assertJsonPath('1.id',$one->id);

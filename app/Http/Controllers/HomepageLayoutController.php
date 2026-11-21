@@ -65,6 +65,8 @@ class HomepageLayoutController extends Controller
             'sections.*.newProductIds.*' => ['integer', 'exists:products,id'],
             'sections.*.productIds' => ['sometimes', 'array', 'max:100'],
             'sections.*.productIds.*' => ['integer', 'exists:products,id'],
+            'sections.*.cardKeys' => ['sometimes', 'array', 'max:100'],
+            'sections.*.cardKeys.*' => ['string', 'max:120'],
             'sections.*.reviewIds' => ['sometimes', 'array', 'max:100'],
             'sections.*.reviewIds.*' => ['integer', 'exists:reviews,id'],
             'sections.*.offer_set_id' => ['sometimes', 'nullable', 'integer', 'exists:homepage_offer_sets,id'],
@@ -75,6 +77,10 @@ class HomepageLayoutController extends Controller
                 if (count($ids) !== count(array_unique($ids))) {
                     throw ValidationException::withMessages(["sections.{$index}.{$key}" => 'Each selection must be unique within its block.']);
                 }
+            }
+            $cardKeys = $section['cardKeys'] ?? [];
+            if (count($cardKeys) !== count(array_unique($cardKeys))) {
+                throw ValidationException::withMessages(["sections.{$index}.cardKeys" => 'Each card selection must be unique within its block.']);
             }
             if ($section['type'] === 'collection') {
                 $source = $section['source'] ?? 'collection';
