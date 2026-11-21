@@ -70,6 +70,8 @@ class CouponController extends Controller
         }
 
         $data = $this->validateCoupon($request);
+        $sellerId = $data['seller_id'] ?? null;
+        $houseOnly = $sellerId === null && (bool) ($data['house_only'] ?? false);
         // The editor intentionally sends AUTO as its placeholder for an
         // automatic rule; turn it into a unique internal redemption code.
         $code = !empty($data['is_automatic']) && (empty($data['code']) || Str::upper((string) $data['code']) === 'AUTO') ? 'AUTO-'.Str::upper(Str::random(10)) : $this->normalizeCode($data['code'] ?? '');
@@ -88,7 +90,8 @@ class CouponController extends Controller
 
         $coupon = Coupon::create([
             'created_by_admin_id' => $actor->id,
-            'seller_id' => $data['seller_id'] ?? null,
+            'seller_id' => $sellerId,
+            'house_only' => $houseOnly,
             'code' => $code,
             'is_automatic' => (bool) ($data['is_automatic'] ?? false),
             'discount_kind' => $data['discount_kind'] ?? 'order', 'combines' => (bool) ($data['combines'] ?? false),
@@ -133,6 +136,8 @@ class CouponController extends Controller
         }
 
         $automatic = array_key_exists('is_automatic', $data) ? (bool) $data['is_automatic'] : $coupon->is_automatic;
+        $sellerId = array_key_exists('seller_id', $data) ? $data['seller_id'] : $coupon->seller_id;
+        $houseOnly = $sellerId === null && (array_key_exists('house_only', $data) ? (bool) $data['house_only'] : $coupon->house_only);
         $code = $coupon->code;
         if (array_key_exists('code', $data)) {
             if ($data['code'] === null && $automatic) {
@@ -158,7 +163,8 @@ class CouponController extends Controller
 
         $coupon->fill([
             'code' => $code,
-            'seller_id' => array_key_exists('seller_id', $data) ? $data['seller_id'] : $coupon->seller_id,
+            'seller_id' => $sellerId,
+            'house_only' => $houseOnly,
             'is_automatic' => $automatic,
             'discount_kind' => $data['discount_kind'] ?? $coupon->discount_kind, 'combines' => array_key_exists('combines', $data) ? (bool) $data['combines'] : $coupon->combines,
             'name' => array_key_exists('name', $data) ? $data['name'] : $coupon->name,
@@ -258,6 +264,7 @@ class CouponController extends Controller
             }
         }
         $data['seller_id'] = $seller->id;
+        $data['house_only'] = false;
         $coupon->fill($data)->save();
         return response()->json(['message' => 'Coupon updated successfully.', 'coupon' => $coupon->fresh()]);
     }
@@ -350,6 +357,7 @@ class CouponController extends Controller
         return $request->validate([
             'code' => [$creating ? 'required_without:is_automatic' : 'sometimes', 'nullable', 'string', 'max:64'],
             'seller_id' => ['nullable', 'integer', 'exists:sellers,id'],
+            'house_only' => ['sometimes', 'boolean'],
             'is_automatic' => ['sometimes', 'boolean'],
             'discount_kind' => ['sometimes', Rule::in(['products','bxgy','order','shipping'])], 'combines' => ['sometimes','boolean'],
             'name' => ['nullable', 'string', 'max:255'],

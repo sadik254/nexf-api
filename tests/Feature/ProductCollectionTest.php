@@ -94,4 +94,30 @@ class ProductCollectionTest extends TestCase
         $this->withToken($token)->postJson('/api/admin/collections', ['name' => 'Winter Collection', 'product_ids' => [$product->id]])->assertCreated()->assertJsonPath('slug', 'winter-collection');
         $this->withToken($token)->postJson('/api/admin/collections', ['name' => 'Winter Collection', 'product_ids' => [$product->id]])->assertCreated()->assertJsonPath('slug', 'winter-collection-2');
     }
+
+    public function test_house_only_collections_accept_only_house_products_and_clear_when_a_store_is_selected(): void
+    {
+        $category = ProductCategory::create(['name' => 'House collections', 'slug' => 'house-collections']);
+        $houseProduct = Product::create(['category_id' => $category->id, 'name' => 'House product', 'slug' => 'house-collection-product', 'status' => 'active']);
+        $seller = Seller::create([
+            'seller_name' => 'Collection seller', 'email' => 'house-only-collection@example.test', 'store_name' => 'Collection Store', 'store_slug' => 'house-only-collection-store',
+            'kyc_type' => 'nid', 'kyc_number' => 'house-only-collection', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'General',
+            'status' => 'approved', 'is_active' => true, 'password' => 'password123',
+        ]);
+        $sellerProduct = Product::create(['seller_id' => $seller->id, 'category_id' => $category->id, 'name' => 'Seller product', 'slug' => 'seller-collection-product', 'status' => 'active']);
+        $admin = Admin::create(['name' => 'Super', 'email' => 'house-only-collection-admin@example.test', 'password' => 'password123', 'role' => 'super_admin', 'is_active' => true]);
+        $token = $admin->createToken('test', ['admin:basic'])->plainTextToken;
+
+        $this->withToken($token)->postJson('/api/admin/collections', [
+            'name' => 'Invalid NEXF collection', 'house_only' => true, 'product_ids' => [$houseProduct->id, $sellerProduct->id],
+        ])->assertUnprocessable()->assertJsonValidationErrors('product_ids');
+
+        $id = $this->withToken($token)->postJson('/api/admin/collections', [
+            'name' => 'NEXF collection', 'house_only' => true, 'product_ids' => [$houseProduct->id],
+        ])->assertCreated()->assertJsonPath('house_only', true)->json('id');
+
+        $this->withToken($token)->postJson("/api/admin/collections/{$id}", [
+            'name' => 'Store collection', 'seller_id' => $seller->id, 'house_only' => true, 'product_ids' => [$sellerProduct->id],
+        ])->assertOk()->assertJsonPath('house_only', false)->assertJsonPath('seller_id', $seller->id);
+    }
 }

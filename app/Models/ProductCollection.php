@@ -8,11 +8,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class ProductCollection extends Model
 {
-    protected $fillable = ['seller_id', 'name', 'slug', 'description', 'photo_category_ids'];
+    protected $fillable = ['seller_id', 'house_only', 'name', 'slug', 'description', 'photo_category_ids'];
 
     protected function casts(): array
     {
-        return ['photo_category_ids' => 'array'];
+        return ['photo_category_ids' => 'array', 'house_only' => 'boolean'];
     }
 
     public function seller(): BelongsTo { return $this->belongsTo(Seller::class); }

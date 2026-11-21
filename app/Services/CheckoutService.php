@@ -221,7 +221,8 @@ class CheckoutService
 
         // Every eligible automatic discount is shown and included in the quote.
         Coupon::query()->where('is_automatic', true)->orderBy('id')->get()->each(function (Coupon $coupon) use ($subtotal, $customer, $items, $excludeOrderId, $shippingPhone, $shippingGroups, $coupons): void {
-            if ($coupon->unusableReason() || (!$this->isShippingCoupon($coupon) && $coupon->minimum_order_amount !== null && $subtotal < (float) $coupon->minimum_order_amount)) return;
+            $scopedSubtotal = $this->couponScopeSubtotal($coupon, $items);
+            if ($coupon->unusableReason() || (!$this->isShippingCoupon($coupon) && $coupon->minimum_order_amount !== null && $scopedSubtotal < (float) $coupon->minimum_order_amount)) return;
             if (app(CouponUsageLimitService::class)->reached($coupon, $customer, $shippingPhone, $excludeOrderId)) return;
             $matches = $this->isShippingCoupon($coupon)
                 ? $shippingGroups !== null && $this->shippingCouponGroupIndexes($coupon, $items, $shippingGroups) !== []
@@ -235,7 +236,7 @@ class CheckoutService
     private function assertCouponApplies(Coupon $coupon, float $subtotal, ?Customer $customer, array $items, ?int $excludeOrderId, string $field, ?string $shippingPhone = null, ?array $shippingGroups = null): void
     {
         if ($reason = $coupon->unusableReason()) throw ValidationException::withMessages([$field => [$reason]]);
-        if (!$this->isShippingCoupon($coupon) && $coupon->minimum_order_amount !== null && $subtotal < (float) $coupon->minimum_order_amount) throw ValidationException::withMessages([$field => ['Minimum order amount not reached for this coupon.']]);
+        if (!$this->isShippingCoupon($coupon) && $coupon->minimum_order_amount !== null && $this->couponScopeSubtotal($coupon, $items) < (float) $coupon->minimum_order_amount) throw ValidationException::withMessages([$field => ['Minimum order amount not reached for this coupon.']]);
         if (app(CouponUsageLimitService::class)->reached($coupon, $customer, $shippingPhone, $excludeOrderId)) throw ValidationException::withMessages([$field => ['Coupon usage limit reached for this customer.']]);
         if ($this->isShippingCoupon($coupon)) {
             if ($shippingGroups === null || $this->shippingCouponGroupIndexes($coupon, $items, $shippingGroups) === []) {
@@ -248,10 +249,10 @@ class CheckoutService
 
     private function couponMatches(Coupon $coupon, array $items): bool
     {
+        $items = $this->couponScopeItems($coupon, $items);
+        if ($items === []) return false;
         $quantity = array_sum(array_map(fn ($item) => $item['quantity'], $items));
         if (!$this->isShippingCoupon($coupon) && $coupon->minimum_quantity !== null && $quantity < $coupon->minimum_quantity) return false;
-        $products = array_map(fn ($item) => $item['product'], $items);
-        if ($coupon->seller_id && !collect($products)->contains(fn ($product) => (int) $product->seller_id === (int) $coupon->seller_id)) return false;
         if ($this->isShippingCoupon($coupon)) return true;
         if ($coupon->discount_kind === 'bxgy') {
             return $this->bxgyDiscount($coupon, $items) > 0;
@@ -263,6 +264,9 @@ class CheckoutService
     private function discountForCart(Coupon $coupon, array $items, float $subtotal, float $shipping): float
     {
         if ($this->isShippingCoupon($coupon)) return 0.0;
+        $items = $this->couponScopeItems($coupon, $items);
+        $subtotal = $this->couponScopeSubtotal($coupon, $items);
+        if ($items === []) return 0.0;
         if ($coupon->discount_kind === 'bxgy') {
             return min($subtotal, $this->bxgyDiscount($coupon, $items));
         }
@@ -300,9 +304,7 @@ class CheckoutService
             $indexes = $group['_item_indexes'] ?? [];
             $groupItems = array_values(array_filter($items, fn ($item, $index) => in_array($index, $indexes, true), ARRAY_FILTER_USE_BOTH));
             if (!$groupItems) continue;
-            $candidateItems = $coupon->seller_id
-                ? array_values(array_filter($groupItems, fn ($item) => (int) $item['product']->seller_id === (int) $coupon->seller_id))
-                : $groupItems;
+            $candidateItems = $this->couponScopeItems($coupon, $groupItems);
             $selected = $this->selectedItems($candidateItems, $coupon->eligible_product_ids, $coupon->eligible_category_ids, $coupon->eligible_collection_ids);
             if ($selected !== []) {
                 $qualified[] = $groupIndex;
@@ -316,6 +318,25 @@ class CheckoutService
         if ($coupon->minimum_quantity !== null && $qualifiedQuantity < (int) $coupon->minimum_quantity) return [];
 
         return $qualified;
+    }
+
+    /** Limit a marketplace coupon to its store, or an NEXF-only coupon to house products. */
+    private function couponScopeItems(Coupon $coupon, array $items): array
+    {
+        if ($coupon->seller_id !== null) {
+            return array_values(array_filter($items, fn ($item) => (int) $item['product']->seller_id === (int) $coupon->seller_id));
+        }
+
+        if ($coupon->house_only) {
+            return array_values(array_filter($items, fn ($item) => $item['product']->seller_id === null));
+        }
+
+        return $items;
+    }
+
+    private function couponScopeSubtotal(Coupon $coupon, array $items): float
+    {
+        return round(array_sum(array_map(fn ($item) => (float) $item['quote']['subtotal'], $this->couponScopeItems($coupon, $items))), 2);
     }
 
     /** Apply each shipping coupon to its eligible parcels and return its waiver. */

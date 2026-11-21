@@ -54,8 +54,10 @@ class ProductCollectionController extends Controller
         $this->authorizeWrite($actor);
         $data = $this->validateInput($request, $actor);
         $collection = DB::transaction(function () use ($actor, $data) {
+            $sellerId = $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null);
             $collection = ProductCollection::create([
-                'seller_id' => $actor instanceof Seller ? $actor->id : ($data['seller_id'] ?? null),
+                'seller_id' => $sellerId,
+                'house_only' => $sellerId === null && (bool) ($data['house_only'] ?? false),
                 'name' => trim($data['name']),
                 'slug' => $this->uniqueSlug(trim($data['name'])),
                 'description' => $data['description'] ?? null,
@@ -74,8 +76,10 @@ class ProductCollectionController extends Controller
         $this->authorizeWrite($actor);
         $data = $this->validateInput($request, $actor, $collection);
         DB::transaction(function () use ($actor, $collection, $data) {
+            $sellerId = $actor instanceof Seller ? $actor->id : (array_key_exists('seller_id', $data) ? $data['seller_id'] : $collection->seller_id);
             $collection->update([
-                'seller_id' => $actor instanceof Seller ? $actor->id : (array_key_exists('seller_id', $data) ? $data['seller_id'] : $collection->seller_id),
+                'seller_id' => $sellerId,
+                'house_only' => $sellerId === null && (array_key_exists('house_only', $data) ? (bool) $data['house_only'] : $collection->house_only),
                 'name' => trim($data['name']),
                 'slug' => $this->uniqueSlug(trim($data['name']), $collection->id),
                 'description' => $data['description'] ?? null,
@@ -121,6 +125,7 @@ class ProductCollectionController extends Controller
             'id' => $collection->id,
             'name' => $collection->name,
             'slug' => $collection->slug,
+            'house_only' => $collection->house_only,
             'photo_categories' => collect($this->photoCategories($collection->photo_category_ids ?? []))
                 ->map(fn (array $category) => ['id' => $category['id'], 'slug' => $category['slug']])
                 ->all(),
@@ -133,6 +138,7 @@ class ProductCollectionController extends Controller
             'name' => ['required', 'string', 'max:150'],
             'description' => ['nullable', 'string', 'max:3000'],
             'seller_id' => ['nullable', 'integer', 'exists:sellers,id'],
+            'house_only' => ['sometimes', 'boolean'],
             'product_ids' => ['required', 'array', 'max:200'],
             'product_ids.*' => ['integer', 'distinct', 'exists:products,id'],
             'photo_category_ids' => ['sometimes', 'array', 'max:30'],
@@ -147,9 +153,14 @@ class ProductCollectionController extends Controller
             $data['photo_category_ids'] = $ids;
         }
         $sellerId = $actor instanceof Seller ? $actor->id : (array_key_exists('seller_id', $data) ? $data['seller_id'] : $existing?->seller_id);
+        $houseOnly = $sellerId === null && !($actor instanceof Seller) && (array_key_exists('house_only', $data) ? (bool) $data['house_only'] : (bool) $existing?->house_only);
         if ($sellerId !== null && Product::whereIn('id', $data['product_ids'])->where(fn ($query) => $query->whereNull('seller_id')->orWhere('seller_id', '!=', $sellerId))->exists()) {
             throw ValidationException::withMessages(['product_ids' => 'A store collection can contain only that store’s products.']);
         }
+        if ($houseOnly && Product::whereIn('id', $data['product_ids'])->whereNotNull('seller_id')->exists()) {
+            throw ValidationException::withMessages(['product_ids' => ['A NEXF collection can contain only NEXF products.']]);
+        }
+        $data['house_only'] = $houseOnly;
         return $data;
     }
 

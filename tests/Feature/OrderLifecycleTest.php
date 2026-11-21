@@ -181,6 +181,29 @@ class OrderLifecycleTest extends TestCase
             ->assertJsonPath('applied_discounts.0.shipping', true);
     }
 
+    public function test_house_only_coupon_applies_only_to_house_store_lines(): void
+    {
+        [$customer, $houseProduct] = $this->checkoutFixtures(1);
+        $seller = Seller::create([
+            'seller_name' => 'Marketplace seller', 'email' => 'house-coupon-seller@example.test', 'store_name' => 'Marketplace Store', 'store_slug' => 'house-coupon-store',
+            'kyc_type' => 'nid', 'kyc_number' => 'house-coupon-seller', 'kyc_document_url' => 'https://example.test/id', 'product_category' => 'Category',
+            'status' => 'approved', 'is_active' => true, 'password' => 'password123',
+        ]);
+        $sellerProduct = Product::create(['seller_id' => $seller->id, 'category_id' => $houseProduct->category_id, 'name' => 'Seller item', 'slug' => 'house-coupon-seller-item', 'product_type' => 'simple', 'status' => 'active', 'default_selling_price' => 60]);
+        ProductLot::create(['product_id' => $sellerProduct->id, 'lot_number' => 'HOUSE-COUPON-SELLER', 'buying_price' => 30, 'selling_price' => 60, 'quantity' => 1, 'quantity_remaining' => 1]);
+        $coupon = Coupon::create(['code' => 'NEXFONLY', 'house_only' => true, 'discount_kind' => 'order', 'discount_type' => 'percentage', 'discount_value' => 100, 'is_active' => true]);
+        $this->assertTrue($coupon->fresh()->house_only);
+        $this->assertNotNull($sellerProduct->fresh()->seller_id);
+        $token = $customer->createToken('test', ['customer:basic'])->plainTextToken;
+        $payload = ['items' => [['product_id' => $houseProduct->id, 'quantity' => 1], ['product_id' => $sellerProduct->id, 'quantity' => 1]], 'payment_method_id' => PaymentMethod::where('code', 'cod')->firstOrFail()->id, 'shipping_method_id' => ShippingMethod::firstOrFail()->id, 'coupon_code' => 'NEXFONLY', 'shipping_phone' => '01700000000'];
+
+        $this->withToken($token)->postJson('/api/customers/orders/preview', $payload)
+            ->assertOk()->assertJsonPath('subtotal', 160)->assertJsonPath('discount_total', 100)->assertJsonPath('total', 100);
+
+        $this->withToken($token)->postJson('/api/customers/orders/preview', array_replace($payload, ['items' => [['product_id' => $sellerProduct->id, 'quantity' => 1]]]))
+            ->assertUnprocessable()->assertJsonValidationErrors('coupon_code');
+    }
+
     public function test_targeted_free_shipping_waives_only_parcels_with_a_qualifying_line(): void
     {
         [$customer, $firstProduct] = $this->checkoutFixtures(1, true);
